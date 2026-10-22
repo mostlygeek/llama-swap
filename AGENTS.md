@@ -1,31 +1,21 @@
 ## Architecture
 
-Only use these technologies:
-
-- Go 1.26+
-- Typescript, Vite and Svelte 5 for UI (ui/)
-- Docker
-- Kubernetes (API, e.g. client-go) for cmd/kubeswap ONLY
-- Markdown
-- YAML
-- Makefile
-- bash
+- Use the existing technologies (Go, typescript, YAML, etc) when making changes
 
 ## Contribution Guidelines
 
 - Follow CONTRIBUTING.md guidelines before submitted an issue or pull request (PR)
-- When asked to create a pull request or issue, always double check no violations of CONTRIBUTING.md. Ask the user for a decision when there is a violate.
+- When asked to create a pull request or issue ask the user for a decision if a violation of the rules is discovered.
 
 ## Testing Changes
 
-- Use test naming conventions like `TestProxy_<test name>`, `TestProcessGroup_<test name>`, etc.
+- Use test naming convention like  `TestProxy_<test name>`, `TestProcessGroup_<test name>`, etc.
 - Use `go test -v -run <new tests>` to quickly check new tests
 - Use `make test-dev` after any changes to Go source
 - Use `make test-ui` after any changes in ui/
 - Use `make test-all` for commiting changes
 - Use the ./build subdirectory for testing binary builds
-- Only when the user asks use `make eval-docs-agent` to score the
-  Help page's Docs Agent against a local model after changing its system prompt, `docs/kb/` content, the MCP tool descriptions, or the docs search ranking. See `evals/docs-agent/README.md` for the tuning loop.
+- Only when the user asks use `make eval-docs-agent` to score the Help page's Docs Agent against a local model after changing its system prompt, `docs/kb/` content, the MCP tool descriptions, or the docs search ranking. See `evals/docs-agent/README.md` for the tuning loop.
 
 ## Documentation
 
@@ -43,11 +33,10 @@ Only use these technologies:
 ### git commit rules
 
 - Run `gofmt -w <file>` before committing to fix any formatting
-- Use this format for commit messages:
 - When referencing issues use "fix: #123", "update: #123"
-- Use "fix" when the branch resolves an issue
-- Use "update" when the branch only contributes to the issue
+- Use "fix" when the branch resolves an issue or update when the branch only contributes to it
 - Hardwrap commit messages to 80 characters wide
+- Use this format for commit messages:
 
 ```
 internal/server: short clear description of change
@@ -61,15 +50,3 @@ Add new feature that implements functionality X and Y.
 fix: #123
 update: #456
 ```
-
-## Code Reviews
-
-Follow these rules when performing a code review
-
-- Use severity levels: High, Medium and Low
-- Tag issues with a severity and number like: H1, M2, L3
-- High severity are must fix issues: security, race conditions, logic errors
-- Medium severity are recommended improvements: coding style, missing tests, inaccurate comments
-- Low severity are nice to have changes
-- Include a suggestion for high and medium severity items
-- Limit your code review to three items sorted by severity
