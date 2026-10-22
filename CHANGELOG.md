@@ -1,5 +1,33 @@
 # Changelog
 
+## v266 (Oct 22, 2026)
+
+This release includes security dependency updates and requested quality of life changes from users:
+
+- the UI no longer expects to be run under a root path making it easier to serve llama-swap behind another proxy
+- the max request size is configurable now. Users should be free to OOM as much as they want. llama-swap ain't your mom!
+- allow manual override of values in /v1/audio/voices. This is a non-standard endpoint but makes working with upstream audio engines a bit nicer
+
+Details below:
+
+- [PR #1224](https://github.com/mostlygeek/llama-swap/pull/1224) cmd/kubeswap: attach DRA ResourceClaims and mount NFS volumes: add repeatable `--resource-claim` and NFS `--volume` support so Kubernetes backends can share a DRA GPU claim and mount models without a static PV and PVC for each export (#1222) by [@gabrielcosi](https://github.com/gabrielcosi)
+- [PR #1225](https://github.com/mostlygeek/llama-swap/pull/1225) Add voices override for speech models: let local models configure `capabilities.voices` so `/v1/audio/voices` returns a reliable list without starting the model or querying the upstream server (#1207) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1228](https://github.com/mostlygeek/llama-swap/pull/1228) ui,server: serve the UI under a reverse proxy base path: use relative asset, API and redirect paths so the UI works behind a prefix-stripping reverse proxy without routing its endpoints at the proxy root (#1227) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1249](https://github.com/mostlygeek/llama-swap/pull/1249) internal/server: make the request body size limit configurable: add `maxRequestBodyMB` for model endpoints and Tailcat, replacing the fixed 250 MB cap while retaining 250 MB as the default (#1245) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1257](https://github.com/mostlygeek/llama-swap/pull/1257) AGENTS.md, go.mod: use go 1.27.3, trim AGENT rules: raise the Go version to 1.27.3, update dependencies and simplify contributor instructions by [@mostlygeek](https://github.com/mostlygeek)
+
+## v265 (Oct 14, 2026)
+
+A couple of small improvements:
+
+- support serving llama-swap behind a path on a reverse proxy. Helpful if you want to front llama-swap with nginx and serve it under a specific path.
+- add support for manually defining voices for text to speech models
+- a small kubeswap update
+
+- [PR #1228](https://github.com/mostlygeek/llama-swap/pull/1228) ui,server: serve the UI under a reverse proxy base path: makes the browser side base-path agnostic (relative asset, redirect, favicon and PWA URLs plus an `apiUrl()` helper that re-attaches a stripped prefix) so llama-swap works behind a plain prefix-stripping proxy at `https://host/subpath/llama-swap/` without routing `/ui`, `/api` and `/v1` at the proxy root; includes an nginx and Caddy guide (#1227) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1225](https://github.com/mostlygeek/llama-swap/pull/1225) Add voices override for speech models: adds a `models.capabilities.voices` capability listing the voice ids an upstream server supports, because the non-standard `GET /v1/audio/voices` endpoint returns unreliable responses; falls back to probing that endpoint on a best-effort basis when the list is not set (#1207) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1224](https://github.com/mostlygeek/llama-swap/pull/1224) cmd/kubeswap: attach DRA ResourceClaims and mount NFS volumes: adds a repeatable `--resource-claim name=claim` flag so backends can get GPUs via the NVIDIA DRA driver (kubeswap only references the claim, pods sharing a claim share its device) and an `nfs:server/export:path[:ro]` kind for `--volume` so models can be mounted from NFS without a static PV/PVC per export (#1222) by [@gabrielcosi](https://github.com/gabrielcosi)
+
 ## v264 (Oct 12, 2026)
 
 This release includes a new `auto:orphans` set for swap matrix rules. This new set automatically includes all models that were not explictly added to a set.  It is defined as `(orphan1 | orphan2 | orphan3 | ...)`. The orphans set is handy for definitions like: `+always & +auto:orphans`, where `+always` is a set of models that are always loaded and should never be swapped out.
