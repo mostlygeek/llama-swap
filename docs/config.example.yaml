@@ -358,14 +358,17 @@ models:
       --ctx-size ${default_ctx}
       --temperature ${temp}
 
-    # capacity: declared usage and eviction cost for use: capacity
-    # - required for every local model when the capacity router is selected
-    # - usage: positive integer, in the same unit as the router's total
-    # - evict_cost: positive integer, default 1; higher favors keeping resident
-    # - minimizes summed eviction cost, then eviction count, then sorted IDs
-    # capacity:
-    #   usage: 18000
-    #   evict_cost: 10
+    # capacities: resource requirements for use: capacity
+    # - optional, default: empty dictionary (no declared usage)
+    # - keys name routing.router.settings.capacity.pools; omitted pools use zero
+    # - values: nonnegative integers in the corresponding pool's unit
+    # capacities:
+    #   ram: 18000
+    #   gpu0: 12000
+
+    # evict_cost: manual eviction preference for the capacity router
+    # - optional, default: 0; nonnegative integer; higher favors keeping resident
+    # evict_cost: 10
 
     # name: a display name for the model
     # - optional, default: empty string
@@ -667,8 +670,8 @@ hooks:
 #           model combinations are allowed to run concurrently, enabling
 #           setups that groups cannot express.
 #
-# - capacity: declare a finite budget and each local model's usage.
-#             Any combination whose total usage fits the budget may coexist.
+# - capacity: declare resource pools and each local model's requirements.
+#             Any combination that fits every pool's limit may coexist.
 #
 # The routing section is optional.
 routing:
@@ -680,17 +683,20 @@ routing:
 
     # settings: a dictionary of settings for the specific engines
     settings:
-      # capacity: one operator-declared budget (no automatic measurement)
-      # - requires use: capacity; remove groups and matrix settings when enabling
+      # capacity: independent resource limits (no automatic measurement)
+      # - used when routing.router.use is capacity; other settings may remain
       # - cannot combine with legacy top-level groups/matrix either
-      # - total: positive integer in the same unit as models.*.capacity.usage
-      #   (for example MiB of RAM); every local model needs a capacity block
-      # - models larger than total, missing usage, and invalid values are errors
-      # - minimizes summed evict_cost, then eviction count, then sorted model IDs
+      # - pools: dictionary of names to positive integer limits
+      # - units are operator-chosen per pool, matching models.*.capacities
+      # - unknown pools, requirements exceeding a limit, and invalid values fail
+      # - minimizes summed evict_cost, then eviction count, then sorted IDs;
+      #   a bounded search may return a feasible nonoptimal plan
       # - only resident models are searched; only the requested model is started
-      # Example (also add capacity blocks to every local model):
       # capacity:
-      #   total: 24000
+      #   pools:
+      #     ram: 128000
+      #     gpu0: 24000
+      #     gpu1: 24000
 
       # groups: a dictionary of named groups
       # - optional, default: empty dictionary

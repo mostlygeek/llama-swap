@@ -432,26 +432,24 @@
                     "macros": {
                         "$ref": "#/definitions/macros"
                     },
-                    "capacity": {
+                    "capacities": {
                         "type": "object",
-                        "description": "Usage and eviction cost for the capacity router. Required for every local model when use: capacity is selected.",
-                        "required": ["usage"],
-                        "properties": {
-                            "usage": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "maximum": 9223372036854775807,
-                                "description": "Declared capacity consumption, no greater than routing.router.settings.capacity.total."
-                            },
-                            "evict_cost": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "maximum": 9223372036854775807,
-                                "default": 1,
-                                "description": "Cost of unloading and later recovering this model. Minimize summed eviction cost, then eviction count, then sorted model IDs. Higher costs favor keeping the model resident."
-                            }
+                        "description": "Resource requirements for the capacity router, in each pool's units. Keys must name declared pools. Omitted pools consume zero; an omitted or empty dictionary declares no usage.",
+                        "default": {},
+                        "propertyNames": {"pattern": "\\S"},
+                        "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9223372036854775807
                         },
-                        "additionalProperties": false
+                        "examples": [{"gpu0": 12, "ram": 128}]
+                    },
+                    "evict_cost": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9223372036854775807,
+                        "default": 0,
+                        "description": "Manual cost of evicting this model in the capacity router. Higher costs favor retention. Minimize summed cost, then eviction count, then sorted model IDs; a bounded search may return a feasible nonoptimal plan."
                     },
                     "cmd": {
                         "type": "string",
@@ -1002,7 +1000,7 @@
                                 "capacity"
                             ],
                             "default": "group",
-                            "description": "Router to use. 'group' uses static groups, 'matrix' uses allowed combinations, 'capacity' uses a declared capacity budget."
+                            "description": "Router to use. 'group' uses static groups, 'matrix' uses allowed combinations, 'capacity' uses declared resource pools."
                         },
                         "settings": {
                             "type": "object",
@@ -1015,13 +1013,18 @@
                                 },
                                 "capacity": {
                                     "type": "object",
-                                    "description": "Operator-declared budget in the same integer unit as models.*.capacity.usage (for example MiB). No automatic measurement.",
-                                    "required": ["total"],
+                                    "description": "Independent resource limits in operator-chosen integer units. Model capacities use the same units as their referenced pools. No automatic measurement.",
+                                    "required": ["pools"],
                                     "properties": {
-                                        "total": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "maximum": 9223372036854775807
+                                        "pools": {
+                                            "type": "object",
+                                            "minProperties": 1,
+                                            "propertyNames": {"pattern": "\\S"},
+                                            "additionalProperties": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 9223372036854775807
+                                            }
                                         }
                                     },
                                     "additionalProperties": false
@@ -1041,13 +1044,9 @@
                                 "required": ["settings"],
                                 "properties": {
                                     "settings": {
-                                        "required": ["capacity"],
-                                        "not": {"anyOf": [{"required": ["groups"]}, {"required": ["matrix"]}]}
+                                        "required": ["capacity"]
                                     }
                                 }
-                            },
-                            "else": {
-                                "properties": {"settings": {"not": {"required": ["capacity"]}}}
                             }
                         }
                     ]
@@ -1073,12 +1072,7 @@
                 }
             },
             "then": {
-                "not": {"anyOf": [{"required": ["groups"]}, {"required": ["matrix"]}]},
-                "properties": {
-                    "models": {
-                        "additionalProperties": {"required": ["capacity"]}
-                    }
-                }
+                "not": {"anyOf": [{"required": ["groups"]}, {"required": ["matrix"]}]}
             }
         },
         {

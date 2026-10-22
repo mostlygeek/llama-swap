@@ -3,105 +3,106 @@ package config
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// CapacityConfig declares an abstract budget in an operator-chosen integer unit
-// (for example MiB). Usage and eviction cost are declared on each model.
+// CapacityConfig declares independent resource limits in operator-chosen units.
+// Each model uses the same units as the pools it references.
 type CapacityConfig struct {
-	Total int64 `yaml:"total"`
-}
-
-type ModelCapacityConfig struct {
-	Usage     int64 `yaml:"usage"`
-	EvictCost int64 `yaml:"evict_cost"`
+	Pools map[string]int64 `yaml:"pools"`
 }
 
 func (c *CapacityConfig) UnmarshalYAML(node *yaml.Node) error {
-	type rawCapacity CapacityConfig
-	var raw rawCapacity
-	if err := decodeCapacity(node, &raw, "total"); err != nil {
-		return err
-	}
-	*c = CapacityConfig(raw)
-	return nil
-}
-
-func (c *ModelCapacityConfig) UnmarshalYAML(node *yaml.Node) error {
-	type rawCapacity ModelCapacityConfig
-	raw := rawCapacity{EvictCost: 1}
-	if err := decodeCapacity(node, &raw, "usage", "evict_cost"); err != nil {
-		return err
-	}
-	*c = ModelCapacityConfig(raw)
-	return nil
-}
-
-// YAML's numeric conversion can silently truncate floats. Both capacity blocks
-// accept only integer fields, rejecting fractions and misspelled settings.
-func decodeCapacity(node *yaml.Node, dst any, fields ...string) error {
-	if err := node.Decode(dst); err != nil {
-		return err
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("capacity must be a mapping")
 	}
 	for i := 0; i < len(node.Content); i += 2 {
-		key, value := node.Content[i].Value, node.Content[i+1]
-		known := false
-		for _, field := range fields {
-			if key == field {
-				known = true
-				break
-			}
-		}
-		if !known {
+		if key := node.Content[i].Value; key != "pools" {
 			return fmt.Errorf("unknown capacity setting %q", key)
 		}
+		if err := validateCapacityMap(node.Content[i+1], "capacity.pools"); err != nil {
+			return err
+		}
+	}
+	type rawCapacity CapacityConfig
+	return node.Decode((*rawCapacity)(c))
+}
+
+// Check YAML tags before decoding: yaml.v3 otherwise truncates fractional values
+// when assigning to int64. Pool names are data, but must be nonempty strings.
+func validateCapacityMap(node *yaml.Node, path string) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("%s must be a mapping", path)
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		if key.Tag != "!!str" || strings.TrimSpace(key.Value) == "" {
+			return fmt.Errorf("%s pool names must be nonempty strings", path)
+		}
 		if value.Tag != "!!int" {
-			return fmt.Errorf("capacity.%s must be an integer", key)
+			return fmt.Errorf("%s.%s must be an integer", path, key.Value)
 		}
 	}
 	return nil
 }
 
-func (c ModelCapacityConfig) Validate() error {
-	if c.Usage <= 0 {
-		return fmt.Errorf("capacity.usage must be a positive integer")
+func validateModelCapacity(model ModelConfig) error {
+	if model.EvictCost < 0 {
+		return fmt.Errorf("evict_cost must be a nonnegative integer")
 	}
-	if c.EvictCost <= 0 {
-		return fmt.Errorf("capacity.evict_cost must be a positive integer")
+	for pool, usage := range model.Capacities {
+		if strings.TrimSpace(pool) == "" {
+			return fmt.Errorf("capacities pool names must be nonempty strings")
+		}
+		if usage < 0 {
+			return fmt.Errorf("capacities.%s must be a nonnegative integer", pool)
+		}
 	}
 	return nil
 }
 
-// ValidateCapacity rejects incomplete budgets and bounds the sum used by the
-// planner so usage and eviction cost arithmetic cannot wrap around.
+// ValidateCapacity rejects impossible requirements and bounds all arithmetic
+// used by the planner. Omitted capacities consume zero resources.
 func ValidateCapacity(c *CapacityConfig, models map[string]ModelConfig) error {
 	if c == nil {
 		return fmt.Errorf("capacity configuration is required")
 	}
-	if c.Total <= 0 {
-		return fmt.Errorf("total must be a positive integer")
+	if len(c.Pools) == 0 {
+		return fmt.Errorf("pools must contain at least one resource limit")
 	}
-	var usage, cost int64
-	for id, model := range models {
-		if model.Capacity == nil {
-			return fmt.Errorf("model %q: capacity.usage is required", id)
+	for pool, total := range c.Pools {
+		if strings.TrimSpace(pool) == "" {
+			return fmt.Errorf("pool names must be nonempty strings")
 		}
-		if err := model.Capacity.Validate(); err != nil {
+		if total <= 0 {
+			return fmt.Errorf("pool %q total must be a positive integer", pool)
+		}
+	}
+	sums := make(map[string]int64, len(c.Pools))
+	var cost int64
+	for id, model := range models {
+		if err := validateModelCapacity(model); err != nil {
 			return fmt.Errorf("model %q: %w", id, err)
 		}
-		amount := model.Capacity.Usage
-		if amount > c.Total {
-			return fmt.Errorf("model %q: capacity.usage (%d) exceeds total (%d)", id, amount, c.Total)
+		for pool, usage := range model.Capacities {
+			total, ok := c.Pools[pool]
+			if !ok {
+				return fmt.Errorf("model %q: unknown capacity pool %q", id, pool)
+			}
+			if usage > total {
+				return fmt.Errorf("model %q: usage (%d) exceeds total (%d) for pool %q", id, usage, total, pool)
+			}
+			if usage > math.MaxInt64-sums[pool] {
+				return fmt.Errorf("sum of capacities exceeds int64 range for pool %q", pool)
+			}
+			sums[pool] += usage
 		}
-		if amount > math.MaxInt64-usage {
-			return fmt.Errorf("sum of capacity.usage exceeds int64 range")
+		if model.EvictCost > math.MaxInt64-cost {
+			return fmt.Errorf("sum of evict_cost exceeds int64 range")
 		}
-		usage += amount
-		if model.Capacity.EvictCost > math.MaxInt64-cost {
-			return fmt.Errorf("sum of capacity.evict_cost exceeds int64 range")
-		}
-		cost += model.Capacity.EvictCost
+		cost += model.EvictCost
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
@@ -17,7 +18,7 @@ func NewCapacity(conf config.Config, logs *logmon.Group) (*Capacity, error) {
 	if err := config.ValidateCapacity(capacity, conf.Models); err != nil {
 		return nil, err
 	}
-	planner := &capacitySwapper{total: capacity.Total, models: conf.Models, logger: logs.ProxyLogs}
+	planner := &capacitySwapper{capacity: capacity, models: conf.Models, logger: logs.ProxyLogs}
 	processes := make(map[string]process.Process, len(conf.Models))
 	base, err := newBaseRouter("capacity", conf, processes, logs.ProxyLogs, planner)
 	if err != nil {
@@ -37,9 +38,12 @@ func NewCapacity(conf config.Config, logs *logmon.Group) (*Capacity, error) {
 }
 
 type capacitySwapper struct {
-	total  int64
-	models map[string]config.ModelConfig
-	logger *logmon.Monitor
+	capacity      *config.CapacityConfig
+	searchLimit   int // zero uses the production node budget; tests may lower it
+	searchNodes   int
+	searchLimited bool
+	models        map[string]config.ModelConfig
+	logger        *logmon.Monitor
 
 	// The scheduler calls planners from a single event-loop goroutine, with
 	// the same inputs for EvictionFor and OnSwapStart. Reuse that decision so
@@ -62,63 +66,175 @@ func (s *capacitySwapper) EvictionFor(target string, running []string) []string 
 	return evict
 }
 
-// evictionFor searches only resident models, including pending starts supplied
-// by the scheduler. Minimize total eviction cost, then eviction count, then
-// lexicographically sorted model IDs. Higher costs protect expensive models.
-// Suffix usage sums and the best cost prune the search. Worst-case time is
-// exponential in resident count; no configured combinations are generated.
+// Search only resident models, including pending starts. Minimize total cost,
+// then eviction count, then sorted IDs. Each model's cost is counted once even
+// when it releases several resources. A feasible greedy seed keeps the decision
+// safe if the node budget is exhausted; optimality is not guaranteed then.
 func (s *capacitySwapper) evictionFor(target string, running []string) []string {
+	s.searchNodes, s.searchLimited = 0, false
+	pools := slices.Sorted(maps.Keys(s.capacity.Pools))
+	totals := make([]int64, len(pools))
+	need := make([]int64, len(pools))
+	for p, pool := range pools {
+		totals[p] = s.capacity.Pools[pool]
+		need[p] = s.models[target].Capacities[pool]
+	}
 	ids := slices.Clone(running)
 	slices.Sort(ids)
 	ids = slices.Compact(ids)
 	var candidates []string
-	var used int64
+	var usage [][]int64
 	for _, id := range ids {
-		if id != target {
-			candidates = append(candidates, id)
-			used += s.models[id].Capacity.Usage
+		if id == target {
+			continue
+		}
+		candidates = append(candidates, id)
+		vector := make([]int64, len(pools))
+		for p, pool := range pools {
+			vector[p] = s.models[id].Capacities[pool]
+		}
+		usage = append(usage, vector)
+		for p, amount := range vector {
+			need[p] += amount
 		}
 	}
-	need := used - (s.total - s.models[target].Capacity.Usage)
-	if need <= 0 {
+	fits := func(freed []int64) bool {
+		for p := range need {
+			if freed[p] < need[p] {
+				return false
+			}
+		}
+		return true
+	}
+	for p := range need {
+		need[p] -= totals[p]
+	}
+	if fits(make([]int64, len(totals))) {
 		return nil
 	}
-	suffix := make([]int64, len(candidates)+1)
+	// Suffix sums also bound feasibility without overflowing validated totals.
+	suffix := make([][]int64, len(candidates)+1)
+	suffix[len(candidates)] = make([]int64, len(totals))
 	for i := len(candidates) - 1; i >= 0; i-- {
-		suffix[i] = suffix[i+1] + s.models[candidates[i]].Capacity.Usage
+		suffix[i] = slices.Clone(suffix[i+1])
+		for p, amount := range usage[i] {
+			suffix[i][p] += amount
+		}
 	}
-	// Evicting every candidate is always feasible after validation.
-	best := slices.Clone(candidates)
+	// Start by evicting all candidates, then retain expensive models whenever
+	// possible. Deterministic ordering makes budget-limited results repeatable.
+	order := make([]int, len(candidates))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortFunc(order, func(a, b int) int {
+		ca, cb := s.models[candidates[a]].EvictCost, s.models[candidates[b]].EvictCost
+		if ca > cb {
+			return -1
+		}
+		if ca < cb {
+			return 1
+		}
+		return a - b
+	})
+	freed := slices.Clone(suffix[0])
+	selected := make([]bool, len(candidates))
+	for i := range selected {
+		selected[i] = true
+	}
+	for _, i := range order {
+		for p, amount := range usage[i] {
+			freed[p] -= amount
+		}
+		if fits(freed) {
+			selected[i] = false
+		} else {
+			for p, amount := range usage[i] {
+				freed[p] += amount
+			}
+		}
+	}
+	var best []string
 	var bestCost int64
-	for _, id := range best {
-		bestCost += s.models[id].Capacity.EvictCost
+	for i, id := range candidates {
+		if selected[i] {
+			best = append(best, id)
+			bestCost += s.models[id].EvictCost
+		}
 	}
+	limit := s.searchLimit
+	if limit <= 0 {
+		limit = 100000
+	}
+	clear(freed)
 	chosen := make([]string, 0, len(candidates))
-	var search func(int, int64, int64)
-	search = func(i int, freed, cost int64) {
-		if freed >= need {
+	var search func(int, int64)
+	search = func(i int, cost int64) {
+		if s.searchNodes >= limit {
+			s.searchLimited = true
+			return
+		}
+		s.searchNodes++
+		if fits(freed) {
 			if cost < bestCost || cost == bestCost && (len(chosen) < len(best) || len(chosen) == len(best) && slices.Compare(chosen, best) < 0) {
 				best = slices.Clone(chosen)
 				bestCost = cost
 			}
 			return
 		}
-		if i == len(candidates) || freed+suffix[i] < need || cost >= bestCost {
+		// Equal costs can still improve count or IDs, especially when costs
+		// default to zero. An infeasible partial set needs at least one more
+		// victim, so it cannot improve a same-cost set of this size or smaller.
+		if i == len(candidates) || cost > bestCost || cost == bestCost && len(chosen) >= len(best) {
 			return
 		}
-		id := candidates[i]
-		chosen = append(chosen, id)
-		search(i+1, freed+s.models[id].Capacity.Usage, cost+s.models[id].Capacity.EvictCost)
+		for p := range need {
+			if freed[p]+suffix[i][p] < need[p] {
+				return
+			}
+		}
+		chosen = append(chosen, candidates[i])
+		for p, amount := range usage[i] {
+			freed[p] += amount
+		}
+		search(i+1, cost+s.models[candidates[i]].EvictCost)
+		for p, amount := range usage[i] {
+			freed[p] -= amount
+		}
 		chosen = chosen[:len(chosen)-1]
-		search(i+1, freed, cost)
+		search(i+1, cost)
 	}
-	search(0, 0, 0)
+	search(0, 0)
+	if s.searchLimited {
+		// A cheaper result found before the cutoff can still contain redundant
+		// zero-cost victims. Retain each removable model even if the search
+		// did not have time to improve the eviction-count tie breaker.
+		clear(freed)
+		for _, id := range best {
+			for p, pool := range pools {
+				freed[p] += s.models[id].Capacities[pool]
+			}
+		}
+		for i := len(best) - 1; i >= 0; i-- {
+			model := s.models[best[i]]
+			for p, pool := range pools {
+				freed[p] -= model.Capacities[pool]
+			}
+			if fits(freed) {
+				best = slices.Delete(best, i, i+1)
+			} else {
+				for p, pool := range pools {
+					freed[p] += model.Capacities[pool]
+				}
+			}
+		}
+	}
 	return best
 }
 
 func (s *capacitySwapper) OnSwapStart(target string, running []string) {
 	evict := s.EvictionFor(target, running)
 	if len(evict) > 0 {
-		s.logger.Infof("capacity: model=%s evict=%v total=%d", target, evict, s.total)
+		s.logger.Infof("capacity: model=%s evict=%v pools=%v search_nodes=%d search_limited=%t", target, evict, s.capacity.Pools, s.searchNodes, s.searchLimited)
 	}
 }

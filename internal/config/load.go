@@ -161,10 +161,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		if err := modelConfig.Capabilities.Validate(); err != nil {
 			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
 		}
-		if modelConfig.Capacity != nil {
-			if err := modelConfig.Capacity.Validate(); err != nil {
-				return Config{}, fmt.Errorf("model %s: %w", modelId, err)
-			}
+		if err := validateModelCapacity(modelConfig); err != nil {
+			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
 		}
 
 		// Auto-register setParamsByID keys as aliases (skip the model's own ID)
@@ -200,7 +198,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	// Normalize routing config. The legacy top-level `matrix`/`groups` keys and
 	// the new `routing.router` block are mutually exclusive: a config may use
 	// either style, never both.
-	hasTopLevel := config.Matrix != nil || len(config.Groups) > 0
+	hasTopLevel := config.Matrix != nil || config.Groups != nil
 	rtr := config.Routing.Router
 	hasRouting := rtr.Use != "" || rtr.Settings.Matrix != nil || len(rtr.Settings.Groups) > 0 || rtr.Settings.Capacity != nil
 
@@ -209,22 +207,14 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 
 	if !hasTopLevel {
-		if rtr.Use == "capacity" || rtr.Settings.Capacity != nil {
-			if rtr.Use != "capacity" || rtr.Settings.Capacity == nil {
-				return Config{}, fmt.Errorf("capacity routing requires use: capacity and routing.router.settings.capacity")
-			}
-			if rtr.Settings.Matrix != nil || rtr.Settings.Groups != nil || config.Groups != nil {
-				return Config{}, fmt.Errorf("capacity router cannot be combined with groups or matrix settings")
-			}
-			if err := ValidateCapacity(rtr.Settings.Capacity, config.Models); err != nil {
-				return Config{}, fmt.Errorf("routing.router.settings.capacity: %w", err)
-			}
-		}
-		// Both groups and matrix may be defined under routing.router.settings;
+		// Multiple engines may be defined under routing.router.settings;
 		// routing.router.use selects which one is active, so there is no conflict.
 		rs := config.Routing.Router.Settings
 		switch config.Routing.Router.Use {
-		case "capacity": // validated above; no legacy representation
+		case "capacity":
+			if err := ValidateCapacity(rs.Capacity, config.Models); err != nil {
+				return Config{}, fmt.Errorf("routing.router.settings.capacity: %w", err)
+			}
 		case "matrix":
 			if rs.Matrix == nil {
 				return Config{}, fmt.Errorf("routing.router.use is 'matrix' but routing.router.settings.matrix is not set")

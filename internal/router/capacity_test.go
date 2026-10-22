@@ -19,13 +19,9 @@ import (
 func newCapacityPlanner(total int64, usage map[string]int64, costs map[string]int64) *capacitySwapper {
 	models := make(map[string]config.ModelConfig, len(usage))
 	for id, amount := range usage {
-		cost := int64(1)
-		if value, ok := costs[id]; ok {
-			cost = value
-		}
-		models[id] = config.ModelConfig{Capacity: &config.ModelCapacityConfig{Usage: amount, EvictCost: cost}}
+		models[id] = config.ModelConfig{Capacities: map[string]int64{"ram": amount}, EvictCost: costs[id]}
 	}
-	return &capacitySwapper{total: total, models: models, logger: logmon.NewWriter(io.Discard)}
+	return &capacitySwapper{capacity: &config.CapacityConfig{Pools: map[string]int64{"ram": total}}, models: models, logger: logmon.NewWriter(io.Discard)}
 }
 
 func TestCapacity_EvictionFor(t *testing.T) {
@@ -47,6 +43,11 @@ func TestCapacity_EvictionFor(t *testing.T) {
 		{"cheapest requires multiple models", 20, map[string]int64{"a": 10, "b": 5, "c": 5, "x": 10}, map[string]int64{"a": 100, "b": 1, "c": 1}, []string{"a", "b", "c"}, []string{"b", "c"}},
 		{"equal cost prefers fewer models", 20, map[string]int64{"a": 5, "b": 5, "c": 10, "x": 10}, map[string]int64{"a": 1, "b": 1, "c": 2}, []string{"a", "b", "c"}, []string{"c"}},
 		{"tie IDs", 10, map[string]int64{"a": 5, "b": 5, "x": 5}, nil, []string{"b", "a"}, []string{"a"}},
+		{"zero cost prefers fewer models", 20, map[string]int64{"a": 5, "b": 5, "c": 10, "x": 10}, nil, []string{"a", "b", "c"}, []string{"c"}},
+		{"retain utility with mandatory large victim", 110, map[string]int64{"a": 1, "b": 100, "x": 50}, nil, []string{"a", "b"}, []string{"b"}},
+		{"manual workload preference", 110, map[string]int64{"utility": 1, "llm": 50, "embeddings": 50, "x": 50}, map[string]int64{"llm": 50, "embeddings": 10}, []string{"utility", "llm", "embeddings"}, []string{"embeddings"}},
+		{"zero usage resident", 10, map[string]int64{"a": 0, "b": 10, "x": 10}, nil, []string{"a", "b"}, []string{"b"}},
+		{"zero usage target", 10, map[string]int64{"a": 10, "x": 0}, nil, []string{"a"}, nil},
 		{"large cost", 10, map[string]int64{"a": 5, "b": 5, "x": 5}, map[string]int64{"b": 9223372036854775805}, []string{"a", "b"}, []string{"a"}},
 		{"maximum total", 9223372036854775807, map[string]int64{"a": 9223372036854775806, "x": 1}, nil, []string{"a"}, nil},
 	} {
@@ -75,7 +76,7 @@ func TestCapacity_DecisionCache(t *testing.T) {
 		s.EvictionFor("x", snapshot)
 	}))
 	s.OnSwapStart("x", snapshot)
-	require.Contains(t, logs.String(), "capacity: model=x evict=[a] total=10")
+	require.Contains(t, logs.String(), "capacity: model=x evict=[a] pools=map[ram:10]")
 	require.Same(t, &evict[0], &s.lastEvict[0])
 
 	// A different target needs a new decision even with the same residents.
@@ -94,52 +95,6 @@ func TestCapacity_DecisionCache(t *testing.T) {
 	}))
 	// An empty decision must not hide a later change in residents.
 	require.Equal(t, []string{"a"}, s.EvictionFor("y", []string{"a", "x"}))
-}
-
-// Compare the pruned search to an independent exhaustive oracle on small
-// random budgets, including total cost, eviction count and model-ID ties.
-func TestCapacity_ExhaustiveOracle(t *testing.T) {
-	rng := rand.New(rand.NewSource(1004))
-	for trial := 0; trial < 500; trial++ {
-		usage := map[string]int64{"x": int64(1 + rng.Intn(30))}
-		costs := map[string]int64{}
-		var running []string
-		var used int64
-		for i := 0; i < 8; i++ {
-			id := fmt.Sprintf("m%d", i)
-			amount := int64(1 + rng.Intn(8))
-			if used+amount > 30 {
-				continue
-			}
-			used += amount
-			running = append(running, id)
-			usage[id] = amount
-			costs[id] = int64(1 + rng.Intn(7))
-		}
-		var want []string
-		var bestCost int64
-		found := false
-		for mask := 0; mask < 1<<len(running); mask++ {
-			var evict []string
-			var cost int64
-			var freed int64
-			for i, id := range running {
-				if mask&(1<<i) != 0 {
-					evict = append(evict, id)
-					cost += costs[id]
-					freed += usage[id]
-				}
-			}
-			if used-freed+usage["x"] > 30 {
-				continue
-			}
-			if !found || cost < bestCost || cost == bestCost && (len(evict) < len(want) || len(evict) == len(want) && slices.Compare(evict, want) < 0) {
-				want, bestCost, found = evict, cost, true
-			}
-		}
-		s := newCapacityPlanner(30, usage, costs)
-		require.Equal(t, want, s.EvictionFor("x", running), "trial %d", trial)
-	}
 }
 
 func TestCapacity_UnloadAndRestart(t *testing.T) {
@@ -231,4 +186,125 @@ func TestCapacity_PendingStartsAndBusyEviction(t *testing.T) {
 func TestCapacity_NewRejectsInvalidBudget(t *testing.T) {
 	_, err := NewCapacity(config.Config{}, logmon.NewGroup(io.Discard, true, true, true))
 	require.ErrorContains(t, err, "capacity configuration is required")
+}
+
+func TestCapacity_Pools(t *testing.T) {
+	model := func(cost, ram, gpu0, gpu1 int64) config.ModelConfig {
+		return config.ModelConfig{EvictCost: cost, Capacities: map[string]int64{"ram": ram, "gpu0": gpu0, "gpu1": gpu1}}
+	}
+	for _, tc := range []struct {
+		name          string
+		models        map[string]config.ModelConfig
+		running, want []string
+	}{
+		{"disjoint", map[string]config.ModelConfig{"a": model(0, 0, 10, 0), "x": model(0, 0, 0, 10)}, []string{"a"}, nil},
+		{"shared cost counted once", map[string]config.ModelConfig{"a": model(3, 5, 5, 0), "b": model(2, 5, 0, 0), "c": model(2, 0, 5, 0), "x": model(0, 5, 5, 0)}, []string{"c", "a", "b"}, []string{"a"}},
+		{"independent deficits", map[string]config.ModelConfig{"a": model(0, 10, 0, 0), "b": model(0, 0, 10, 0), "c": model(0, 0, 0, 10), "x": model(0, 1, 1, 0)}, []string{"a", "b", "c"}, []string{"a", "b"}},
+		{"undeclared target", map[string]config.ModelConfig{"a": model(0, 10, 10, 10), "x": {}}, []string{"a"}, nil},
+		{"undeclared resident", map[string]config.ModelConfig{"a": {}, "x": model(0, 10, 10, 10)}, []string{"a"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &capacitySwapper{capacity: &config.CapacityConfig{Pools: map[string]int64{"ram": 10, "gpu0": 10, "gpu1": 10}}, models: tc.models}
+			require.NoError(t, config.ValidateCapacity(s.capacity, tc.models))
+			require.Equal(t, tc.want, s.EvictionFor("x", tc.running))
+		})
+	}
+}
+
+// Sum retained model usage independently of the planner's deficit calculations.
+// Include empty requirements and zero/mixed costs to check all tie breakers.
+func TestCapacity_ExhaustiveOracle(t *testing.T) {
+	for _, poolCount := range []int{1, 3} {
+		t.Run(fmt.Sprintf("%d pools", poolCount), func(t *testing.T) {
+			rng := rand.New(rand.NewSource(319))
+			pools := map[string]int64{}
+			for p := 0; p < poolCount; p++ {
+				pools[fmt.Sprint(p)] = 10
+			}
+			for trial := 0; trial < 400; trial++ {
+				models := map[string]config.ModelConfig{}
+				var running []string
+				for i := 0; i < 9; i++ {
+					id := fmt.Sprintf("m%d", i)
+					if i == 8 {
+						id = "x"
+					} else {
+						running = append(running, id)
+					}
+					amounts := map[string]int64{}
+					for p := 0; p < poolCount; p++ {
+						amounts[fmt.Sprint(p)] = int64(rng.Intn(5))
+					}
+					models[id] = config.ModelConfig{EvictCost: int64(rng.Intn(7)), Capacities: amounts}
+					if trial%3 == 0 {
+						model := models[id]
+						model.EvictCost = 0
+						models[id] = model
+					}
+				}
+				s := &capacitySwapper{capacity: &config.CapacityConfig{Pools: pools}, models: models}
+				require.NoError(t, config.ValidateCapacity(s.capacity, models))
+				fits := func(evict []string) bool {
+					for pool, total := range s.capacity.Pools {
+						used := models["x"].Capacities[pool]
+						for _, id := range running {
+							if !slices.Contains(evict, id) {
+								used += models[id].Capacities[pool]
+							}
+						}
+						if used > total {
+							return false
+						}
+					}
+					return true
+				}
+				var want []string
+				var bestCost int64
+				found := false
+				for mask := 0; mask < 1<<len(running); mask++ {
+					var evict []string
+					var cost int64
+					for i, id := range running {
+						if mask&(1<<i) != 0 {
+							evict = append(evict, id)
+							cost += models[id].EvictCost
+						}
+					}
+					if !fits(evict) {
+						continue
+					}
+					if !found || cost < bestCost || cost == bestCost && (len(evict) < len(want) || len(evict) == len(want) && slices.Compare(evict, want) < 0) {
+						want, bestCost, found = evict, cost, true
+					}
+				}
+				require.Equal(t, want, s.EvictionFor("x", running), "trial %d", trial)
+				require.False(t, s.searchLimited)
+				// Exhausting the node budget still returns a feasible, deterministic
+				// plan with no victim that could simply have been retained.
+				for _, limit := range []int{1, 3, 17} {
+					s.searchLimit = limit
+					s.lastValid = false
+					actual := s.EvictionFor("x", running)
+					require.True(t, fits(actual), "fallback trial %d", trial)
+					require.LessOrEqual(t, s.searchNodes, limit)
+					for i := range actual {
+						without := append(slices.Clone(actual[:i]), actual[i+1:]...)
+						require.False(t, fits(without), "redundant fallback victim in trial %d", trial)
+					}
+					s.lastValid = false
+					slices.Reverse(running)
+					require.Equal(t, actual, s.EvictionFor("x", running))
+				}
+			}
+		})
+	}
+}
+
+func TestCapacity_SearchCutoffRetainsRedundantVictim(t *testing.T) {
+	s := newCapacityPlanner(10, map[string]int64{"a": 0, "b": 6, "c": 2, "d": 2, "x": 4}, map[string]int64{"b": 6, "c": 4, "d": 4})
+	// The greedy seed evicts C+D (cost 8). DFS first finds A+B (cost 6)
+	// before the cutoff. A contributes nothing and must still be retained.
+	s.searchLimit = 3
+	require.Equal(t, []string{"b"}, s.EvictionFor("x", []string{"a", "b", "c", "d"}))
+	require.True(t, s.searchLimited)
 }

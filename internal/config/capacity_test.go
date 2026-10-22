@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -17,62 +18,78 @@ const capacityModels = `models:
     cmd: echo a
     proxy: http://localhost:8080
     aliases: [alias-a]
-    capacity: {usage: 4, evict_cost: 1}
+    capacities: {ram: 4, gpu0: 2}
+    evict_cost: 1
   b:
     cmd: echo b
     proxy: http://localhost:8081
-    capacity: {usage: 6, evict_cost: 10}
+    capacities: {ram: 6}
+    evict_cost: 10
 `
 const capacityRouting = `routing:
   router:
     use: capacity
     settings:
       capacity:
-        total: 10
+        pools: {ram: 10, gpu0: 8}
 `
 
 func TestConfig_Capacity(t *testing.T) {
 	cfg, err := LoadConfigFromReader(strings.NewReader(capacityModels + capacityRouting))
 	require.NoError(t, err)
 	require.Equal(t, "capacity", cfg.Routing.Router.Use)
-	require.Equal(t, int64(10), cfg.Routing.Router.Settings.Capacity.Total)
-	require.Equal(t, int64(4), cfg.Models["a"].Capacity.Usage)
-	require.Equal(t, int64(10), cfg.Models["b"].Capacity.EvictCost)
+	require.Equal(t, map[string]int64{"ram": 10, "gpu0": 8}, cfg.Routing.Router.Settings.Capacity.Pools)
+	require.Equal(t, map[string]int64{"ram": 4, "gpu0": 2}, cfg.Models["a"].Capacities)
+	require.Zero(t, cfg.Models["b"].Capacities["gpu0"])
+	require.Equal(t, int64(10), cfg.Models["b"].EvictCost)
 	require.Empty(t, cfg.Groups)
 	require.Empty(t, cfg.Routing.Router.Settings.Groups)
 	require.Nil(t, cfg.Matrix)
 	require.Nil(t, cfg.Routing.Router.Settings.Matrix)
-	cfg, err = LoadConfigFromReader(strings.NewReader(strings.Replace(capacityModels+capacityRouting, ", evict_cost: 1", "", 1)))
-	require.NoError(t, err)
-	require.Equal(t, int64(1), cfg.Models["a"].Capacity.EvictCost)
+	for _, declaration := range []string{"", "    capacities: {}\n", "    capacities: {ram: 0}\n", "    evict_cost: 0\n"} {
+		input := strings.Replace(capacityModels, "    capacities: {ram: 4, gpu0: 2}\n    evict_cost: 1\n", declaration, 1)
+		cfg, err := LoadConfigFromReader(strings.NewReader(input + capacityRouting))
+		require.NoError(t, err)
+		require.Zero(t, cfg.Models["a"].EvictCost)
+		require.Zero(t, cfg.Models["a"].Capacities["ram"])
+	}
 }
 
 func TestConfig_CapacityValidation(t *testing.T) {
 	for _, tc := range []struct{ name, from, to, want string }{
-		{"zero total", "total: 10", "total: 0", "total must be a positive integer"},
-		{"negative total", "total: 10", "total: -1", "total must be a positive integer"},
-		{"missing total", "total: 10", "{}", "total must be a positive integer"},
-		{"fraction total", "total: 10", "total: 10.5", "total must be an integer"},
-		{"nonfinite total", "total: 10", "total: .inf", "cannot unmarshal"},
-		{"overflow total", "total: 10", "total: 9223372036854775808", "cannot unmarshal"},
-		{"zero usage", "usage: 4", "usage: 0", "usage must be a positive integer"},
-		{"negative usage", "usage: 4", "usage: -1", "usage must be a positive integer"},
-		{"missing usage", "usage: 4, ", "", "usage must be a positive integer"},
-		{"fraction usage", "usage: 4", "usage: 4.5", "usage must be an integer"},
-		{"oversized model", "usage: 4", "usage: 11", "exceeds total"},
-		{"missing model capacity", "    capacity: {usage: 4, evict_cost: 1}\n", "", "capacity.usage is required"},
-		{"negative cost", "evict_cost: 1}", "evict_cost: -1}", "evict_cost must be a positive integer"},
-		{"zero cost", "evict_cost: 1}", "evict_cost: 0}", "evict_cost must be a positive integer"},
-		{"fraction cost", "evict_cost: 1}", "evict_cost: 1.5}", "evict_cost must be an integer"},
-		{"unknown model setting", "evict_cost: 1}", "eviction_priority: 1}", "unknown capacity setting"},
-		{"unknown router setting", "total: 10", "budget: 10", "unknown capacity setting"},
-		{"old router name", "use: capacity", "use: resource", "requires use: capacity"},
-		{"old cost map", "total: 10", "total: 10\n        evict_costs: {a: 1}", "unknown capacity setting"},
-		{"no settings", "    settings:\n      capacity:\n        total: 10\n", "", "requires use: capacity"},
-		{"not selected", "use: capacity", "use: group", "requires use: capacity"},
-		{"implicit group", "    use: capacity\n", "", "requires use: capacity"},
-		{"group settings", "    settings:\n", "    settings:\n      groups: {}\n", "cannot be combined"},
-		{"matrix settings", "    settings:\n", "    settings:\n      matrix: {sets: {s: a}}\n", "cannot be combined"},
+		{"zero total", "ram: 10", "ram: 0", "total must be a positive integer"},
+		{"negative total", "ram: 10", "ram: -1", "total must be a positive integer"},
+		{"missing pools", "pools: {ram: 10, gpu0: 8}", "{}", "at least one resource limit"},
+		{"empty pools", "pools: {ram: 10, gpu0: 8}", "pools: {}", "at least one resource limit"},
+		{"null pools", "pools: {ram: 10, gpu0: 8}", "pools: null", "must be a mapping"},
+		{"array pools", "pools: {ram: 10, gpu0: 8}", "pools: [{name: ram, total: 10}]", "must be a mapping"},
+		{"blank pool name", "ram: 10", "' ': 10", "nonempty strings"},
+		{"numeric pool name", "ram: 10", "42: 10", "nonempty strings"},
+		{"fraction total", "ram: 10", "ram: 10.5", "must be an integer"},
+		{"nonfinite total", "ram: 10", "ram: .inf", "must be an integer"},
+		{"overflow total", "ram: 10", "ram: 9223372036854775808", "cannot unmarshal"},
+		{"duplicate pool", "gpu0: 8", "ram: 8", "already defined"},
+		{"negative usage", "ram: 4", "ram: -1", "must be a nonnegative integer"},
+		{"fraction usage", "ram: 4", "ram: 4.5", "must be an integer"},
+		{"quoted usage", "ram: 4", "ram: '4'", "must be an integer"},
+		{"null usage", "ram: 4", "ram: null", "must be an integer"},
+		{"overflow usage", "ram: 4", "ram: 9223372036854775808", "cannot unmarshal"},
+		{"oversized model", "ram: 4", "ram: 11", "exceeds total"},
+		{"unknown pool", "ram: 4", "typo: 4", "unknown capacity pool"},
+		{"unknown zero pool", "ram: 4", "typo: 0", "unknown capacity pool"},
+		{"blank requirement", "ram: 4", "' ': 4", "nonempty strings"},
+		{"numeric requirement", "ram: 4", "42: 4", "nonempty strings"},
+		{"duplicate requirement", "ram: 4, gpu0: 2", "ram: 4, ram: 2", "already defined"},
+		{"null capacities", "capacities: {ram: 4, gpu0: 2}", "capacities: null", "must be a mapping"},
+		{"array capacities", "capacities: {ram: 4, gpu0: 2}", "capacities: [4]", "must be a mapping"},
+		{"negative cost", "evict_cost: 1\n", "evict_cost: -1\n", "must be a nonnegative integer"},
+		{"fraction cost", "evict_cost: 1\n", "evict_cost: 1.5\n", "must be an integer"},
+		{"quoted cost", "evict_cost: 1\n", "evict_cost: '1'\n", "must be an integer"},
+		{"null cost", "evict_cost: 1\n", "evict_cost: null\n", "must be an integer"},
+		{"overflow cost", "evict_cost: 1\n", "evict_cost: 9223372036854775808\n", "cannot unmarshal"},
+		{"unknown router setting", "pools: {ram: 10, gpu0: 8}", "total: 10", "unknown capacity setting"},
+		{"unknown router", "use: capacity", "use: resource", "unknown router"},
+		{"no settings", "    settings:\n      capacity:\n        pools: {ram: 10, gpu0: 8}\n", "", "capacity configuration is required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := LoadConfigFromReader(strings.NewReader(strings.Replace(capacityModels+capacityRouting, tc.from, tc.to, 1)))
@@ -84,14 +101,13 @@ func TestConfig_CapacityValidation(t *testing.T) {
 		require.ErrorContains(t, err, "legacy top-level")
 	}
 	_, err := LoadConfigFromReader(strings.NewReader(capacityModels + capacityRouting + "groups: {}"))
-	require.ErrorContains(t, err, "cannot be combined")
-	err = ValidateCapacity(&CapacityConfig{Total: 9223372036854775807}, map[string]ModelConfig{
-		"a": {Capacity: &ModelCapacityConfig{Usage: 9223372036854775807, EvictCost: 1}}, "b": {Capacity: &ModelCapacityConfig{Usage: 1, EvictCost: 1}},
+	require.ErrorContains(t, err, "legacy top-level")
+	err = ValidateCapacity(&CapacityConfig{Pools: map[string]int64{"ram": math.MaxInt64}}, map[string]ModelConfig{
+		"a": {Capacities: map[string]int64{"ram": math.MaxInt64}}, "b": {Capacities: map[string]int64{"ram": 1}},
 	})
-	require.ErrorContains(t, err, "sum of capacity.usage")
-	// Cost sums are bounded too, so the planner's score cannot overflow.
-	_, err = LoadConfigFromReader(strings.NewReader(strings.ReplaceAll(capacityModels, "evict_cost: 1}", "evict_cost: 9223372036854775807}") + capacityRouting))
-	require.ErrorContains(t, err, "sum of capacity.evict_cost")
+	require.ErrorContains(t, err, "sum of capacities")
+	_, err = LoadConfigFromReader(strings.NewReader(strings.Replace(capacityModels, "evict_cost: 1\n", "evict_cost: 9223372036854775807\n", 1) + capacityRouting))
+	require.ErrorContains(t, err, "sum of evict_cost")
 }
 
 func TestConfig_CapacityConfigSources(t *testing.T) {
@@ -101,27 +117,37 @@ func TestConfig_CapacityConfigSources(t *testing.T) {
 	cfg, err := LoadConfigSources("", dir)
 	require.NoError(t, err)
 	require.Equal(t, "capacity", cfg.Routing.Router.Use)
+	// Pools can be declared in separate files, but duplicate identities fail
+	// even when their limits agree.
+	writeYAML(t, dir, "extra.yaml", strings.Replace(capacityRouting, "{ram: 10, gpu0: 8}", "{gpu1: 16}", 1))
+	cfg, err = LoadConfigSources("", dir)
+	require.NoError(t, err)
+	require.Equal(t, int64(16), cfg.Routing.Router.Settings.Capacity.Pools["gpu1"])
 	writeYAML(t, dir, "duplicate.yaml", capacityRouting)
 	_, err = LoadConfigSources("", dir)
-	require.ErrorContains(t, err, `duplicate capacity "total"`)
+	require.ErrorContains(t, err, `duplicate pools`)
 }
 
 func TestConfig_CapacitySpillover(t *testing.T) {
-	for _, total := range []int{9, 10} {
-		t.Run(fmt.Sprint(total), func(t *testing.T) {
-			input := capacityModels + strings.Replace(capacityRouting, "total: 10", fmt.Sprintf("total: %d", total), 1) + `selectors:
-  spill:
-    strategy: spillover
-    targets: [a, b]
-`
-			_, err := LoadConfigFromReader(strings.NewReader(input))
-			if total == 10 {
-				require.NoError(t, err)
-			} else {
-				require.ErrorContains(t, err, "spillover targets exceed capacity")
-			}
-		})
+	for _, pool := range []string{"ram", "gpu0"} {
+		for _, total := range []int{9, 10} {
+			t.Run(fmt.Sprintf("%s/%d", pool, total), func(t *testing.T) {
+				models := strings.ReplaceAll(capacityModels, "{ram: 4, gpu0: 2}", "{"+pool+": 4}")
+				models = strings.ReplaceAll(models, "{ram: 6}", "{"+pool+": 6}")
+				routing := strings.Replace(capacityRouting, "{ram: 10, gpu0: 8}", fmt.Sprintf("{%s: %d}", pool, total), 1)
+				input := models + routing + "selectors:\n  spill:\n    strategy: spillover\n    targets: [a, b]\n"
+				_, err := LoadConfigFromReader(strings.NewReader(input))
+				if total == 10 {
+					require.NoError(t, err)
+				} else {
+					require.ErrorContains(t, err, "spillover targets exceed capacity")
+				}
+			})
+		}
 	}
+	input := strings.Replace(capacityModels, "    capacities: {ram: 4, gpu0: 2}\n", "", 1) + capacityRouting + "selectors:\n  spill:\n    strategy: spillover\n    targets: [a, b]\n"
+	_, err := LoadConfigFromReader(strings.NewReader(input))
+	require.NoError(t, err, "undeclared requirements consume zero")
 }
 
 func TestConfig_CapacitySchema(t *testing.T) {
@@ -136,18 +162,23 @@ func TestConfig_CapacitySchema(t *testing.T) {
 		valid       bool
 	}{
 		{"valid", capacityModels + capacityRouting, true},
-		{"missing total", capacityModels + strings.Replace(capacityRouting, "total: 10", "{}", 1), false},
-		{"zero total", capacityModels + strings.Replace(capacityRouting, "total: 10", "total: 0", 1), false},
-		{"fraction usage", strings.Replace(capacityModels, "usage: 4", "usage: 4.5", 1) + capacityRouting, false},
-		{"negative cost", strings.Replace(capacityModels, "evict_cost: 1}", "evict_cost: -1}", 1) + capacityRouting, false},
-		{"zero cost", strings.Replace(capacityModels, "evict_cost: 1}", "evict_cost: 0}", 1) + capacityRouting, false},
-		{"missing usage", strings.Replace(capacityModels, "usage: 4, ", "", 1) + capacityRouting, false},
-		{"missing model capacity", strings.Replace(capacityModels, "    capacity: {usage: 4, evict_cost: 1}\n", "", 1) + capacityRouting, false},
-		{"default cost", strings.Replace(capacityModels, ", evict_cost: 1", "", 1) + capacityRouting, true},
+		{"missing pools", capacityModels + strings.Replace(capacityRouting, "pools: {ram: 10, gpu0: 8}", "{}", 1), false},
+		{"empty pools", capacityModels + strings.Replace(capacityRouting, "{ram: 10, gpu0: 8}", "{}", 1), false},
+		{"zero total", capacityModels + strings.Replace(capacityRouting, "ram: 10", "ram: 0", 1), false},
+		{"blank name", capacityModels + strings.Replace(capacityRouting, "ram: 10", "' ': 10", 1), false},
+		{"fraction usage", strings.Replace(capacityModels, "ram: 4", "ram: 4.5", 1) + capacityRouting, false},
+		{"negative usage", strings.Replace(capacityModels, "ram: 4", "ram: -4", 1) + capacityRouting, false},
+		{"negative cost", strings.Replace(capacityModels, "evict_cost: 1\n", "evict_cost: -1\n", 1) + capacityRouting, false},
+		{"zero cost", strings.Replace(capacityModels, "evict_cost: 1\n", "evict_cost: 0\n", 1) + capacityRouting, true},
+		{"empty requirements", strings.Replace(capacityModels, "{ram: 4, gpu0: 2}", "{}", 1) + capacityRouting, true},
+		{"missing requirements", strings.Replace(capacityModels, "    capacities: {ram: 4, gpu0: 2}\n", "", 1) + capacityRouting, true},
+		{"default cost", strings.Replace(capacityModels, "    evict_cost: 1\n", "", 1) + capacityRouting, true},
 		{"missing capacity settings", capacityModels + "routing: {router: {use: capacity}}", false},
-		{"inactive settings", capacityModels + strings.Replace(capacityRouting, "use: capacity", "use: matrix", 1), false},
-		{"matrix settings", capacityModels + strings.Replace(capacityRouting, "    settings:\n", "    settings:\n      matrix: {vars: {a: a}, sets: {s: a}}\n", 1), false},
-		{"group settings", capacityModels + strings.Replace(capacityRouting, "    settings:\n", "    settings:\n      groups: {}\n", 1), false},
+		{"inactive capacity", capacityModels + strings.Replace(capacityRouting, "use: capacity", "use: group", 1), true},
+		{"implicit group", capacityModels + strings.Replace(capacityRouting, "    use: capacity\n", "", 1), true},
+		{"inactive matrix", capacityModels + strings.Replace(capacityRouting, "    settings:\n", "    settings:\n      matrix: {vars: {a: a}, sets: {s: a}}\n", 1), true},
+		{"inactive groups", capacityModels + strings.Replace(capacityRouting, "    settings:\n", "    settings:\n      groups: {}\n", 1), true},
+		{"matrix with inactive capacity", capacityModels + strings.Replace(strings.Replace(capacityRouting, "use: capacity", "use: matrix", 1), "    settings:\n", "    settings:\n      matrix: {vars: {a: a}, sets: {s: 'a & b'}}\n", 1), true},
 		{"legacy groups", capacityModels + capacityRouting + "groups: {}", false},
 		{"legacy matrix", capacityModels + capacityRouting + "matrix: {vars: {a: a}, sets: {s: a}}", false},
 		{"default group", capacityModels, true},
@@ -164,9 +195,27 @@ func TestConfig_CapacitySchema(t *testing.T) {
 			err = resolved.Validate(instance)
 			if tc.valid {
 				require.NoError(t, err)
+				_, err = LoadConfigFromReader(strings.NewReader(tc.input))
+				require.NoError(t, err, "schema and config loader must both accept the example")
 			} else {
 				require.Error(t, err)
 			}
 		})
+	}
+}
+
+func TestConfig_CapacityGuideExamples(t *testing.T) {
+	data, err := os.ReadFile("../../docs/kb/guides/routing/groups-and-matrix.md")
+	require.NoError(t, err)
+	_, section, found := strings.Cut(string(data), "## `capacity`")
+	require.True(t, found)
+	section = strings.SplitN(section, "## Which one?", 2)[0]
+	examples := strings.Split(section, "```yaml\n")[1:]
+	require.NotEmpty(t, examples)
+	for _, example := range examples {
+		input := strings.SplitN(example, "```", 2)[0]
+		cfg, err := LoadConfigFromReader(strings.NewReader(input))
+		require.NoError(t, err)
+		require.Equal(t, "capacity", cfg.Routing.Router.Use)
 	}
 }
