@@ -187,19 +187,25 @@ routing:
 models:
   a:
     cmd: llama-server -m /models/a.gguf --port ${PORT}
-    capacities: {ram: 10000, gpu0: 6000}
+    capacities:
+      ram: 10000
+      gpu0: 6000
     evict_cost: 100
   b:
     cmd: llama-server -m /models/b.gguf --port ${PORT}
-    capacities: {ram: 5000}
+    capacities:
+      ram: 5000
     evict_cost: 1
   c:
     cmd: llama-server -m /models/c.gguf --port ${PORT}
-    capacities: {ram: 5000}
+    capacities:
+      ram: 5000
     evict_cost: 1
   d:
     cmd: llama-server -m /models/d.gguf --port ${PORT}
-    capacities: {ram: 10000, gpu0: 6000}
+    capacities:
+      ram: 10000
+      gpu0: 6000
 ```
 
 A, B and C fit exactly. Requesting D evicts B+C (cost 2), retaining A
