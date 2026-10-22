@@ -3,8 +3,8 @@ title: ComfyUI with the /comfyui endpoint
 summary: Name a model comfyui_auto and use /comfyui/ so ComfyUI's websocket does not block model swapping.
 category: guides
 tags: [comfyui, image, websocket, upstream, swapping, ttl, docker]
-config_keys: [models.*.compat.ignoreWebsockets, models.*.concurrencyLimit, models.*.checkEndpoint, models.*.cmdStop, models.*.unloadTimeout, models.*.ttl, models.*.unlisted, upstream.ignorePaths]
-updated: 2026-09-21
+config_keys: [models.*.compat.ignoreWebsockets, models.*.concurrencyLimit, models.*.checkEndpoint, models.*.cmdStop, models.*.unloadTimeout, models.*.ttl, models.*.unlisted, models.*.busyCheck.endpoint, models.*.busyCheck.fields, models.*.busyCheck.hold, upstream.ignorePaths]
+updated: 2026-10-21
 ---
 
 # ComfyUI with the /comfyui endpoint
@@ -103,6 +103,38 @@ as usual: the page itself, `/api/prompt`, and any path not in the list.
 Query parameters are not part of the match, so `?clientId=...` makes no
 difference. `/wsapi` and `/api/jobs/12` are different paths and are not ignored.
 
+## Do not swap out a model that is rendering
+
+llama-swap decides a model is busy by counting open HTTP requests. ComfyUI is
+asynchronous: queueing a job returns at once and the render runs on with no
+request open, so a swap can stop ComfyUI in the middle of a job. Add a
+`busyCheck` that points at ComfyUI's queue:
+
+```yaml
+models:
+  comfyui_auto:
+    checkEndpoint: /
+    busyCheck:
+      endpoint: /queue
+      fields: [queue_running, queue_pending]
+      hold: 30
+```
+
+While `/queue` lists a running or pending job, a request that needs the VRAM
+waits in the queue instead of stopping ComfyUI, and `ttl` does not unload it.
+The swap goes ahead once the queue is empty. The check also works on models
+served through `/upstream/`. Unloading from the API or UI still stops the model
+at once.
+
+`hold` keeps the model busy for that many seconds after the queue empties. Clients
+fetch the finished file a few seconds after the job ends, and without a hold the
+swap stops ComfyUI in between, the download fails and the client may resubmit the
+job.
+
+If a job never finishes, the waiting request waits with it. Unload the model to
+release it. If the endpoint stops answering, the model is treated as idle again
+after a few failed polls.
+
 ## What goes wrong
 
 - **`404 local model comfyui_auto not found`.** The model is named something
@@ -120,8 +152,8 @@ difference. `/wsapi` and `/api/jobs/12` are different paths and are not ignored.
   `/comfyui/` first.
 - **The model unloads while you are working.** Websocket traffic is ignored, so
   it does not reset the TTL timer. Watching a long render over the websocket
-  counts as idle. Use a longer `ttl`, or `ttl: 0` to disable automatic
-  unloading, and rely on a swap to free the VRAM.
+  counts as idle. Set a `busyCheck` (see above) so a running job keeps the model
+  loaded, or use a longer `ttl`, or `ttl: 0` to disable automatic unloading.
 - **ComfyUI never becomes ready.** The default `checkEndpoint` is `/health`,
   which ComfyUI does not serve. Set `checkEndpoint: /`, or `none` to skip the
   check. See `guides/model-runtime/troubleshooting-model-wont-load`.

@@ -703,3 +703,52 @@ models:
 	assert.True(t, caps.Empty(), "voices are not advertised in /v1/models")
 	assert.Equal(t, caps.Voices, caps.Merge(ModelCapConfig{Tools: true}).Voices)
 }
+
+func TestConfig_ModelBusyCheck(t *testing.T) {
+	content := `
+models:
+  comfy:
+    cmd: path/to/cmd --port ${PORT}
+    busyCheck:
+      endpoint: /queue
+      fields: [queue_running, queue_pending]
+      hold: 30
+  plain:
+    cmd: path/to/cmd --port ${PORT}
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	assert.True(t, cfg.Models["comfy"].BusyCheck.Enabled())
+	assert.Equal(t, "/queue", cfg.Models["comfy"].BusyCheck.Endpoint)
+	assert.Equal(t, []string{"queue_running", "queue_pending"}, cfg.Models["comfy"].BusyCheck.Fields)
+	assert.Equal(t, 30, cfg.Models["comfy"].BusyCheck.Hold)
+	assert.False(t, cfg.Models["plain"].BusyCheck.Enabled())
+}
+
+func TestConfig_ModelBusyCheckInvalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		check string
+		err   string
+	}{
+		{"relative endpoint", "endpoint: queue\n      fields: [a]", "must start with /"},
+		{"no fields", "endpoint: /queue", "at least one field"},
+		{"empty field name", "endpoint: /queue\n      fields: [\"\"]", "empty names"},
+		{"fields without endpoint", "fields: [a]", "require busyCheck.endpoint"},
+		{"hold without endpoint", "hold: 10", "require busyCheck.endpoint"},
+		{"negative hold", "endpoint: /queue\n      fields: [a]\n      hold: -1", "hold must be >= 0"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			content := `
+models:
+  comfy:
+    cmd: path/to/cmd --port ${PORT}
+    busyCheck:
+      ` + tc.check + "\n"
+			_, err := LoadConfigFromReader(strings.NewReader(content))
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tc.err)
+		})
+	}
+}

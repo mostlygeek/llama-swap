@@ -163,6 +163,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.UnloadTimeout = config.UnloadTimeout
 		}
 
+		if err := modelConfig.BusyCheck.Validate(); err != nil {
+			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
+		}
+
 		if err := modelConfig.Capabilities.Validate(); err != nil {
 			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
 		}

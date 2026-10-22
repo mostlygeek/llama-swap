@@ -129,7 +129,7 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 	}
 
 	// (5) Would evict a busy process — queue until it drains.
-	if conflictsWithInFlight(evict, s.inFlight) {
+	if s.evictsBusy(evict) {
 		s.logger.Debugf("%s: queuing request for model %s (would evict in-flight process)", s.name, req.Model)
 		s.enqueue(req)
 		return
@@ -214,6 +214,12 @@ func (s *FIFO) OnServeDone(ev ServeDoneEvent) {
 		delete(s.inFlight, ev.ModelID)
 		s.drainQueue()
 	}
+}
+
+// OnBusyTick retries the queue so that requests deferred because they would
+// have evicted a busy model start once that model reports idle.
+func (s *FIFO) OnBusyTick() {
+	s.drainQueue()
 }
 
 // OnUnload reconciles router-owned state with the impending Stop, performs the
@@ -429,7 +435,7 @@ func (s *FIFO) drainQueue() {
 			remaining = append(remaining, req)
 			continue
 		}
-		if conflictsWithInFlight(evict, s.inFlight) {
+		if s.evictsBusy(evict) {
 			remaining = append(remaining, req)
 			continue
 		}
@@ -513,12 +519,14 @@ func slicesOverlap(xs, ys []string) bool {
 	return false
 }
 
-// conflictsWithInFlight reports whether any model in evict is still handling
-// requests. Stopping a busy process would cancel its callers' connections, so
-// the scheduler defers the swap until those callers finish.
-func conflictsWithInFlight(evict []string, inFlight map[string]int) bool {
+// evictsBusy reports whether any model in evict is still working. That is the
+// case while it handles requests, or while its process reports unfinished work
+// that no open request represents (see Effects.Busy). Stopping a busy process
+// would cancel its callers' connections or abandon its jobs, so the scheduler
+// defers the swap until the work finishes.
+func (s *FIFO) evictsBusy(evict []string) bool {
 	for _, m := range evict {
-		if inFlight[m] > 0 {
+		if s.inFlight[m] > 0 || s.effects.Busy(m) {
 			return true
 		}
 	}

@@ -58,6 +58,11 @@ type Scheduler interface {
 	OnSwapDone(ev SwapDone)
 	// OnServeDone handles a tracked ServeHTTP finishing (in-flight decrement).
 	OnServeDone(ev ServeDoneEvent)
+	// OnBusyTick is a periodic nudge that lets the scheduler retry requests it
+	// queued because their swap would have evicted a busy model. Models that
+	// are busy for reasons no open request represents (see Effects.Busy)
+	// produce no event when they become idle, so the router ticks instead.
+	OnBusyTick()
 	// OnUnload reconciles scheduler state for an unload, stops the targeted
 	// processes via Effects, and drains the queue. It must block until the
 	// targeted processes have stopped.
@@ -79,6 +84,10 @@ type Effects interface {
 	// shut down, keyed by model ID. The scheduler uses it to build the running
 	// set it hands the Swapper.
 	RunningModels() map[string]process.ProcessState
+	// Busy reports whether a model's process says it is still working on
+	// something that no in-flight request represents, such as a queued job of
+	// an asynchronous API. A busy model is not evicted. It must not block.
+	Busy(modelID string) bool
 	// StartSwap launches the swap goroutine for modelID, stopping evict first.
 	StartSwap(modelID string, evict []string)
 	// GrantError responds to a caller with an error.
