@@ -207,7 +207,7 @@ func TestConfig_CapacitySchema(t *testing.T) {
 func TestConfig_CapacityGuideExamples(t *testing.T) {
 	data, err := os.ReadFile("../../docs/kb/guides/routing/groups-and-matrix.md")
 	require.NoError(t, err)
-	_, section, found := strings.Cut(string(data), "## `capacity`")
+	_, section, found := strings.Cut(strings.ReplaceAll(string(data), "\r\n", "\n"), "## `capacity`")
 	require.True(t, found)
 	section = strings.SplitN(section, "## Which one?", 2)[0]
 	examples := strings.Split(section, "```yaml\n")[1:]
