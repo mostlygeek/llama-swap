@@ -51,8 +51,7 @@ func TestGroup_NewGroup_DuplicateMembership(t *testing.T) {
 			"a": {},
 		},
 	}
-	log := logmon.NewWriter(io.Discard)
-	if _, err := NewGroup(conf, log, log); err == nil {
+	if _, err := NewGroup(conf, logmon.NewGroup(io.Discard, true, true, true)); err == nil {
 		t.Fatalf("expected error for duplicate membership")
 	}
 }

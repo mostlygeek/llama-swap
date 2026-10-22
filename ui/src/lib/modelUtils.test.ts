@@ -31,6 +31,10 @@ describe("modelServerPath", () => {
     expect(modelServerPath("comfyui_auto")).toBe("/comfyui/");
   });
 
+  it("uses the audio.cpp endpoint for the reserved model", () => {
+    expect(modelServerPath("audiocpp_auto")).toBe("/audiocpp/");
+  });
+
   it("uses the encoded upstream endpoint for other models", () => {
     expect(modelServerPath("org/model name")).toBe("/upstream/org%2Fmodel%20name/");
   });

@@ -9,6 +9,7 @@ const ModelPreloadedEventID = 0x06
 const InFlightRequestsEventID = 0x07
 const ProfileChangedEventID = 0x08
 const ModelCapabilitiesChangedEventID = 0x09
+const ProcessLoadingEventID = 0x0A
 
 // ProcessStateChangeEvent is emitted whenever a process transitions between
 // lifecycle states. States are carried as strings so this package stays a leaf
@@ -29,6 +30,19 @@ const (
 	ReloadingStateStart ReloadingState = iota
 	ReloadingStateEnd
 )
+
+// ProcessLoadingEvent is emitted while a process is starting, each time its
+// upstream reports new loading progress through the health check endpoint.
+type ProcessLoadingEvent struct {
+	ProcessName string
+	// Progress is the fraction loaded, from 0 to 1, or nil if not reported.
+	Progress *float64
+	Message  string
+}
+
+func (e ProcessLoadingEvent) Type() uint32 {
+	return ProcessLoadingEventID
+}
 
 type ConfigFileChangedEvent struct {
 	State ReloadingState

@@ -12,14 +12,11 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"os"
-	"reflect"
-	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	tailcatlib "github.com/tailscale/tailcat"
 	"tailscale.com/tailcfg"
@@ -31,6 +28,7 @@ const (
 	HTTPPort                uint16 = 80
 	serverDrainTimeout             = time.Second
 	serverReadHeaderTimeout        = time.Second
+	staleClientDialTimeout         = 5 * time.Second
 )
 
 // PrivateKey is the adapter-owned representation of a validated Tailcat key
@@ -128,6 +126,9 @@ func logFunc(logger Logger, prefix string) func(string, ...any) {
 
 type sourceContextKey struct{}
 
+// sourcePrefix marks a request source as a Tailcat node key.
+const sourcePrefix = "tc:"
+
 // SourceFromContext returns trusted listener metadata attached by this
 // adapter. It cannot be influenced through HTTP forwarding headers.
 func SourceFromContext(ctx context.Context) (string, bool) {
@@ -135,65 +136,70 @@ func SourceFromContext(ctx context.Context) (string, bool) {
 	return source, ok && source != ""
 }
 
+// ContextWithNodeKey attaches an authenticated client node key to ctx. The
+// listener calls it for every accepted Tailcat connection.
+func ContextWithNodeKey(ctx context.Context, nodeKey string) context.Context {
+	return context.WithValue(ctx, sourceContextKey{}, sourcePrefix+nodeKey)
+}
+
+// NodeKeyFromContext returns the authenticated client node key attached by
+// the listener, in canonical "nodekey:..." form.
+func NodeKeyFromContext(ctx context.Context) (string, bool) {
+	source, ok := SourceFromContext(ctx)
+	if !ok {
+		return "", false
+	}
+	nodeKey, ok := strings.CutPrefix(source, sourcePrefix)
+	return nodeKey, ok && nodeKey != ""
+}
+
 type authenticatedConn struct {
 	net.Conn
-	source string
+	nodeKey string
 }
 
-type channelListener struct {
-	connections chan net.Conn
-	done        chan struct{}
-	closeOnce   sync.Once
+// authenticatedListener wraps Tailcat's port listener and tags each accepted
+// connection with the client's node key before net/http sees it.
+type authenticatedListener struct {
+	net.Listener
+	server  *tailcatlib.Server
+	runtime *Server
 }
 
-func newChannelListener() *channelListener {
-	return &channelListener{connections: make(chan net.Conn), done: make(chan struct{})}
-}
-
-func (l *channelListener) Accept() (net.Conn, error) {
-	select {
-	case conn := <-l.connections:
-		return conn, nil
-	case <-l.done:
-		return nil, net.ErrClosed
+func (l *authenticatedListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
 	}
-}
-
-func (l *channelListener) deliver(conn net.Conn) bool {
-	select {
-	case l.connections <- conn:
-		return true
-	case <-l.done:
-		return false
+	public, ok := resolveRemoteNodeKey(l.server, conn.LocalAddr(), conn.RemoteAddr())
+	if !ok {
+		if logger := l.runtime.currentLogger(); logger != nil {
+			logger.Warnf("tailcat server: rejecting connection with unresolved identity from %v", conn.RemoteAddr())
+		}
+		// Let net/http read the request and return 403. Closing here leaves
+		// clients waiting for an HTTP response that will never arrive.
+		return &authenticatedConn{Conn: conn}, nil
 	}
+	return &authenticatedConn{Conn: conn, nodeKey: public.String()}, nil
 }
 
-func (l *channelListener) Close() error {
-	l.closeOnce.Do(func() { close(l.done) })
-	return nil
-}
-
-func (l *channelListener) Addr() net.Addr { return tailcatAddr("tailcat:80") }
-
-type tailcatAddr string
-
-func (a tailcatAddr) Network() string { return "tailcat" }
-func (a tailcatAddr) String() string  { return string(a) }
-
+// ServerOptions configures a Tailcat listener. Client authorization is not
+// enforced here: the listener accepts any client holding the connection token
+// and tags requests with the client's node key (see NodeKeyFromContext) so the
+// HTTP handler can apply an allowlist that changes on config reload.
 type ServerOptions struct {
-	PrivateKey     *PrivateKey
-	AllowedClients []string
-	Handler        http.Handler
-	Logger         Logger
+	PrivateKey *PrivateKey
+	Handler    http.Handler
+	Logger     Logger
 }
 
 // Server bridges Tailcat port 80 into a standard net/http server.
 type Server struct {
 	tailcat *tailcatlib.Server
 	http    *http.Server
-	ln      *channelListener
 	blob    string
 	closed  atomic.Bool
+	logger  atomic.Pointer[Logger]
 }
 
 type ephemeralServerIdentity struct {
@@ -221,50 +227,28 @@ func Start(ctx context.Context, opts ServerOptions) (*Server, error) {
 		return nil, err
 	}
 
-	ln := newChannelListener()
-	runtime := &Server{ln: ln, blob: identity.blob}
-	allowed := make([]key.NodePublic, 0, len(opts.AllowedClients))
-	for _, raw := range opts.AllowedClients {
-		var public key.NodePublic
-		if err := public.UnmarshalText([]byte(raw)); err != nil {
-			ln.Close()
-			return nil, fmt.Errorf("parse allowed Tailcat client: %w", err)
-		}
-		allowed = append(allowed, public)
-	}
+	runtime := &Server{blob: identity.blob}
+	runtime.SetLogger(opts.Logger)
 	tc := &tailcatlib.Server{
 		Key:                 identity.private,
 		PresharedKey:        identity.presharedKey,
 		DisablePresharedKey: identity.disablePresharedKey,
 		Region:              identity.region,
-		AllowedClients:      allowed,
 		ServedTCPPorts:      []filter.PortRange{{First: HTTPPort, Last: HTTPPort}},
-		Logf:                logFunc(opts.Logger, "tailcat server: "),
-	}
-	tc.OnTCP = func(port uint16) func(net.Conn) {
-		if port != HTTPPort {
-			return nil
-		}
-		return func(conn net.Conn) {
-			public, ok := resolveRemoteNodeKey(tc, conn.RemoteAddr())
-			if !ok {
-				if opts.Logger != nil {
-					opts.Logger.Warnf("tailcat server: rejecting connection with unresolved identity from %v", conn.RemoteAddr())
-				}
-				conn.Close()
-				return
+		Logf: func(format string, args ...any) {
+			if logger := runtime.currentLogger(); logger != nil {
+				logger.Debugf("tailcat server: "+format, args...)
 			}
-			authenticated := &authenticatedConn{Conn: conn, source: "tc:" + public.String()}
-			if !ln.deliver(authenticated) {
-				conn.Close()
-			}
-		}
+		},
 	}
 
-	if err := tc.Start(); err != nil {
-		ln.Close()
+	// Listen starts the Tailcat server and claims the HTTP port.
+	tcListener, err := tc.Listen(ctx, "tcp", fmt.Sprintf(":%d", HTTPPort))
+	if err != nil {
+		tc.Close()
 		return nil, fmt.Errorf("start Tailcat server: %w", err)
 	}
+	ln := &authenticatedListener{Listener: tcListener, server: tc, runtime: runtime}
 	runtime.tailcat = tc
 
 	// Tailcat's server token embeds the resolved relay. Stable key files keep
@@ -291,8 +275,9 @@ func Start(ctx context.Context, opts ServerOptions) (*Server, error) {
 	}
 	runtime.http = newHTTPServer(opts)
 	go func() {
-		if err := runtime.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) && opts.Logger != nil {
-			opts.Logger.Warnf("tailcat HTTP server stopped: %v", err)
+		err := runtime.http.Serve(ln)
+		if logger := runtime.currentLogger(); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) && logger != nil {
+			logger.Warnf("tailcat HTTP server stopped: %v", err)
 		}
 	}()
 	return runtime, nil
@@ -300,11 +285,18 @@ func Start(ctx context.Context, opts ServerOptions) (*Server, error) {
 
 func newHTTPServer(opts ServerOptions) *http.Server {
 	return &http.Server{
-		Handler:           opts.Handler,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := NodeKeyFromContext(r.Context()); !ok {
+				w.Header().Set("Connection", "close")
+				http.Error(w, "Tailcat client identity not recognized", http.StatusForbidden)
+				return
+			}
+			opts.Handler.ServeHTTP(w, r)
+		}),
 		ReadHeaderTimeout: serverReadHeaderTimeout,
 		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
 			if authenticated, ok := conn.(*authenticatedConn); ok {
-				return context.WithValue(ctx, sourceContextKey{}, authenticated.source)
+				return ContextWithNodeKey(ctx, authenticated.nodeKey)
 			}
 			return ctx
 		},
@@ -359,71 +351,42 @@ func resolveServerIdentity(ctx context.Context, saved *PrivateKey) (ephemeralSer
 	}, nil
 }
 
-func resolveRemoteNodeKey(server *tailcatlib.Server, addr net.Addr) (key.NodePublic, bool) {
+// resolveRemoteNodeKey returns the node key WireGuard authenticated for an
+// accepted connection, using Tailcat's own client registry via PeerEnv.
+func resolveRemoteNodeKey(server *tailcatlib.Server, local, remote net.Addr) (key.NodePublic, bool) {
 	var zero key.NodePublic
-	host, _, err := net.SplitHostPort(addr.String())
-	if err != nil {
-		return zero, false
-	}
-	ip, err := netip.ParseAddr(host)
-	if err != nil {
-		return zero, false
-	}
-	status := server.Status()
-	if status != nil {
-		for public, peer := range status.Peer {
-			if peer != nil && slices.Contains(peer.TailscaleIPs, ip) {
-				return public, true
-			}
+	for _, kv := range server.PeerEnv(local, remote) {
+		raw, ok := strings.CutPrefix(kv, "TAILCAT_PEER_KEY=")
+		if !ok {
+			continue
 		}
-	}
-
-	// Tailcat v0.4.0's public Status method creates an ipnstate builder with
-	// peer collection disabled, so Status().Peer is always empty even after a
-	// successful meow handshake. Until Tailcat exposes the authenticated key
-	// on OnTCP (or fixes Status), read its authenticated client registry under
-	// its own mutex. This dependency is deliberately isolated here and guarded
-	// by the exact v0.4.0 module pin and the local-DERP integration test.
-	if public, ok := tailcatV040RemoteNodeKey(server, ip); ok {
+		var public key.NodePublic
+		if err := public.UnmarshalText([]byte(raw)); err != nil || public.IsZero() {
+			return zero, false
+		}
 		return public, true
 	}
 	return zero, false
 }
 
-func tailcatV040RemoteNodeKey(server *tailcatlib.Server, ip netip.Addr) (key.NodePublic, bool) {
-	var zero key.NodePublic
-	serverValue := reflect.ValueOf(server)
-	if !serverValue.IsValid() || serverValue.IsNil() {
-		return zero, false
+// SetLogger replaces the transport logger of a running listener. A nil logger
+// silences Tailcat diagnostics. It lets config reloads toggle tailcat.debug.
+func (s *Server) SetLogger(logger Logger) {
+	if s == nil {
+		return
 	}
-	lbPointer := serverValue.Elem().FieldByName("lb")
-	if !lbPointer.IsValid() || lbPointer.IsNil() {
-		return zero, false
+	if logger == nil {
+		s.logger.Store(nil)
+		return
 	}
-	lb := lbPointer.Elem()
-	mutexValue := lb.FieldByName("mu")
-	clients := lb.FieldByName("clients")
-	if !mutexValue.IsValid() || !mutexValue.CanAddr() || !clients.IsValid() || clients.Kind() != reflect.Map {
-		return zero, false
-	}
+	s.logger.Store(&logger)
+}
 
-	mutex := (*sync.Mutex)(unsafe.Pointer(mutexValue.UnsafeAddr()))
-	mutex.Lock()
-	defer mutex.Unlock()
-	iter := clients.MapRange()
-	for iter.Next() {
-		nodeValue := iter.Value()
-		if nodeValue.Kind() != reflect.Pointer || nodeValue.IsNil() {
-			continue
-		}
-		node := (*tailcfg.Node)(unsafe.Pointer(nodeValue.Pointer()))
-		for _, prefix := range node.Addresses {
-			if prefix.Addr() == ip {
-				return node.Key, true
-			}
-		}
+func (s *Server) currentLogger() Logger {
+	if p := s.logger.Load(); p != nil {
+		return *p
 	}
-	return zero, false
+	return nil
 }
 
 func (s *Server) Address() string {
@@ -463,9 +426,23 @@ func (s *Server) Close(ctx context.Context) error {
 
 // Client is a reusable outbound Tailcat identity and network stack.
 type Client struct {
-	client *tailcatlib.Client
-	closed atomic.Bool
-	used   atomic.Bool
+	mu         sync.Mutex
+	client     *tailcatlib.Client
+	newClient  func() *tailcatlib.Client
+	closed     atomic.Bool
+	usedClient *tailcatlib.Client
+	retired    map[*tailcatlib.Client]*retiredClient
+	// A dial may still be starting when its client is replaced. DrainTCP
+	// cannot see that connection until Tailcat creates its TCP endpoint.
+	pending map[*tailcatlib.Client]int
+}
+
+type retiredClient struct {
+	cancel    context.CancelFunc
+	done      chan struct{}
+	dialsDone chan struct{}
+	used      bool
+	err       error
 }
 
 var processPeerKeys struct {
@@ -489,40 +466,198 @@ func NewClient(peerID, blob string, saved *PrivateKey, logger Logger) *Client {
 		}
 		processPeerKeys.Unlock()
 	}
-	return &Client{client: &tailcatlib.Client{
-		Server: tailcatlib.Addr(blob),
-		Key:    private,
-		Logf:   logFunc(logger, "tailcat client "+peerID+": "),
-	}}
+	newClient := func() *tailcatlib.Client {
+		return &tailcatlib.Client{
+			Server: tailcatlib.Addr(blob),
+			Key:    private,
+			Logf:   logFunc(logger, "tailcat client "+peerID+": "),
+		}
+	}
+	return &Client{client: newClient(), newClient: newClient}
 }
 
 func (c *Client) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
 	if c == nil || c.closed.Load() {
 		return nil, net.ErrClosed
 	}
-	conn, err := c.client.DialTCPPort(ctx, HTTPPort)
-	if err == nil {
-		c.used.Store(true)
+	c.mu.Lock()
+	if c.closed.Load() {
+		c.mu.Unlock()
+		return nil, net.ErrClosed
+	}
+	current := c.client
+	used := c.usedClient == current
+	c.startDialLocked(current)
+	c.mu.Unlock()
+	// An already authenticated Tailcat client does not repeat its handshake.
+	// If the server restarted, its old TCP dial can wait for the entire
+	// request deadline. Bound that attempt so a fresh client can reconnect.
+	attemptCtx := ctx
+	if used {
+		var cancel context.CancelFunc
+		attemptCtx, cancel = context.WithTimeout(ctx, staleClientDialTimeout)
+		defer cancel()
+	}
+	conn, err := current.DialTCPPort(attemptCtx, HTTPPort)
+	conn, err = c.finishDial(current, conn, err)
+	if err != nil && ctx.Err() == nil {
+		if c.closed.Load() {
+			return nil, net.ErrClosed
+		}
+		c.replaceClient(current)
+		c.mu.Lock()
+		current = c.client
+		if c.closed.Load() {
+			c.mu.Unlock()
+			return nil, net.ErrClosed
+		}
+		c.startDialLocked(current)
+		c.mu.Unlock()
+		conn, err = current.DialTCPPort(ctx, HTTPPort)
+		conn, err = c.finishDial(current, conn, err)
 	}
 	return conn, err
 }
 
+func (c *Client) startDialLocked(client *tailcatlib.Client) {
+	if c.pending == nil {
+		c.pending = make(map[*tailcatlib.Client]int)
+	}
+	c.pending[client]++
+}
+
+func (c *Client) finishDial(client *tailcatlib.Client, conn net.Conn, err error) (net.Conn, error) {
+	c.mu.Lock()
+	closeConn := false
+	if err == nil {
+		if c.closed.Load() {
+			closeConn = true
+		} else if c.client == client {
+			c.usedClient = client
+		} else if retired := c.retired[client]; retired != nil {
+			retired.used = true
+		}
+	}
+	c.pending[client]--
+	if c.pending[client] == 0 {
+		delete(c.pending, client)
+		if retired := c.retired[client]; retired != nil {
+			close(retired.dialsDone)
+		}
+	}
+	c.mu.Unlock()
+	if closeConn {
+		conn.Close()
+		return nil, net.ErrClosed
+	}
+	return conn, err
+}
+
+func (c *Client) replaceClient(current *tailcatlib.Client) {
+	c.mu.Lock()
+	if c.closed.Load() || c.client != current {
+		c.mu.Unlock()
+		return
+	}
+	used := c.usedClient == current
+	c.client = c.newClient()
+	c.usedClient = nil
+	if c.retired == nil {
+		c.retired = make(map[*tailcatlib.Client]*retiredClient)
+	}
+	retireCtx, cancel := context.WithCancel(context.Background())
+	retired := &retiredClient{cancel: cancel, done: make(chan struct{}), dialsDone: make(chan struct{}), used: used}
+	if c.pending[current] == 0 {
+		close(retired.dialsDone)
+	}
+	c.retired[current] = retired
+	c.mu.Unlock()
+	go c.drainRetiredClient(retireCtx, current, retired)
+}
+
+func (c *Client) drainRetiredClient(ctx context.Context, client *tailcatlib.Client, retired *retiredClient) {
+	defer func() {
+		retired.err = client.Close()
+		c.mu.Lock()
+		if c.retired[client] == retired {
+			delete(c.retired, client)
+		}
+		c.mu.Unlock()
+		close(retired.done)
+		retired.cancel()
+	}()
+	select {
+	case <-retired.dialsDone:
+	case <-ctx.Done():
+		return
+	}
+	c.mu.Lock()
+	used := retired.used
+	c.mu.Unlock()
+	if !used {
+		// A failed first dial may leave Tailcat without a network stack.
+		return
+	}
+	for {
+		drainCtx, cancel := context.WithTimeout(ctx, serverDrainTimeout)
+		err := client.DrainTCP(drainCtx)
+		cancel()
+		if err == nil {
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		timer := time.NewTimer(serverDrainTimeout)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		case <-timer.C:
+		}
+	}
+}
+
 // PublicKey returns the canonical node-key string without exposing Tailcat's
 // concrete key type outside the adapter.
-func (c *Client) PublicKey() string { return c.client.PublicKey().String() }
+func (c *Client) PublicKey() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.client.PublicKey().String()
+}
 
 func (c *Client) Close(ctx context.Context) error {
 	if c == nil || !c.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	c.mu.Lock()
+	current := c.client
+	used := c.usedClient == current
+	retired := c.retired
+	c.retired = nil
+	c.mu.Unlock()
 	var errs []error
-	if c.used.Load() {
-		if err := c.client.DrainTCP(ctx); err != nil && ctx.Err() == nil {
+	if used {
+		if err := current.DrainTCP(ctx); err != nil && ctx.Err() == nil {
 			errs = append(errs, err)
 		}
 	}
-	if err := c.client.Close(); err != nil {
+	if err := current.Close(); err != nil {
 		errs = append(errs, err)
+	}
+	for _, state := range retired {
+		state.cancel()
+	}
+	for _, state := range retired {
+		<-state.done
+		if state.err != nil {
+			errs = append(errs, state.err)
+		}
 	}
 	return errors.Join(errs...)
 }

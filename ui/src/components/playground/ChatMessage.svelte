@@ -39,6 +39,8 @@
     toolCallCount?: number;
     onEdit?: (newContent: string) => void;
     onRegenerate?: () => void;
+    /** The turn failed or was cancelled; its retry stays visible. */
+    interrupted?: "error" | "cancelled";
   }
 
   interface ToolWorkResult {
@@ -65,6 +67,7 @@
     toolCallCount = 0,
     onEdit,
     onRegenerate,
+    interrupted,
   }: Props = $props();
 
   let textContent = $derived(getTextContent(content));
@@ -75,7 +78,8 @@
     role === "assistant" && !hasMessageText && !hasImages && Boolean(reasoning_content || workItems.length)
   );
   let canEdit = $derived(onEdit !== undefined && !hasImages);
-  let showActions = $derived(!isStreaming && hasMessageText);
+  // An interrupted reply may have no text at all, but still needs its retry.
+  let showActions = $derived(!isStreaming && (hasMessageText || Boolean(interrupted)));
   // The footer shows the whole turn in one line; a chevron expands it into
   // the detailed table. While the model is still thinking the footer would
   // only repeat the live Reasoning header, so it waits for the answer; once
@@ -303,35 +307,46 @@
         <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
           {#if showActions}
             <div
-              class="-ml-1 flex items-center gap-0.5 transition-opacity md:focus-within:opacity-100 md:group-hover:opacity-100 {showRaw || copied ? 'md:opacity-100' : 'md:opacity-0'}"
+              class="-ml-1 flex items-center gap-0.5 transition-opacity md:focus-within:opacity-100 md:group-hover:opacity-100 {showRaw || copied || interrupted ? 'md:opacity-100' : 'md:opacity-0'}"
             >
               {#if onRegenerate}
-                <Button variant="ghost" size="icon-xs" class="text-muted-foreground" onclick={onRegenerate} title="Regenerate response">
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  class="text-muted-foreground"
+                  onclick={onRegenerate}
+                  title={interrupted ? "Retry" : "Regenerate response"}
+                >
                   <RefreshCw />
                 </Button>
               {/if}
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                class="text-muted-foreground"
-                onclick={copyToClipboard}
-                title={copied ? "Copied!" : "Copy to clipboard"}
-              >
-                {#if copied}
-                  <Check class="text-success" />
-                {:else}
-                  <Copy />
-                {/if}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                class={showRaw ? "text-primary" : "text-muted-foreground"}
-                onclick={() => showRaw = !showRaw}
-                title={showRaw ? "Show rendered" : "Show raw"}
-              >
-                <Code />
-              </Button>
+              {#if interrupted === "cancelled"}
+                <span class="text-muted-foreground px-1 text-xs">Cancelled</span>
+              {/if}
+              {#if hasMessageText}
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  class="text-muted-foreground"
+                  onclick={copyToClipboard}
+                  title={copied ? "Copied!" : "Copy to clipboard"}
+                >
+                  {#if copied}
+                    <Check class="text-success" />
+                  {:else}
+                    <Copy />
+                  {/if}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  class={showRaw ? "text-primary" : "text-muted-foreground"}
+                  onclick={() => showRaw = !showRaw}
+                  title={showRaw ? "Show rendered" : "Show raw"}
+                >
+                  <Code />
+                </Button>
+              {/if}
             </div>
           {/if}
           {#if showGenerationStats && stats}

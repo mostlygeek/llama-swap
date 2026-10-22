@@ -296,6 +296,18 @@ cmd: |
   --port ${PORT}
 ```
 
+### eSpeak-ng
+
+Kokoro, SanoTTS and Inflect use eSpeak-ng to turn text into phonemes. audio.cpp
+is built with `AUDIOCPP_STATIC_ESPEAK=ON`, so eSpeak-ng 1.52.0 is linked into
+`audiocpp_server` and `audiocpp_cli` and no shared library is needed. Its data
+is installed unpacked at `/usr/local/bin/espeak-ng-data`, where audio.cpp looks
+for it by default, so these models need no eSpeak settings in the config.
+Nothing is written to `$HOME` at runtime.
+
+eSpeak-ng is GPL-3.0-or-later. Its license and the source archive it was built
+from are in `/usr/local/share/audiocpp/licenses/espeak-ng`.
+
 ### CUDA version
 
 The CUDA toolkit the projects compile against and the runtime libraries the
@@ -317,14 +329,19 @@ from `nvcc` altogether and those cards still need an image:
 
 | image | platform | CUDA | `CMAKE_CUDA_ARCHITECTURES` | covers |
 |---|---|---|---|---|
-| `unified-cuda` | amd64 | 12.9.1 | `60;61;75;86;89` | Pascal (P100, GTX 10xx, P40), Turing, Ampere, Ada |
+| `unified-cuda` | amd64 | 12.9.1 | `60;61;70;75;86;89` | Pascal (P100, GTX 10xx, P40), Volta (V100), Turing, Ampere, Ada |
 | `unified-cuda13` | amd64 | 13.3.1 | `80;86;89;90;100;120` | Ampere (A100, RTX 30xx), Ada (RTX 40xx), Hopper (H100), Blackwell (100 on datacenter parts, 120 on GeForce RTX 50xx and RTX PRO) |
 | `unified-cuda13` | arm64 | 13.3.1 | `90;100;120;121` | GB10 (DGX Spark) at 121, GH200 at 90, GB200 at 100, and a discrete GeForce or RTX PRO card in an aarch64 host at 120 |
 
 Those are the compute capabilities compiled as SASS. For most entries CMake also
 emits PTX, so an architecture above one of them still runs by JIT-compiling that
 PTX — it pays that cost on first load and misses arch-specific kernels. On
-`unified-cuda` that covers Volta (70), Ampere (80) and Hopper (90).
+`unified-cuda` that covers Ampere (80) and Hopper (90).
+
+That fallback does not work for every project. ik_llama.cpp picks its WMMA
+flash-attention kernel from the GPU's compute capability, so on a Volta card
+running the sm_61 PTX it launches a kernel that was never compiled and aborts
+(issue #1185). That is why `70` is compiled natively on `unified-cuda`.
 
 Blackwell is the exception, in two ways that both matter when editing these
 lists.

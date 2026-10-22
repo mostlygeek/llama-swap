@@ -137,7 +137,7 @@ for arg in "$@"; do
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
             echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
-            echo "                       (default: 60;61;75;86;89 for --cuda,"
+            echo "                       (default: 60;61;70;75;86;89 for --cuda,"
             echo "                       80;86;89;90;100;120 for --cuda13 on amd64,"
             echo "                       90;100;120;121 for --cuda13 on arm64)"
             echo "  CUDA_VERSION         CUDA toolkit/runtime version as an nvidia/cuda image tag"
@@ -228,7 +228,7 @@ case "${VARIANT}:${ARCH}" in
         ;;
     *)
         CUDA_VERSION="${CUDA_VERSION:-12.9.1}"
-        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
+        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;70;75;86;89}"
         ;;
 esac
 
@@ -784,7 +784,21 @@ if ! docker run "${SMOKE_ARGS[@]}" --entrypoint audiocpp_server "${RUNTIME_TAG}"
     exit 1
 fi
 
-echo "audio.cpp verified: deployment build (compiled model spec catalog), binary runs"
+# Kokoro, SanoTTS and Inflect phonemize with the eSpeak-ng linked into
+# audio.cpp. It reads its data from espeak-ng-data next to the executable; a
+# packed espeak-ng-data.bin there would be used instead and unpacked into
+# $HOME/.cache, which is not writable in every image.
+if ! docker run --rm --entrypoint sh "${RUNTIME_TAG}" -c \
+        'test -f /usr/local/bin/espeak-ng-data/phontab &&
+         test -f /usr/local/bin/espeak-ng-data/en_dict &&
+         test ! -e /usr/local/bin/espeak-ng-data.bin &&
+         test -f /usr/local/share/audiocpp/licenses/espeak-ng/COPYING'; then
+    echo "ERROR: eSpeak-ng data or license files are missing from the image;"
+    echo "       Kokoro and other eSpeak-based audio.cpp models will fail."
+    exit 1
+fi
+
+echo "audio.cpp verified: deployment build (compiled model spec catalog), eSpeak-ng data, binary runs"
 
 # The entrypoint turns LLAMA_SWAP_* variables into flags. Point -config at a path
 # that cannot exist and look for it in llama-swap's own output: nothing but

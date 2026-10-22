@@ -1,10 +1,10 @@
 ---
 title: Writing the cmd for a model
-summary: Minimal model config using cmd and ${PORT}, plus proxy, Docker, and llama-server's --jinja flag.
+summary: Minimal model config using cmd and ${PORT}, plus proxy, checkEndpoint loading progress, Docker, and llama-server's --jinja flag.
 category: guides
-tags: [cmd, port, proxy, model-id, check-endpoint, tools, tool-calling, jinja, llama-server, minimal, configuration, getting-started, docker, container]
-config_keys: [models.*.cmd, models.*.proxy, models.*.checkEndpoint, models.*.env, startPort]
-updated: 2026-08-25
+tags: [cmd, port, proxy, model-id, check-endpoint, health-check, loading-progress, tools, tool-calling, jinja, llama-server, minimal, configuration, getting-started, docker, container]
+config_keys: [models.*.cmd, models.*.proxy, models.*.checkEndpoint, models.*.env, startPort, healthCheckTimeout]
+updated: 2026-10-07
 ---
 
 # Writing the `cmd` for a model
@@ -90,6 +90,38 @@ Set `checkEndpoint: "none"` to skip health checking entirely — llama-swap then
 forwards the first request immediately, which usually means it fails while the
 server is still loading weights. Only use it for servers with no usable
 readiness endpoint.
+
+### Loading progress
+
+While the server is not ready, it can report how far along it is by answering
+the health check with a non-200 status and a JSON body like this:
+
+```json
+{"progress": 0.42, "message": "loading tensors 12/28"}
+```
+
+- `progress` is the fraction loaded, from `0` to `1`. Values outside that
+  range are clamped, so a percentage such as `42` reads as fully loaded.
+- `message` is a short description of the current step. llama-swap keeps the
+  first 1024 characters.
+- Either field can be left out. A body with neither, or one that is not JSON,
+  is treated as a plain "not ready yet". llama-server's own loading response
+  falls in this group.
+
+The Models page and the model's detail page show the percentage, a progress
+bar and the message while the model starts.
+
+Each time the reported `progress` value changes, llama-swap restarts the
+`healthCheckTimeout` countdown. The timeout then limits how long a load may go
+*without progress*, not how long it may take in total, so a large model that
+keeps reporting progress is never cut off. A server whose `progress` stops
+changing fails with `health check timed out after ... without loading
+progress`, even if its `message` keeps changing (an ETA countdown, say).
+
+Without `progress`, the timeout works as usual: the server must return 200
+within `healthCheckTimeout`. A `message` on its own is shown in the UI but
+does not extend the timeout. Set `healthCheckTimeout` longer than any loading
+step during which `progress` does not move.
 
 ## Environment variables
 

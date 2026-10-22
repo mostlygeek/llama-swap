@@ -35,7 +35,8 @@ type serveConfig struct {
 	Requests       map[string]string // resource name -> quantity
 	Limits         map[string]string // resource name -> quantity
 	Env            []envVar
-	GPUs           map[string]string // resource name -> quantity (requests AND limits)
+	GPUs           map[string]string   // resource name -> quantity (requests AND limits)
+	ResourceClaims []resourceClaimSpec // existing DRA ResourceClaims attached to the pod
 	NodeSel        map[string]string
 	Tolerations    []toleration
 	Volumes        []volumeSpec
@@ -144,6 +145,7 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 				},
 				Spec: corev1.PodSpec{
 					Containers:                    []corev1.Container{container},
+					ResourceClaims:                c.renderResourceClaims(),
 					Volumes:                       volumes,
 					NodeSelector:                  nodeSel,
 					Tolerations:                   c.renderTolerations(),
@@ -237,10 +239,26 @@ func (c *serveConfig) renderResources() (corev1.ResourceRequirements, error) {
 		}
 		limits[corev1.ResourceName(k)] = qty
 	}
-	if len(requests) == 0 && len(limits) == 0 {
-		return corev1.ResourceRequirements{}, nil
+	var out corev1.ResourceRequirements
+	if len(requests) > 0 || len(limits) > 0 {
+		out.Requests, out.Limits = requests, limits
 	}
-	return corev1.ResourceRequirements{Requests: requests, Limits: limits}, nil
+	// Each --resource-claim is also listed on the container: a pod-level
+	// claim only reaches the containers that name it.
+	for _, rc := range c.ResourceClaims {
+		out.Claims = append(out.Claims, corev1.ResourceClaim{Name: rc.Name})
+	}
+	return out, nil
+}
+
+// renderResourceClaims renders the --resource-claim entries as pod-level
+// claims referencing the existing ResourceClaims by name.
+func (c *serveConfig) renderResourceClaims() []corev1.PodResourceClaim {
+	var out []corev1.PodResourceClaim
+	for _, rc := range c.ResourceClaims {
+		out = append(out, corev1.PodResourceClaim{Name: rc.Name, ResourceClaimName: &rc.Claim})
+	}
+	return out
 }
 
 // renderTolerations Renders the parsed tolerations as corev1.Toleration values.
@@ -282,6 +300,14 @@ func (c *serveConfig) renderVolumes() (volumes []corev1.Volume, mounts []corev1.
 				Name: name,
 				VolumeSource: corev1.VolumeSource{
 					HostPath: &corev1.HostPathVolumeSource{Path: v.Name},
+				},
+			})
+		case volNFS:
+			server, export := nfsSource(v.Name)
+			volumes = append(volumes, corev1.Volume{
+				Name: name,
+				VolumeSource: corev1.VolumeSource{
+					NFS: &corev1.NFSVolumeSource{Server: server, Path: export, ReadOnly: v.ReadOnly},
 				},
 			})
 		default:
@@ -371,8 +397,9 @@ func strPtr(s string) *string {
 // desired one (used by --strict adoption). Every configuration-owned field
 // is compared — the deployment's labels (which carry the extra --label
 // entries), and in the pod template the image, command, args, env, ports,
-// volumes, node selector, tolerations, grace period, probes and resources —
-// so strict mode replaces the Deployment whenever any of them drifted.
+// volumes, resource claims, node selector, tolerations, grace period,
+// probes and resources — so strict mode replaces the Deployment whenever
+// any of them drifted.
 func deploymentSpecMatches(have *appsv1.Deployment, want *appsv1.Deployment) bool {
 	if have == nil || want == nil {
 		return false
@@ -390,6 +417,9 @@ func deploymentSpecMatches(have *appsv1.Deployment, want *appsv1.Deployment) boo
 		return false
 	}
 	if !volumesEqual(hs.Volumes, ws.Volumes) {
+		return false
+	}
+	if !podResourceClaimsEqual(hs.ResourceClaims, ws.ResourceClaims) {
 		return false
 	}
 	if derefInt64(hs.TerminationGracePeriodSeconds) != derefInt64(ws.TerminationGracePeriodSeconds) {
@@ -485,9 +515,57 @@ func envsEqual(a, b []corev1.EnvVar) bool {
 	return true
 }
 
-// resourcesEqual Reports whether two resource requirement sets are equal (limits and requests).
+// resourcesEqual Reports whether two resource requirement sets are equal (limits, requests and claims).
 func resourcesEqual(a, b corev1.ResourceRequirements) bool {
-	return resourceListEqual(a.Limits, b.Limits) && resourceListEqual(a.Requests, b.Requests)
+	return resourceListEqual(a.Limits, b.Limits) && resourceListEqual(a.Requests, b.Requests) &&
+		containerClaimsEqual(a.Claims, b.Claims)
+}
+
+// containerClaimsEqual compares container resource claims as multisets
+// (order-insensitive).
+func containerClaimsEqual(a, b []corev1.ResourceClaim) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	count := make(map[corev1.ResourceClaim]int, len(a))
+	for _, c := range a {
+		count[c]++
+	}
+	for _, c := range b {
+		if count[c] == 0 {
+			return false
+		}
+		count[c]--
+	}
+	return true
+}
+
+// podResourceClaimsEqual compares pod-level resource claims by name
+// (order-insensitive), matching the referenced ResourceClaim. An entry
+// without one (e.g. a hand-edited claim template) maps to "" and so never
+// matches a rendered claim; a name missing from b is drift, not "".
+func podResourceClaimsEqual(a, b []corev1.PodResourceClaim) bool {
+	byName := func(claims []corev1.PodResourceClaim) map[string]string {
+		m := make(map[string]string, len(claims))
+		for _, rc := range claims {
+			m[rc.Name] = ""
+			if rc.ResourceClaimName != nil {
+				m[rc.Name] = *rc.ResourceClaimName
+			}
+		}
+		return m
+	}
+	ma, mb := byName(a), byName(b)
+	if len(ma) != len(mb) {
+		return false
+	}
+	for k, v := range ma {
+		bv, ok := mb[k]
+		if !ok || bv != v {
+			return false
+		}
+	}
+	return true
 }
 
 // resourceListEqual Reports whether two resource lists hold the same quantities.
@@ -655,6 +733,8 @@ func volumesEqual(a, b []corev1.Volume) bool {
 			return "host:" + v.HostPath.Path
 		case v.EmptyDir != nil:
 			return "emptydir"
+		case v.NFS != nil:
+			return fmt.Sprintf("nfs:%s:%s:%t", v.NFS.Server, v.NFS.Path, v.NFS.ReadOnly)
 		default:
 			return v.Name + ":unknown-source"
 		}

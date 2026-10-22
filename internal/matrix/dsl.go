@@ -30,6 +30,7 @@ const (
 	nodeRef
 	nodeAnd
 	nodeOr
+	nodeEmpty
 )
 
 type node struct {
@@ -66,7 +67,9 @@ func tokenize(input string) ([]token, error) {
 		case '+':
 			i++
 			start := i
-			for i < len(runes) && isIdentChar(runes[i]) {
+			// Namespaced set references (e.g. +auto:orphans) allow colons.
+			// Bare model/var identifiers keep their existing grammar.
+			for i < len(runes) && (isIdentChar(runes[i]) || runes[i] == ':') {
 				i++
 			}
 			if i == start {

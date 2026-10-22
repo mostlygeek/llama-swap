@@ -116,12 +116,13 @@ release:
 # Get the highest tag in v{number} format, increment it, and create a new tag
 	@highest_tag=$$(git tag --sort=-v:refname | grep -E '^v[0-9]+$$' | head -n 1 || echo "v0"); \
 	new_tag="v$$(( $${highest_tag#v} + 1 ))"; \
-	echo "Generating changelog entry for: $$new_tag"; \
-	scripts/add-changelog.sh "$$new_tag"; \
-	git add CHANGELOG.md; \
-	git commit -m "changelog: $$new_tag"; \
+	echo "Checking for a changelog entry for: $$new_tag"; \
+	if ! grep -qE "^## $$new_tag( |$$)" CHANGELOG.md; then \
+		echo "Error: CHANGELOG.md has no entry for $$new_tag. Add a '## $$new_tag' section and commit it." >&2; \
+		exit 1; \
+	fi; \
 	echo "tagging new version: $$new_tag"; \
-	git tag "$$new_tag";
+	git tag "$$new_tag"
 
 GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
 GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)

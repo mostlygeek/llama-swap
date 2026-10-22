@@ -235,6 +235,35 @@ models:
     ttl: 30m
 ```
 
+#### GPU (Dynamic Resource Allocation, existing `ResourceClaim`)
+
+On a cluster where the GPU driver publishes devices through DRA (e.g. the
+NVIDIA DRA driver) instead of a device plugin, there is no `nvidia.com/gpu`
+resource to request. Create a `ResourceClaim` in the namespace and attach it
+with `--resource-claim`; the scheduler places the pod on the node holding
+the allocated device. Pods that reference the same claim share its device.
+
+```yaml
+models:
+  qwen25:
+    proxy: 127.0.0.1:${PORT}
+    cmd: |
+      kubeswap serve
+      --listen 127.0.0.1:${PORT}
+      --model qwen25
+      --namespace llama-swap
+      --image ghcr.io/mostlygeek/llama-swap:unified-cuda13
+      --command llama-server
+      --resource-claim gpu=single-gpu
+      --volume pvc:llama-swap-models:/models:ro
+      --
+      -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
+      --port 8080
+      --ctx-size 4096
+    cmdStop: kubeswap delete --model qwen25 --namespace llama-swap
+    ttl: 30m
+```
+
 #### CPU (no `--gpu`, no node selector; lavapipe Vulkan works)
 
 ```yaml
@@ -463,6 +492,8 @@ literal text.
   Hostpath volumes escape the namespace boundary (the pod reads and,
   without `:ro`, writes that part of the node), so kubeswap logs a
   warning when one is used.
+- `nfs:nas.lan/export/models:/models:ro` — NFS export mounted directly
+  (`server/export`), with no PersistentVolume or PVC to create.
 
 PVCs that already exist are adopted as-is (a shared model cache is typically
 pre-created once, RWX, by the operator); missing ones are created with
@@ -534,6 +565,7 @@ in-cluster config else standard kubeconfig rules):
 | `--probe-timeout` | `5s` | readiness/liveness probe request timeout |
 | `--startup-timeout` | `10m` | model loading time the **startup probe** tolerates before the pod restarts; it also gates readiness/liveness until the backend answers once (llama-swap's global `healthCheckTimeout` should be at least this long) |
 | `--gpu` | — | GPU resource, e.g. `amd.com/gpu=1` (sets requests **and** limits — GPUs are exclusive) |
+| `--resource-claim` | — | attach an existing DRA ResourceClaim `name=claim` to the pod and the container, e.g. `gpu=my-gpu-claim` (repeatable; `name` is a DNS-1123 label, unique per pod) |
 | `--request` | — | resource request `name=quantity`, e.g. `cpu=2`, `memory=4Gi` (repeatable; overrides `--gpu` for the same key) |
 | `--limit` | — | resource limit `name=quantity`, e.g. `cpu=4` (repeatable; overrides `--gpu` for the same key) |
 | `--service-port` | — | extra Service port `name:port` (repeatable; e.g. expose backend metrics) |
@@ -541,7 +573,7 @@ in-cluster config else standard kubeconfig rules):
 | `--node-selector` | — | `key=value`, repeatable |
 | `--toleration` | — | `key:operator:value:effect` (operator Equal or Exists, default Equal; effect NoSchedule/PreferNoSchedule/NoExecute or empty for any effect; value must be empty with Exists; key must not be empty with Equal), repeatable |
 | `--label` | — | extra pod label `K=V`, repeatable; `llama-swap.io/managed-by`, `llama-swap.io/model`, `llama-swap.io/deployment` and `app.kubernetes.io/name` are reserved |
-| `--volume` | — | `pvc:name:path[:ro]`, `emptydir:name:path[:ro]` or `hostpath:nodePath:mountPath[:ro]`, repeatable |
+| `--volume` | — | `pvc:name:path[:ro]`, `emptydir:name:path[:ro]` or `hostpath:nodePath:mountPath[:ro]` or `nfs:server/export:mountPath[:ro]`, repeatable |
 | `--pvc-size` | `1Gi` | size for PVCs kubeswap must create |
 | `--pvc-class` | cluster default | StorageClass for created PVCs |
 | `--pvc-access-mode` | `rwo` | `rwo` or `rwx` for created PVCs |

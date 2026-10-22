@@ -365,9 +365,19 @@ func (b *baseRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
 // is a snapshot, so this is safe to call without the run loop.
 func (b *baseRouter) RunningModels() map[string]process.ProcessState {
 	running := make(map[string]process.ProcessState)
+	for id, st := range b.RunningStatus() {
+		running[id] = st.State
+	}
+	return running
+}
+
+// RunningStatus returns the status snapshot of every process that is not
+// stopped or shut down.
+func (b *baseRouter) RunningStatus() map[string]process.Status {
+	running := make(map[string]process.Status)
 	for id, p := range b.processes {
-		st := p.State()
-		if st == process.StateStopped || st == process.StateShutdown {
+		st := p.Status()
+		if st.State == process.StateStopped || st.State == process.StateShutdown {
 			continue
 		}
 		running[id] = st

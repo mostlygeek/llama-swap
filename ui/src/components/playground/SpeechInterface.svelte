@@ -1,5 +1,6 @@
 <script lang="ts">
   import { hasListedModels } from "../../stores/api";
+  import { apiUrl } from "../../lib/apiPath";
   import { persistentStore } from "../../stores/persistent";
   import { createPlaygroundInterface } from "../../lib/playgroundInterface";
   import { generateSpeech } from "../../lib/speechApi";
@@ -100,7 +101,7 @@
     isLoadingVoices = true;
 
     try {
-      const response = await fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`, {
+      const response = await fetch(apiUrl(`/v1/audio/voices?model=${encodeURIComponent(model)}`), {
         cache: "no-store",
         headers: playgroundSessionHeaders,
       });
@@ -133,14 +134,6 @@
       selectedVoiceStore.set(defaultVoices[0]);
     } finally {
       isLoadingVoices = false;
-    }
-  }
-
-  function handleVoiceChange(value: string) {
-    if (value === "(refresh)") {
-      refreshVoices();
-    } else {
-      selectedVoiceStore.set(value);
     }
   }
 
@@ -232,14 +225,13 @@
       <Select.Root
         type="single"
         value={$selectedVoiceStore}
-        onValueChange={(v) => v && handleVoiceChange(v)}
+        onValueChange={(v) => v && selectedVoiceStore.set(v)}
       >
         <Select.Trigger class="h-9 w-40">{$selectedVoiceStore}</Select.Trigger>
         <Select.Content class="max-h-[60vh]">
           {#each availableVoices as voice (voice)}
             <Select.Item value={voice}>{voice}</Select.Item>
           {/each}
-          <Select.Item value="(refresh)">(refresh)</Select.Item>
         </Select.Content>
       </Select.Root>
       {#if $selectedModelStore}

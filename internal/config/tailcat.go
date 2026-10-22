@@ -12,13 +12,15 @@ const TailcatEphemeralKey = "ephemeral"
 
 // TailcatConfig configures the private Tailcat listener and its HTTP policy.
 // The listener identity comes from the startup-only -listen-tailcat flag.
+// TailcatAllowAll in tailcat.allow permits any client holding the connection
+// token. Without it, only listed node keys may make requests.
+const TailcatAllowAll = "*"
+
 type TailcatConfig struct {
 	Allow  []string `yaml:"allow"`
 	Models []string `yaml:"models"`
 	Admin  bool     `yaml:"admin"`
 	Debug  bool     `yaml:"debug"`
-
-	AllowedClients []string `yaml:"-"`
 }
 
 func validatePeerTailcat(peer *rawPeerConfig) error {
@@ -66,6 +68,13 @@ func validateTailcatConfig(cfg *Config) error {
 		seenAllow := make(map[string]struct{}, len(tc.Allow))
 		allowedClients := make([]string, 0, len(tc.Allow))
 		for i, raw := range tc.Allow {
+			if raw == TailcatAllowAll {
+				if _, exists := seenAllow[raw]; !exists {
+					seenAllow[raw] = struct{}{}
+					allowedClients = append(allowedClients, raw)
+				}
+				continue
+			}
 			canonical, err := tailcat.ValidateNodePublic(raw)
 			if err != nil {
 				return fmt.Errorf("tailcat.allow[%d]: invalid node public key: %w", i, err)
@@ -80,7 +89,6 @@ func validateTailcatConfig(cfg *Config) error {
 			allowedClients = append(allowedClients, canonical)
 		}
 		tc.Allow = allowedClients
-		tc.AllowedClients = allowedClients
 
 		validModels := publicTailcatModelIDs(*cfg)
 		seenModels := make(map[string]struct{}, len(tc.Models))

@@ -1,5 +1,6 @@
 import type { SpeechGenerationRequest } from "./types";
 import { playgroundSessionHeaders } from "./playgroundSession";
+import { apiUrl } from "./apiPath";
 
 export async function generateSpeech(
   model: string,
@@ -13,7 +14,7 @@ export async function generateSpeech(
     voice,
   };
 
-  const response = await fetch("/v1/audio/speech", {
+  const response = await fetch(apiUrl("/v1/audio/speech"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -46,6 +46,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		CaptureBuffer:      5,
 		GlobalTTL:          0,
 		UnloadTimeout:      DEFAULT_UNLOAD_TIMEOUT,
+		MaxRequestBodyMB:   DEFAULT_MAX_REQUEST_BODY_MB,
 		UI: UIConfig{Activity: UIActivityConfig{SessionID: []string{
 			"X-Session-ID",
 			"X-Litellm-Session-Id",
@@ -91,6 +92,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, fmt.Errorf("globalConcurrencyLimit must be >= 0")
 	}
 
+	if config.MaxRequestBodyMB < 1 {
+		return Config{}, fmt.Errorf("maxRequestBodyMB must be >= 1")
+	}
+
 	config.UI.Activity.SessionID = normalizeHeaderNames(config.UI.Activity.SessionID)
 
 	if config.Store != nil {
@@ -109,10 +114,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, fmt.Errorf("security.cors: %w", err)
 	}
 
-	switch config.LogToStdout {
-	case LogToStdoutProxy, LogToStdoutUpstream, LogToStdoutBoth, LogToStdoutNone:
-	default:
-		return Config{}, fmt.Errorf("logToStdout must be one of: proxy, upstream, both, none")
+	if _, _, _, err := ParseLogToStdout(config.LogToStdout); err != nil {
+		return Config{}, err
 	}
 
 	// Populate the aliases map

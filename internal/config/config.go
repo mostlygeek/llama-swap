@@ -4,18 +4,46 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 const DEFAULT_GROUP_ID = "(default)"
 const DEFAULT_UNLOAD_TIMEOUT = 10
+const DEFAULT_MAX_REQUEST_BODY_MB = 250
 const (
 	LogToStdoutProxy    = "proxy"
 	LogToStdoutUpstream = "upstream"
+	LogToStdoutHTTP     = "http"
 	LogToStdoutBoth     = "both"
 	LogToStdoutNone     = "none"
 )
+
+// ParseLogToStdout reports which log streams logToStdout sends to stdout. It
+// accepts "none", "both" (every stream), or a comma separated list of
+// "proxy", "upstream" and "http".
+func ParseLogToStdout(value string) (proxy, upstream, http bool, err error) {
+	switch strings.TrimSpace(value) {
+	case LogToStdoutNone:
+		return false, false, false, nil
+	case LogToStdoutBoth:
+		return true, true, true, nil
+	}
+	for item := range strings.SplitSeq(value, ",") {
+		switch strings.TrimSpace(item) {
+		case LogToStdoutProxy:
+			proxy = true
+		case LogToStdoutUpstream:
+			upstream = true
+		case LogToStdoutHTTP:
+			http = true
+		default:
+			return false, false, false, fmt.Errorf("logToStdout must be none, both, or a comma separated list of proxy, upstream, http; got %q", value)
+		}
+	}
+	return proxy, upstream, http, nil
+}
 
 type MacroEntry struct {
 	Name  string
@@ -174,6 +202,10 @@ type Config struct {
 	// once across all models. 0 (default) means no limit. See issue #1086.
 	GlobalConcurrencyLimit int `yaml:"globalConcurrencyLimit"`
 
+	// MaxRequestBodyMB caps the size, in megabytes, of request bodies on
+	// model-dispatched POSTs. Larger requests get HTTP 413.
+	MaxRequestBodyMB int `yaml:"maxRequestBodyMB"`
+
 	// routing is the canonical source for swap/scheduling configuration.
 	// New code must read Routing, never the backwards-compat fields below.
 	Routing RoutingConfig `yaml:"routing"`
@@ -229,6 +261,16 @@ func (c *Config) SetTailcatEnabled(enabled bool) {
 // TailcatEnabled reports whether this process has a Tailcat listener.
 func (c Config) TailcatEnabled() bool {
 	return c.tailcatEnabled
+}
+
+// MaxRequestBodyBytes returns MaxRequestBodyMB in bytes. Configs not built by
+// LoadConfigFromReader leave MaxRequestBodyMB at 0 and get the default.
+func (c Config) MaxRequestBodyBytes() int64 {
+	mb := c.MaxRequestBodyMB
+	if mb <= 0 {
+		mb = DEFAULT_MAX_REQUEST_BODY_MB
+	}
+	return int64(mb) << 20
 }
 
 // RoutingConfig is the canonical, normalized routing/scheduling configuration.

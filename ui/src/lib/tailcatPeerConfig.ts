@@ -14,7 +14,7 @@ export function peerConfigYaml(address: string, models: string[]): string {
   const modelLines = models.map((model) => `      - ${yamlQuote(model)}`).join("\n");
   // tailcatKey is commented out: without it, connecting uses an ephemeral
   // client identity, so nobody's private key ends up in a shared snippet.
-  // The commented line shows how to generate a stable one if this server
-  // allowlists callers.
-  return `peers:\n  friend:\n    proxy: tailcat://${address}\n    # generate with: tailcat genkey --client --key=/path/to/client.private.json\n    # tailcatKey: /path/to/client.private.json\n    models:\n${modelLines}\n`;
+  // An ephemeral identity only works when this server's tailcat.allow is
+  // "*"; otherwise the caller needs a stable key listed in tailcat.allow.
+  return `peers:\n  friend:\n    proxy: tailcat://${address}\n    # required unless this server's tailcat.allow is "*"; add the key's printpub output to it\n    # generate with: tailcat genkey --client --key=/path/to/client.private.json\n    # tailcatKey: /path/to/client.private.json\n    models:\n${modelLines}\n`;
 }

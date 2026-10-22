@@ -57,6 +57,39 @@ func TestKubeswap_ParseGPUs(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ParseResourceClaims Verifies resource-claim parsing: the API server's name rules and duplicate names.
+func TestKubeswap_ParseResourceClaims(t *testing.T) {
+	got, err := parseResourceClaims([]string{"gpu=pro2000", "nic=rdma.claim-0"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []resourceClaimSpec{{Name: "gpu", Claim: "pro2000"}, {Name: "nic", Claim: "rdma.claim-0"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	for _, bad := range []string{
+		"gpu",                                // no claim
+		"=pro2000",                           // empty name
+		"gpu=",                               // empty claim
+		"g.pu=pro2000",                       // the pod-level name is a DNS-1123 label: no dots
+		"GPU=pro2000",                        // uppercase name
+		"gpu=Pro2000",                        // uppercase claim
+		"gpu=pro_2000",                       // '_' is not a subdomain character
+		strings.Repeat("g", 64) + "=pro2000", // 64-character label
+	} {
+		if _, err := parseResourceClaims([]string{bad}); err == nil {
+			t.Errorf("expected error for %q", bad)
+		}
+	}
+	if _, err := parseResourceClaims([]string{"gpu=a", "gpu=b"}); err == nil {
+		t.Error("expected error for duplicate name")
+	}
+	// Two pod-level names may reference the same claim.
+	if _, err := parseResourceClaims([]string{"a=shared", "b=shared"}); err != nil {
+		t.Errorf("distinct names on one claim should be valid: %v", err)
+	}
+}
+
 // TestKubeswap_ParseTolerations Verifies toleration parsing: operator/effect validation and empty-effect preservation.
 func TestKubeswap_ParseTolerations(t *testing.T) {
 	got, err := parseTolerations([]string{"dedicated:Exists::NoSchedule"})
@@ -100,12 +133,13 @@ func TestKubeswap_ParseTolerations(t *testing.T) {
 	}
 }
 
-// TestKubeswap_ParseVolumes Verifies volume parsing for the pvc, emptydir and hostpath forms.
+// TestKubeswap_ParseVolumes Verifies volume parsing for the pvc, emptydir, hostpath and nfs forms.
 func TestKubeswap_ParseVolumes(t *testing.T) {
 	got, err := parseVolumes([]string{
 		"pvc:llama-swap-models:/models:ro",
 		"emptydir:slots:/slots",
 		"hostpath:/data/models:/models:ro",
+		"nfs:nas.lan/export/models:/library:ro",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -114,11 +148,12 @@ func TestKubeswap_ParseVolumes(t *testing.T) {
 		{Kind: volPVC, Name: "llama-swap-models", Path: "/models", ReadOnly: true},
 		{Kind: volEmptyDir, Name: "slots", Path: "/slots"},
 		{Kind: volHostPath, Name: "/data/models", Path: "/models", ReadOnly: true},
+		{Kind: volNFS, Name: "nas.lan/export/models", Path: "/library", ReadOnly: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	for _, bad := range []string{"pvc:only-two", "blob:foo:/mnt", "pvc:/models", "pvc:claim:/models:rw"} {
+	for _, bad := range []string{"pvc:only-two", "blob:foo:/mnt", "pvc:/models", "pvc:claim:/models:rw", "nfs:nas.lan:/library", "nfs:/export:/library", "nfs:nas.lan/:/library"} {
 		if _, err := parseVolumes([]string{bad}); err == nil {
 			t.Errorf("expected error for %q", bad)
 		}

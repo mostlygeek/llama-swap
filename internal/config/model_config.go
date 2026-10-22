@@ -9,10 +9,13 @@ import (
 const (
 	MODEL_CONFIG_DEFAULT_TTL   = -1
 	MODEL_CONFIG_DEFAULT_PROXY = "http://localhost:${PORT}"
-	comfyUIConcurrencyLimit    = 50
+	comfyUIConcurrencyLimit    = 999
 
 	// ComfyUIModelID identifies the model used by the /comfyui endpoint.
 	ComfyUIModelID = "comfyui_auto"
+
+	// AudioCppModelID identifies the model used by the /audiocpp endpoint.
+	AudioCppModelID = "audiocpp_auto"
 )
 
 var validModalities = map[string]struct{}{
@@ -20,6 +23,16 @@ var validModalities = map[string]struct{}{
 	"audio": {},
 	"image": {},
 	"video": {},
+}
+
+// validOutModalities adds "decisions", the only output of llama.cpp decision
+// models, which answer /v1/systemone and generate no text.
+var validOutModalities = map[string]struct{}{
+	"text":      {},
+	"audio":     {},
+	"image":     {},
+	"video":     {},
+	"decisions": {},
 }
 
 // ModelCapConfig defines what modalities and features a model supports.
@@ -31,6 +44,12 @@ type ModelCapConfig struct {
 	Tools    bool     `yaml:"tools" json:"tools,omitempty"`
 	Reranker bool     `yaml:"reranker" json:"reranker,omitempty"`
 	Context  int      `yaml:"context" json:"context,omitempty"`
+
+	// Voices, when set, is returned as the response to
+	// GET /v1/audio/voices?model={id} instead of asking the upstream. It is
+	// never discovered and never rendered into /v1/models, so Empty and Merge
+	// leave it alone.
+	Voices []string `yaml:"voices" json:"-"`
 
 	// DisableAuto turns off automatic capability discovery for this model.
 	// It is a switch, not a capability, so Empty ignores it and it is never
@@ -83,8 +102,8 @@ func (c ModelCapConfig) Validate() error {
 		}
 	}
 	for _, m := range c.Out {
-		if _, ok := validModalities[m]; !ok {
-			return fmt.Errorf("capabilities.out: invalid modality %q, must be one of: text, audio, image, video", m)
+		if _, ok := validOutModalities[m]; !ok {
+			return fmt.Errorf("capabilities.out: invalid modality %q, must be one of: text, audio, image, video, decisions", m)
 		}
 	}
 	if c.Context < 0 {
@@ -146,6 +165,11 @@ type ModelConfig struct {
 
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
+
+	// DisableKeepAlives opens a new upstream connection for every request
+	// instead of reusing pooled ones. Works around upstreams that advertise
+	// keep-alive and then close the connection (#1205).
+	DisableKeepAlives bool `yaml:"disableKeepAlives"`
 
 	// Compatibility settings for upstream applications.
 	Compat CompatConfig `yaml:"compat"`

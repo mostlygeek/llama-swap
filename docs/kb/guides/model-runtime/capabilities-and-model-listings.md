@@ -2,9 +2,9 @@
 title: Model capabilities and model listings
 summary: Advertise images, tools and context length in /v1/models, automatically or by hand.
 category: guides
-tags: [capabilities, models, tools, vision, context, autodetect, llama-server, vllm, halogen, playground]
-config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, store.path]
-updated: 2026-09-22
+tags: [capabilities, voices, speech, models, tools, vision, context, autodetect, llama-server, vllm, halogen, playground, decisions]
+config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, models.*.capabilities.voices, store.path]
+updated: 2026-10-10
 ---
 
 # Model capabilities and model listings
@@ -47,6 +47,7 @@ What each server can report:
 | image input | yes | no | yes |
 | audio or video input | yes | no | no |
 | tools | yes, from the chat template | no | yes |
+| decision model output | yes, from `/v1/models` | no | no |
 | reranker | no | no | no |
 
 llama-server is read from `/props`, and halogen-flash-server from its
@@ -54,6 +55,12 @@ llama-server is read from `/props`, and halogen-flash-server from its
 the running build accepts. Both vary per deployment: halogen serves images
 only when it was started with a vision tower, and that is read rather than
 assumed.
+
+Decision models are the one thing `/props` cannot show. They answer
+`/v1/systemone` and generate no text, so llama-server marks them with
+`output_modalities: ["decisions"]` in its `/v1/models` instead, and llama-swap
+reports `out: [decisions]` and no tools for them, whatever their chat template
+says.
 
 vLLM is the thin one. Nothing it serves says whether it was started with
 `--enable-auto-tool-choice`, or whether the model takes images, so set those
@@ -109,6 +116,35 @@ models:
 
 With `disableAuto: true` the model advertises exactly what you wrote, and
 nothing else. On its own, with no other fields, it advertises nothing.
+
+## Setting the voice list for a speech model
+
+`GET /v1/audio/voices?model={id}` normally goes to the upstream server.
+`capabilities.voices` is an override: set it to answer the request from the
+config instead:
+
+```yaml
+models:
+  tts:
+    cmd: my-tts-server --port ${PORT}
+    capabilities:
+      in: [text]
+      out: [audio]
+      voices: ["voicea", "voiceb", "voicec"]
+```
+
+```bash
+curl -s 'localhost:8080/v1/audio/voices?model=tts'
+# {"model":"tts","voices":["voicea","voiceb","voicec"]}
+```
+
+The response is a JSON object with a `voices` array and the `model` id. OpenAI
+has no endpoint for listing voices, so this is a llama-swap convention, not an
+OpenAI format. The Playground's speech tab reads it. The model is not started to
+answer, and voices are not shown in `/v1/models`.
+When `voices` is empty or unset there is no override, and the request goes to
+the upstream server as before, which starts the model if it is not running.
+This applies to local models only, not peers.
 
 ## How the Playground uses this
 

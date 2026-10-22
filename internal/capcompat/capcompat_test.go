@@ -48,6 +48,14 @@ import (
 // halogen files are that same capture with vision turned off, and with the
 // supported list and tool-call block removed, to cover builds configured
 // differently. Their derivation is noted where they are used.
+//
+// gufo/v1_models.json is a verbatim capture from a running Gufo instance
+// (AMD Strix Halo gfx1151).
+//
+// v1_models_capture_clef.json and props_capture_clef.json are one capture from
+// a single llama-server (b11429) serving the Clef-Flash decision model. The
+// listing is verbatim; the /props file keeps only modalities,
+// default_generation_settings and chat_template_caps.
 
 // fixture reads a testdata file.
 func fixture(t *testing.T, parts ...string) []byte {
@@ -121,6 +129,24 @@ func TestCapcompat_DetectLlamaServerVision(t *testing.T) {
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 	assert.False(t, info.Capabilities.Tools, "template reports no tool support")
 	assert.Equal(t, 8192, info.Capabilities.Context)
+}
+
+// A decision model answers /v1/systemone and generates no text. Only the
+// listing says so, through output_modalities; /props looks like a chat model
+// and even reports tool support from its chat template.
+func TestCapcompat_DetectLlamaServerDecisionModel(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models_capture_clef.json"),
+		"/props":     fixture(t, "llama-server", "props_capture_clef.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "Clef-Flash-Q8_0")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"text", "image", "video"}, info.Capabilities.In)
+	assert.Equal(t, []string{"decisions"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools, "no text output, so no tool calls")
+	assert.Equal(t, 16384, info.Capabilities.Context)
 }
 
 func TestCapcompat_DetectLlamaServerIgnoresUnmappedModalities(t *testing.T) {
@@ -237,7 +263,7 @@ func TestCapcompat_DetectVLLM(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "meta-llama/Llama-3.1-8B-Instruct")
 	require.NoError(t, err)
 
-	assert.Equal(t, "vllm", info.Upstream)
+	assert.Equal(t, "default", info.Upstream)
 	assert.Equal(t, 131072, info.Capabilities.Context)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
@@ -257,7 +283,7 @@ func TestCapcompat_DetectVLLMCapture(t *testing.T) {
 		info, err := Detect(context.Background(), up.client(t), "qwen3-4b-vllm")
 		require.NoError(t, err)
 
-		assert.Equal(t, "vllm", info.Upstream)
+		assert.Equal(t, "default", info.Upstream)
 		assert.Equal(t, 40960, info.Capabilities.Context)
 		assert.Equal(t, []string{"text"}, info.Capabilities.In)
 		assert.Equal(t, []string{"text"}, info.Capabilities.Out)
@@ -302,6 +328,23 @@ func TestCapcompat_VLLMSkipsLoRAAdapters(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 4096, info.Capabilities.Context)
 	})
+}
+
+func TestCapcompat_DetectGufo(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "gufo", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "qwen3.8-flash-next-gufo")
+	require.NoError(t, err)
+
+	assert.Equal(t, "default", info.Upstream)
+	assert.Equal(t, 262144, info.Capabilities.Context)
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools, "gufo exposes nothing about tool support in /v1/models")
+	assert.Equal(t, 0, up.hits["/props"], "gufo has no /props to read")
+	require.NoError(t, info.Capabilities.Validate())
 }
 
 func TestCapcompat_DetectHalogen(t *testing.T) {

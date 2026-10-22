@@ -395,10 +395,10 @@ func (s *Server) startPreload() {
 	go func() {
 		for _, modelID := range models {
 			if !s.local.Handles(modelID) {
-				s.proxylog.Warnf("preload: model %s is not a local model, skipping", modelID)
+				s.logs.ProxyLogs.Warnf("preload: model %s is not a local model, skipping", modelID)
 				continue
 			}
-			s.proxylog.Infof("preloading model: %s", modelID)
+			s.logs.ProxyLogs.Infof("preloading model: %s", modelID)
 
 			req, err := http.NewRequestWithContext(s.shutdownCtx, http.MethodGet, "/", nil)
 			if err != nil {
@@ -411,7 +411,7 @@ func (s *Server) startPreload() {
 
 			success := dw.status < http.StatusBadRequest
 			if !success {
-				s.proxylog.Errorf("failed to preload model %s: status %d", modelID, dw.status)
+				s.logs.ProxyLogs.Errorf("failed to preload model %s: status %d", modelID, dw.status)
 			}
 			event.Emit(swaputil.ModelPreloadedEvent{ModelName: modelID, Success: success})
 		}
@@ -434,12 +434,28 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func handleRootRedirect(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/ui", http.StatusFound)
+// redirectRelative sends a redirect whose Location header stays relative to
+// the URL the client requested. http.Redirect resolves its destination
+// against the server-visible request path, which drops the path prefix when
+// llama-swap runs behind a prefix-stripping reverse proxy (a browser resolves
+// a relative Location against the URL it actually asked for, so the prefix
+// survives). Target must not start with "/".
+func redirectRelative(w http.ResponseWriter, target string, code int) {
+	w.Header().Set("Location", target)
+	w.WriteHeader(code)
 }
 
+func handleRootRedirect(w http.ResponseWriter, r *http.Request) {
+	redirectRelative(w, "ui/", http.StatusFound)
+}
+
+// handleUpstreamRedirect sends /upstream to the Models page. The target uses
+// the hash router (ui/#/models) so the document stays mounted at <prefix>/ui/:
+// a path route (ui/models) would leave the UI's prefix detection in
+// ui/src/lib/apiPath.ts unable to recover the proxy prefix, disconnecting the
+// page behind a prefix-stripping reverse proxy.
 func handleUpstreamRedirect(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/ui/models", http.StatusFound)
+	redirectRelative(w, "ui/#/models", http.StatusFound)
 }
 
 // handleUpstream proxies ANY request under /upstream/<model>/<path> directly to
@@ -454,16 +470,27 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Redirect /upstream/model to /upstream/model/ so relative URLs in upstream
-	// responses resolve. 301 for GET/HEAD, 308 otherwise to preserve the method.
+	// responses resolve. The Location stays relative so the redirect keeps a
+	// reverse proxy's path prefix (see redirectRelative). 301 for GET/HEAD,
+	// 308 otherwise to preserve the method.
+	//
+	// The target is built from the last escaped segment of the requested URL,
+	// not from searchName: a slash name ("author/model") arriving as two
+	// segments would resolve "author/model/" against /upstream/author/ and
+	// double the path, and a colon alias ("model1:high") would parse as a URL
+	// scheme (RFC 3986 4.2). "./<segment>/" stays path-relative for both, and
+	// reusing the escaped segment keeps %2F-encoded names redirecting to the
+	// URL the client actually requested.
 	if remainingPath == "/" && !strings.HasSuffix(r.URL.Path, "/") {
-		newPath := "/upstream/" + searchName + "/"
+		escapedPath := r.URL.EscapedPath()
+		newPath := "./" + escapedPath[strings.LastIndex(escapedPath, "/")+1:] + "/"
 		if r.URL.RawQuery != "" {
 			newPath += "?" + r.URL.RawQuery
 		}
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
-			http.Redirect(w, r, newPath, http.StatusMovedPermanently)
+			redirectRelative(w, newPath, http.StatusMovedPermanently)
 		} else {
-			http.Redirect(w, r, newPath, http.StatusPermanentRedirect)
+			redirectRelative(w, newPath, http.StatusPermanentRedirect)
 		}
 		return
 	}

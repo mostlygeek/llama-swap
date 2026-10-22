@@ -11,13 +11,16 @@ FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04
 # Compute capabilities compiled as SASS, shared by every CUDA build.
 # 60/61 are Pascal (P100, GTX 10xx, P40) -- the oldest architecture ggml still
 # supports -- through 89 (Ada). CMake emits PTX alongside SASS for each entry,
-# so architectures between and above the list (70 Volta, 80 Ampere, 90 Hopper,
-# 100 and 120 Blackwell) still run by JIT-compiling the nearest lower PTX; they
-# just pay a first-run JIT cost and miss arch-specific kernels. Add those
-# numbers here to compile them natively, at the cost of build time in every
-# project. Changing this changes this file's hash, which rebuilds the base and
+# so architectures between and above the list (80 Ampere, 90 Hopper, 100 and
+# 120 Blackwell) still run by JIT-compiling the nearest lower PTX; they just pay
+# a first-run JIT cost and miss arch-specific kernels. That fallback is not safe
+# for every project: ik_llama.cpp selects its WMMA flash-attention kernel from
+# the device's compute capability, so on Volta it launches a kernel the sm_61
+# PTX does not contain and aborts. 70 (V100) is listed for that reason. Add
+# other numbers here to compile them natively, at the cost of build time in
+# every project. Changing this changes this file's hash, which rebuilds the base and
 # every CUDA project that starts from it.
-ARG CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
+ARG CMAKE_CUDA_ARCHITECTURES="60;61;70;75;86;89"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}
 ENV CCACHE_DIR=/ccache

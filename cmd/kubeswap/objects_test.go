@@ -159,6 +159,49 @@ func TestKubeswap_RenderDeploymentCPU(t *testing.T) {
 	}
 }
 
+// TestKubeswap_RenderDeploymentResourceClaims Verifies --resource-claim renders the pod-level claim and the container reference.
+func TestKubeswap_RenderDeploymentResourceClaims(t *testing.T) {
+	cfg := testConfig()
+	cfg.ResourceClaims = []resourceClaimSpec{{Name: "gpu", Claim: "pro2000"}}
+	dep, err := cfg.renderDeployment()
+	if err != nil {
+		t.Fatalf("renderDeployment: %v", err)
+	}
+	pod := dep.Spec.Template.Spec
+	if len(pod.ResourceClaims) != 1 || pod.ResourceClaims[0].Name != "gpu" ||
+		pod.ResourceClaims[0].ResourceClaimName == nil || *pod.ResourceClaims[0].ResourceClaimName != "pro2000" ||
+		pod.ResourceClaims[0].ResourceClaimTemplateName != nil {
+		t.Errorf("pod resource claims: %+v", pod.ResourceClaims)
+	}
+	c := pod.Containers[0]
+	if len(c.Resources.Claims) != 1 || c.Resources.Claims[0] != (corev1.ResourceClaim{Name: "gpu"}) {
+		t.Errorf("container resource claims: %+v", c.Resources.Claims)
+	}
+	// Claims add to, not replace, the --gpu requests and limits.
+	if got := c.Resources.Limits[corev1.ResourceName("amd.com/gpu")]; got.String() != "1" {
+		t.Errorf("gpu limit: %v", c.Resources.Limits)
+	}
+
+	// A claim alone (no --gpu/--request/--limit) leaves requests and
+	// limits unset.
+	cfg.GPUs = nil
+	dep, err = cfg.renderDeployment()
+	if err != nil {
+		t.Fatalf("renderDeployment: %v", err)
+	}
+	r := dep.Spec.Template.Spec.Containers[0].Resources
+	if r.Requests != nil || r.Limits != nil || len(r.Claims) != 1 {
+		t.Errorf("claim-only resources: %+v", r)
+	}
+
+	// Without --resource-claim nothing is rendered.
+	cfg.ResourceClaims = nil
+	dep, _ = cfg.renderDeployment()
+	if dep.Spec.Template.Spec.ResourceClaims != nil || dep.Spec.Template.Spec.Containers[0].Resources.Claims != nil {
+		t.Errorf("expected no resource claims: %+v", dep.Spec.Template.Spec)
+	}
+}
+
 // TestKubeswap_RenderService Verifies the Service rendered for a model.
 func TestKubeswap_RenderService(t *testing.T) {
 	cfg := testConfig()
@@ -506,6 +549,94 @@ func TestKubeswap_DeploymentSpecMatchesVolumes(t *testing.T) {
 	dep2.Spec.Template.Spec.Volumes[0].PersistentVolumeClaim.ClaimName = "other-pvc"
 	if deploymentSpecMatches(dep, dep2) {
 		t.Error("volume drift should not match")
+	}
+}
+
+// TestKubeswap_RenderDeploymentNFSVolume Verifies an nfs volume renders its server, export and access mode, and that changing any of them is drift.
+func TestKubeswap_RenderDeploymentNFSVolume(t *testing.T) {
+	cfg := testConfig()
+	cfg.Volumes = []volumeSpec{{Kind: volNFS, Name: "nas.lan/export/models", Path: "/library", ReadOnly: true}}
+	dep, err := cfg.renderDeployment()
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	pod := dep.Spec.Template.Spec
+	want := corev1.NFSVolumeSource{Server: "nas.lan", Path: "/export/models", ReadOnly: true}
+	if got := pod.Volumes[0].NFS; got == nil || *got != want {
+		t.Errorf("nfs source = %+v, want %+v", got, want)
+	}
+	if m := pod.Containers[0].VolumeMounts[0]; m.MountPath != "/library" || !m.ReadOnly {
+		t.Errorf("mount = %+v, want read-only /library", m)
+	}
+	for name, mutate := range map[string]func(*corev1.NFSVolumeSource){
+		"server":   func(n *corev1.NFSVolumeSource) { n.Server = "other.lan" },
+		"export":   func(n *corev1.NFSVolumeSource) { n.Path = "/export/other" },
+		"readOnly": func(n *corev1.NFSVolumeSource) { n.ReadOnly = false },
+	} {
+		dep2, _ := cfg.renderDeployment()
+		mutate(dep2.Spec.Template.Spec.Volumes[0].NFS)
+		if deploymentSpecMatches(dep, dep2) {
+			t.Errorf("nfs %s drift should not match", name)
+		}
+	}
+}
+
+// TestKubeswap_DeploymentSpecMatchesResourceClaims Verifies the spec comparison detects pod and container resource-claim drift, ignoring order.
+func TestKubeswap_DeploymentSpecMatchesResourceClaims(t *testing.T) {
+	cfg := testConfig()
+	cfg.ResourceClaims = []resourceClaimSpec{{Name: "gpu", Claim: "pro2000"}, {Name: "nic", Claim: "rdma"}}
+	dep, _ := cfg.renderDeployment()
+
+	// Reordered claims still match.
+	reordered := *cfg
+	reordered.ResourceClaims = []resourceClaimSpec{cfg.ResourceClaims[1], cfg.ResourceClaims[0]}
+	dep2, _ := reordered.renderDeployment()
+	if !deploymentSpecMatches(dep, dep2) {
+		t.Error("reordered resource claims should match")
+	}
+
+	// A different referenced claim is drift.
+	dep2, _ = cfg.renderDeployment()
+	other := "pro4000"
+	dep2.Spec.Template.Spec.ResourceClaims[0].ResourceClaimName = &other
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("referenced claim drift should not match")
+	}
+
+	// A claim template in place of the claim is drift.
+	dep2, _ = cfg.renderDeployment()
+	dep2.Spec.Template.Spec.ResourceClaims[0].ResourceClaimName = nil
+	dep2.Spec.Template.Spec.ResourceClaims[0].ResourceClaimTemplateName = &other
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("claim template in place of the claim should not match")
+	}
+
+	// A removed pod-level claim is drift.
+	dep2, _ = cfg.renderDeployment()
+	dep2.Spec.Template.Spec.ResourceClaims = dep2.Spec.Template.Spec.ResourceClaims[:1]
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("removed pod resource claim should not match")
+	}
+
+	// The container no longer naming a claim is drift.
+	dep2, _ = cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Containers[0].Resources.Claims = dep2.Spec.Template.Spec.Containers[0].Resources.Claims[:1]
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("removed container resource claim should not match")
+	}
+
+	// A container claim narrowed to one request is drift.
+	dep2, _ = cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Containers[0].Resources.Claims[0].Request = "gpu-0"
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("container claim request drift should not match")
+	}
+
+	// A deployment created before --resource-claim was added is drift.
+	cfg.ResourceClaims = nil
+	dep2, _ = cfg.renderDeployment()
+	if deploymentSpecMatches(dep, dep2) || deploymentSpecMatches(dep2, dep) {
+		t.Error("added resource claims should not match")
 	}
 }
 

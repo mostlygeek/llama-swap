@@ -84,6 +84,7 @@
         finalAssistantIdx: number;
         userMessageIdx: number | undefined;
         isCurrent: boolean;
+        interrupted?: "error" | "cancelled";
       };
 
   // name -> friendly label, so tool-call cards can show it without re-deriving.
@@ -169,6 +170,8 @@
         finalAssistantIdx,
         userMessageIdx,
         isCurrent: finalAssistantIdx === messages.length - 1,
+        // A cancel can land on a tool result, so check the whole run.
+        interrupted: group.findLast(({ message }) => message.interrupted)?.message.interrupted,
       });
     }
 
@@ -307,7 +310,7 @@
   }
 
   function appendError(message: string) {
-    patchLast({ content: lastText() + `\n\n**Error:** ${message}` });
+    patchLast({ content: lastText() + `\n\n**Error:** ${message}`, interrupted: "error" });
   }
 
   function handleTurnError(error: unknown) {
@@ -316,6 +319,7 @@
       if (isReasoning && reasoningStartTime > 0) {
         patchLast({ reasoningTimeMs: Date.now() - reasoningStartTime });
       }
+      patchLast({ interrupted: "cancelled" });
       return;
     }
     appendError(error instanceof Error ? error.message : "An error occurred");
@@ -444,13 +448,17 @@
         case "error":
           appendError(event.message);
           break;
+
+        case "done":
+          if (event.reason === "aborted") patchLast({ interrupted: "cancelled" });
+          break;
       }
     }
 
-    // An abort, or a final turn that produced nothing, can leave the trailing
-    // placeholder empty.
+    // A final turn that produced nothing can leave the trailing placeholder
+    // empty. A cancelled one is kept so the card can offer a retry.
     const last = messages[messages.length - 1];
-    if (last?.role === "assistant" && !last.tool_calls?.length && !last.reasoning_content && lastText() === "") {
+    if (last?.role === "assistant" && !last.interrupted && !last.tool_calls?.length && !last.reasoning_content && lastText() === "") {
       messages = messages.slice(0, -1);
     }
   }
@@ -559,6 +567,7 @@
               stats={$showGenerationStats ? item.stats : undefined}
               statsLive={isStreaming && item.isCurrent && $showGenerationStats}
               toolCallCount={item.toolCallCount}
+              interrupted={item.interrupted}
               onRegenerate={!isStreaming && item.userMessageIdx !== undefined
                 ? () => regenerateFromIndex(item.userMessageIdx!)
                 : undefined}

@@ -39,7 +39,7 @@ func (s *Server) onProcessStateChange(e swaputil.ProcessStateChangeEvent) {
 func (s *Server) refreshCapabilities(modelID string, mc config.ModelConfig) {
 	base, err := url.Parse(mc.Proxy)
 	if err != nil {
-		s.proxylog.Debugf("capcompat: <%s> unusable proxy URL %q: %v", modelID, mc.Proxy, err)
+		s.logs.ProxyLogs.Debugf("capcompat: <%s> unusable proxy URL %q: %v", modelID, mc.Proxy, err)
 		return
 	}
 
@@ -56,7 +56,7 @@ func (s *Server) refreshCapabilities(modelID string, mc config.ModelConfig) {
 		// transcription servers with no capability surface, and a model that
 		// stopped again mid-probe is normal. Neither is worth a warning on
 		// every model start.
-		s.proxylog.Debugf("capcompat: <%s> discovery failed: %v", modelID, err)
+		s.logs.ProxyLogs.Debugf("capcompat: <%s> discovery failed: %v", modelID, err)
 		return
 	}
 

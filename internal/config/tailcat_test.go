@@ -48,7 +48,7 @@ profiles:
     pins:
       public: local
 tailcat:
-  allow: [%q, %q]
+  allow: [%q, %q, "*", "*"]
   models: [local, alias, select, public, "*", local]
   debug: true
 `, client, client)
@@ -62,8 +62,8 @@ tailcat:
 	if !cfg.Tailcat.Debug {
 		t.Fatal("Debug = false, want true")
 	}
-	if got := len(cfg.Tailcat.AllowedClients); got != 1 {
-		t.Fatalf("AllowedClients = %d, want 1", got)
+	if want := []string{client, "*"}; fmt.Sprint(cfg.Tailcat.Allow) != fmt.Sprint(want) {
+		t.Fatalf("Allow = %v, want %v", cfg.Tailcat.Allow, want)
 	}
 	wantModels := []string{"local", "alias", "select", "public", "*"}
 	if fmt.Sprint(cfg.Tailcat.Models) != fmt.Sprint(wantModels) {
@@ -115,6 +115,33 @@ func TestConfig_TailcatPeerURLValidation(t *testing.T) {
 			yaml := fmt.Sprintf("models: {}\npeers:\n  cat:\n    proxy: %q\n    models: [m]\n", proxy)
 			if _, err := LoadConfigFromReader(strings.NewReader(yaml)); err == nil {
 				t.Fatalf("accepted malformed Tailcat URL %q", proxy)
+			}
+		})
+	}
+}
+
+func TestConfig_TailcatPeerResponseHeaderTimeout(t *testing.T) {
+	blob := testTailcatBlob()
+	tests := []struct {
+		name     string
+		proxy    string
+		timeouts string
+		want     int
+	}{
+		{"HTTP default", "http://localhost:8080", "", 60},
+		{"Tailcat default", "tailcat://" + blob, "", 300},
+		{"Tailcat explicit", "tailcat://" + blob, "    timeouts:\n      responseHeader: 60\n", 60},
+		{"Tailcat disabled", "tailcat://" + blob, "    timeouts:\n      responseHeader: 0\n", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf("models: {}\npeers:\n  cat:\n    proxy: %s\n    models: [m]\n%s", tt.proxy, tt.timeouts)
+			cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Peers["cat"].Timeouts.ResponseHeader; got != tt.want {
+				t.Fatalf("responseHeader = %d, want %d", got, tt.want)
 			}
 		})
 	}

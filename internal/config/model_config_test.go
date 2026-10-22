@@ -83,10 +83,10 @@ func TestConfig_ComfyUIOverrides(t *testing.T) {
 		concurrencyLimit int
 		wantLimit        int
 	}{
-		{name: "unset limit", wantLimit: 50},
-		{name: "lower limit", concurrencyLimit: 10, wantLimit: 50},
-		{name: "minimum limit", concurrencyLimit: 50, wantLimit: 50},
-		{name: "higher limit", concurrencyLimit: 60, wantLimit: 60},
+		{name: "unset limit", wantLimit: 999},
+		{name: "lower limit", concurrencyLimit: 10, wantLimit: 999},
+		{name: "minimum limit", concurrencyLimit: 999, wantLimit: 999},
+		{name: "higher limit", concurrencyLimit: 1500, wantLimit: 1500},
 	}
 
 	for _, tt := range tests {
@@ -363,6 +363,19 @@ func TestConfig_ModelCapabilities_Validate(t *testing.T) {
 		// than a side effect of the two lists sharing one map.
 		caps := ModelCapConfig{Out: []string{"video"}}
 		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("decisions_output_modality", func(t *testing.T) {
+		caps := ModelCapConfig{In: []string{"text", "image"}, Out: []string{"decisions"}}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("decisions_is_output_only", func(t *testing.T) {
+		caps := ModelCapConfig{In: []string{"decisions"}}
+		err := caps.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capabilities.in")
+		assert.Contains(t, err.Error(), "decisions")
 	})
 
 	t.Run("video_with_other_modalities", func(t *testing.T) {
@@ -672,4 +685,21 @@ models:
 	mc := config.Models["model1"]
 	assert.True(t, mc.Capabilities.DisableAuto)
 	assert.True(t, mc.Capabilities.Empty(), "disableAuto alone is still an empty block")
+}
+
+func TestConfig_ModelCapabilities_Voices(t *testing.T) {
+	content := `
+models:
+  tts:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      voices: ["voicea", "voiceb", "voicec"]
+`
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	caps := config.Models["tts"].Capabilities
+	assert.Equal(t, []string{"voicea", "voiceb", "voicec"}, caps.Voices)
+	assert.True(t, caps.Empty(), "voices are not advertised in /v1/models")
+	assert.Equal(t, caps.Voices, caps.Merge(ModelCapConfig{Tools: true}).Voices)
 }

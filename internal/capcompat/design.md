@@ -55,8 +55,8 @@ field, which every supported server sets to a stable name of its own:
 | `owned_by` | prober | reads |
 | --- | --- | --- |
 | `llamacpp` | llama-server, and forks keeping its API | `/v1/models`, `/props` |
-| `vllm` | vLLM | `/v1/models` |
 | `halogen` | halogen-flash-server | `/v1/models`, `/health` |
+| *(any other)* | default (vLLM, Gufo, SGLang, etc.) | `/v1/models` |
 
 The owner is taken from the first entry that sets one rather than strictly
 `data[0]`, so a listing whose first entry omits it still resolves. Matching

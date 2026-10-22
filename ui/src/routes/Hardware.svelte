@@ -37,6 +37,12 @@
       .join(" ");
   }
 
+  function systemLabel(snapshot: HardwareSnapshot): string {
+    const device = [snapshot.system.vendor, snapshot.system.model].filter(Boolean).join(" ");
+    if (!device) return "Not detected";
+    return snapshot.system.family ? `${device} (${snapshot.system.family})` : device;
+  }
+
   function acceleratorTitle(accelerator: HardwareAccelerator): string {
     return accelerator.model ?? `${titleCase(accelerator.kind)} ${accelerator.index + 1}`;
   }
@@ -51,6 +57,12 @@
       : "Not detected";
   }
 
+  function powerLabel(accelerator: HardwareAccelerator): string {
+    if (accelerator.power_limit_watts !== null) return `${accelerator.power_limit_watts} W`;
+    if (accelerator.nominal_power_watts !== null) return `${accelerator.nominal_power_watts} W (nominal SoC)`;
+    return "Not detected";
+  }
+
   function acceleratorSummary(accelerator: HardwareAccelerator): string[] {
     return [
       `Accelerator ${accelerator.index + 1}: ${acceleratorTitle(accelerator)}`,
@@ -59,7 +71,7 @@
       `  Architecture: ${shown(accelerator.architecture)}`,
       `  Memory: ${accelerator.memory.capacity_bytes ? formatCapacity(accelerator.memory.capacity_bytes) : "Not detected"} (${titleCase(accelerator.memory.kind)})`,
       `  Driver: ${driverLabel(accelerator)}`,
-      `  Power Limit: ${accelerator.power_limit_watts === null ? "Not detected" : `${accelerator.power_limit_watts} W`}`,
+      `  Power: ${powerLabel(accelerator)}`,
     ];
   }
 
@@ -76,6 +88,7 @@
       "",
       "System",
       `  Operating System: ${osLabel(snapshot)}`,
+      `  Device: ${systemLabel(snapshot)}`,
       `  Kernel: ${shown(snapshot.operating_system.kernel)}`,
       `  Architecture: ${snapshot.architecture.name}`,
       `  Environment: ${environmentLabel(snapshot)}`,
@@ -134,6 +147,7 @@
             <h4 class="mb-3 text-sm font-semibold text-muted-foreground">System</h4>
             <dl class="grid grid-cols-[minmax(8rem,auto)_1fr] gap-x-4 gap-y-2 text-sm">
               <dt class="text-muted-foreground">Operating System</dt><dd>{osLabel(hardware)}</dd>
+              <dt class="text-muted-foreground">Device</dt><dd>{systemLabel(hardware)}</dd>
               <dt class="text-muted-foreground">Kernel</dt><dd>{shown(hardware.operating_system.kernel)}</dd>
               <dt class="text-muted-foreground">Architecture</dt><dd>{hardware.architecture.name}</dd>
               <dt class="text-muted-foreground">Environment</dt><dd>{environmentLabel(hardware)}</dd>
@@ -173,8 +187,8 @@
                     <dt class="text-muted-foreground">Memory</dt>
                     <dd>{accelerator.memory.capacity_bytes ? formatCapacity(accelerator.memory.capacity_bytes) : "Not detected"} ({titleCase(accelerator.memory.kind)})</dd>
                     <dt class="text-muted-foreground">Driver</dt><dd>{driverLabel(accelerator)}</dd>
-                    <dt class="text-muted-foreground">Power Limit</dt>
-                    <dd>{accelerator.power_limit_watts === null ? "Not detected" : `${accelerator.power_limit_watts} W`}</dd>
+                    <dt class="text-muted-foreground">Power</dt>
+                    <dd>{powerLabel(accelerator)}</dd>
                   </dl>
                 </article>
               {/each}

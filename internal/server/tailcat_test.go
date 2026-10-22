@@ -2,15 +2,24 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/tailcat"
 )
 
+// newTailcatPolicyServer allows every Tailcat client so tests can focus on
+// the HTTP surface policy.
 func newTailcatPolicyServer(t *testing.T, extra string) *Server {
+	t.Helper()
+	return newTailcatAllowServer(t, `["*"]`, extra)
+}
+
+func newTailcatAllowServer(t *testing.T, allow, extra string) *Server {
 	t.Helper()
 	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
 models:
@@ -21,6 +30,7 @@ models:
     proxy: http://localhost:2
 tailcat:
   models: [public]
+  allow: ` + allow + `
 ` + extra))
 	if err != nil {
 		t.Fatal(err)
@@ -66,6 +76,59 @@ func TestServer_TailcatNonAdminStrictSurface(t *testing.T) {
 				t.Fatalf("status = %d, want %d, body=%q", w.Code, tt.want, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestServer_TailcatClientAllowlist(t *testing.T) {
+	allowed := "nodekey:" + strings.Repeat("ab", 32)
+	other := "nodekey:" + strings.Repeat("cd", 32)
+	withKey := func(r *http.Request, nodeKey string) *http.Request {
+		return r.WithContext(tailcat.ContextWithNodeKey(r.Context(), nodeKey))
+	}
+
+	s := newTailcatAllowServer(t, "["+allowed+"]", "")
+	tests := []struct {
+		name string
+		req  *http.Request
+		want int
+	}{
+		{"allowed key", withKey(tailcatRequest(http.MethodGet, "/health", ""), allowed), http.StatusOK},
+		{"allowed key inference", withKey(tailcatRequest(http.MethodPost, "/v1/chat/completions", `{"model":"public"}`), allowed), http.StatusOK},
+		{"other key", withKey(tailcatRequest(http.MethodGet, "/health", ""), other), http.StatusForbidden},
+		{"other key inference", withKey(tailcatRequest(http.MethodPost, "/v1/chat/completions", `{"model":"public"}`), other), http.StatusForbidden},
+		{"no key", tailcatRequest(http.MethodGet, "/health", ""), http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			s.ServeTailcatHTTP(w, tt.req)
+			if w.Code != tt.want {
+				t.Fatalf("status = %d, want %d, body=%q", w.Code, tt.want, w.Body.String())
+			}
+		})
+	}
+
+	// Access is denied by default: an empty allow list admits nobody.
+	for _, allow := range []string{"[]", "null"} {
+		closed := newTailcatAllowServer(t, allow, "")
+		w := httptest.NewRecorder()
+		closed.ServeTailcatHTTP(w, withKey(tailcatRequest(http.MethodGet, "/health", ""), allowed))
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("allow %s status = %d, want 403", allow, w.Code)
+		}
+	}
+
+	// "*" permits any client, with or without a node key.
+	open := newTailcatAllowServer(t, `["*", `+allowed+`]`, "")
+	for _, r := range []*http.Request{
+		withKey(tailcatRequest(http.MethodGet, "/health", ""), other),
+		tailcatRequest(http.MethodGet, "/health", ""),
+	} {
+		w := httptest.NewRecorder()
+		open.ServeTailcatHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("open server status = %d, want 200", w.Code)
+		}
 	}
 }
 
@@ -189,4 +252,39 @@ func TestServer_APITailcatStatus(t *testing.T) {
 		!strings.Contains(w.Body.String(), `"models":[]`) {
 		t.Fatalf("disabled status response = %d %q, want models: []", w.Code, w.Body.String())
 	}
+}
+
+func TestServer_TailcatBodyTooLarge(t *testing.T) {
+	s := newTailcatPolicyServer(t, "maxRequestBodyMB: 1\n")
+
+	t.Run("Content-Length over the limit", func(t *testing.T) {
+		r := tailcatRequest(http.MethodPost, "/v1/chat/completions", `{"model":"public"}`)
+		r.ContentLength = 1<<20 + 1
+		w := httptest.NewRecorder()
+		s.ServeTailcatHTTP(w, r)
+		if w.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("streamed JSON body over the limit", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", io.LimitReader(zeroReader{}, 1<<20+1))
+		r.ContentLength = -1
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeTailcatHTTP(w, r)
+		if w.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("bad body still looks like an unknown model", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("not json"))
+		r.Header.Set("Content-Type", "text/plain")
+		w := httptest.NewRecorder()
+		s.ServeTailcatHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404: %s", w.Code, w.Body.String())
+		}
+	})
 }

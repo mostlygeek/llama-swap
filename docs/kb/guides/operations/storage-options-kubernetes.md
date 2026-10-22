@@ -24,7 +24,7 @@ volume error while the router waits out `healthCheckTimeout`.
 | CephFS (Rook) | RWX; the natural choice when the cluster already runs Rook |
 | Azure Files | RWX; the managed option on AKS |
 | AWS EFS | RWX; the managed option on EKS |
-| NFS server | RWX via the NFS CSI driver or a static PV |
+| NFS server | RWX via the NFS CSI driver or a static PV, or mounted directly with `--volume nfs:` (no PV or PVC) |
 
 Cloud block storage (EBS, PD, managed disks) is `ReadWriteOnce` only — do not
 reach for it for a shared cache.

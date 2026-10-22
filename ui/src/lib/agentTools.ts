@@ -1,4 +1,5 @@
 import { playgroundSessionHeaders } from "./playgroundSession";
+import { apiUrl } from "./apiPath";
 import type { ToolDefinition } from "./chatApi";
 
 /**
@@ -92,7 +93,7 @@ async function rpc(method: string, params?: unknown, toolName?: string, signal?:
     headers["Mcp-Name"] = toolName;
   }
 
-  const response = await fetch(MCP_ENDPOINT, {
+  const response = await fetch(apiUrl(MCP_ENDPOINT), {
     method: "POST",
     headers,
     body: JSON.stringify({

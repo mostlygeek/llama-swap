@@ -1,5 +1,177 @@
 # Changelog
 
+## v266 (Oct 22, 2026)
+
+This release includes security dependency updates and requested quality of life changes from users:
+
+- the UI no longer expects to be run under a root path making it easier to serve llama-swap behind another proxy
+- the max request size is configurable now. Users should be free to OOM as much as they want. llama-swap ain't your mom!
+- allow manual override of values in /v1/audio/voices. This is a non-standard endpoint but makes working with upstream audio engines a bit nicer
+
+Details below:
+
+- [PR #1224](https://github.com/mostlygeek/llama-swap/pull/1224) cmd/kubeswap: attach DRA ResourceClaims and mount NFS volumes: add repeatable `--resource-claim` and NFS `--volume` support so Kubernetes backends can share a DRA GPU claim and mount models without a static PV and PVC for each export (#1222) by [@gabrielcosi](https://github.com/gabrielcosi)
+- [PR #1225](https://github.com/mostlygeek/llama-swap/pull/1225) Add voices override for speech models: let local models configure `capabilities.voices` so `/v1/audio/voices` returns a reliable list without starting the model or querying the upstream server (#1207) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1228](https://github.com/mostlygeek/llama-swap/pull/1228) ui,server: serve the UI under a reverse proxy base path: use relative asset, API and redirect paths so the UI works behind a prefix-stripping reverse proxy without routing its endpoints at the proxy root (#1227) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1249](https://github.com/mostlygeek/llama-swap/pull/1249) internal/server: make the request body size limit configurable: add `maxRequestBodyMB` for model endpoints and Tailcat, replacing the fixed 250 MB cap while retaining 250 MB as the default (#1245) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1257](https://github.com/mostlygeek/llama-swap/pull/1257) AGENTS.md, go.mod: use go 1.27.3, trim AGENT rules: raise the Go version to 1.27.3, update dependencies and simplify contributor instructions by [@mostlygeek](https://github.com/mostlygeek)
+
+## v265 (Oct 14, 2026)
+
+A couple of small improvements:
+
+- support serving llama-swap behind a path on a reverse proxy. Helpful if you want to front llama-swap with nginx and serve it under a specific path.
+- add support for manually defining voices for text to speech models
+- a small kubeswap update
+
+- [PR #1228](https://github.com/mostlygeek/llama-swap/pull/1228) ui,server: serve the UI under a reverse proxy base path: makes the browser side base-path agnostic (relative asset, redirect, favicon and PWA URLs plus an `apiUrl()` helper that re-attaches a stripped prefix) so llama-swap works behind a plain prefix-stripping proxy at `https://host/subpath/llama-swap/` without routing `/ui`, `/api` and `/v1` at the proxy root; includes an nginx and Caddy guide (#1227) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1225](https://github.com/mostlygeek/llama-swap/pull/1225) Add voices override for speech models: adds a `models.capabilities.voices` capability listing the voice ids an upstream server supports, because the non-standard `GET /v1/audio/voices` endpoint returns unreliable responses; falls back to probing that endpoint on a best-effort basis when the list is not set (#1207) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1224](https://github.com/mostlygeek/llama-swap/pull/1224) cmd/kubeswap: attach DRA ResourceClaims and mount NFS volumes: adds a repeatable `--resource-claim name=claim` flag so backends can get GPUs via the NVIDIA DRA driver (kubeswap only references the claim, pods sharing a claim share its device) and an `nfs:server/export:path[:ro]` kind for `--volume` so models can be mounted from NFS without a static PV/PVC per export (#1222) by [@gabrielcosi](https://github.com/gabrielcosi)
+
+## v264 (Oct 12, 2026)
+
+This release includes a new `auto:orphans` set for swap matrix rules. This new set automatically includes all models that were not explictly added to a set.  It is defined as `(orphan1 | orphan2 | orphan3 | ...)`. The orphans set is handy for definitions like: `+always & +auto:orphans`, where `+always` is a set of models that are always loaded and should never be swapped out.
+
+The /audiocpp endpoint was added to make working with audio.cpp server eaiser. The `audiocpp_auto` model is automatically used when the endpoint is requested. audio.cpp's OpenAI compatible endpoints can be accessed directly via `/audiocpp/v1/audio/*`. Very handy when used with llama-swap's unified docker container which builds audio.cpp with the UI and native model downloader.
+
+Also one tiny commit to improve compatibility with llama-server's decision model functionality.
+
+Thanks to the contributors in this release, especially @knguyen298 for being patient and keeping his PR updated.
+
+- [PR #1026](https://github.com/mostlygeek/llama-swap/pull/1026) internal/matrix: add synthetic auto:orphans set: adds a `+auto:orphans` selector that expands to every model not named in another set, so a catch-all set like `"+always & +auto:orphans"` picks up new models automatically (#1025) by [@knguyen298](https://github.com/knguyen298)
+- [PR #1223](https://github.com/mostlygeek/llama-swap/pull/1223) Add /audiocpp endpoint for audio.cpp UI passthrough: serves audio.cpp's web UI and model management through a dedicated `/audiocpp/` endpoint bound to the reserved `audiocpp_auto` model, like `/comfyui/`, so the unified container works without naming a model per request by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1220](https://github.com/mostlygeek/llama-swap/pull/1220) internal/capcompat: detect decision models from llama-server's listing: fix decision models being reported as `out: [text]` (and `capabilities.out: [decisions]` failing validation) because discovery only read `/props`; `output_modalities` from `/v1/models` is now used, and tools are only advertised when the model outputs text (#1219) by [@nazeshinjite](https://github.com/nazeshinjite)
+
+## v263 (Oct 9, 2026)
+
+I've been busy, busy, busy and have not had as much time for llama-swap as I
+would like. This release includes reliability improvements, improved
+compatibility and some small quality of life improvements. Thank you for the
+amazing contributors for this release! Everyone who files issues or submits a
+PR is greatly appreciated.
+
+- [PR #1213](https://github.com/mostlygeek/llama-swap/pull/1213) Add confirmation UI and progress tracking for WoL wake: wol-proxy gets a `-require-confirm` flag that shows a "Start server" page instead of waking on every request, plus a retro loading page with a progress bar estimated from the last wake duration by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1215](https://github.com/mostlygeek/llama-swap/pull/1215) internal/router: strip browser headers before proxying to peers: fix UI chats failing with a 401 against an api.anthropic.com peer, which treated the forwarded browser Origin header as a direct browser call; Origin, Referer, Sec-Fetch-* and Access-Control-Request-* are now removed (#1214) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1212](https://github.com/mostlygeek/llama-swap/pull/1212) internal/process: report loading progress from the health check: parse `progress`/`message` from not-ready health check JSON bodies, show it on the Models and model detail pages, and restart the `healthCheckTimeout` countdown when progress changes so long loads don't time out (#1079, #1208) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1196](https://github.com/mostlygeek/llama-swap/pull/1196) internal/perf: restart loop to trigger GPU collector when the monitor still running: fix GPU stats stopping for good after `nvidia-smi` exited; the exit error is now logged and the collector restarts with a 5 to 30 second backoff (#1155) by [@hpdkhoa](https://github.com/hpdkhoa)
+- [PR #1211](https://github.com/mostlygeek/llama-swap/pull/1211) internal/process: add a per-model disableKeepAlives option (#1205): fix intermittent 502 `proxy error: EOF` when a POST reused a pooled connection that llama-server closed after a streamed response; `disableKeepAlives: true` opens a new connection per request by [@johnnieCR](https://github.com/johnnieCR)
+- [PR #1199](https://github.com/mostlygeek/llama-swap/pull/1199) fix(metrics): show oMLX token rates in Activity: read oMLX's `usage.prompt_tokens_per_second` and `usage.generation_tokens_per_second` as a fallback so rates no longer show as unknown by [@junmo-kim](https://github.com/junmo-kim)
+- [PR #1198](https://github.com/mostlygeek/llama-swap/pull/1198) internal/capcompat: add Gufo inference engine prober: add a default capability prober that uses only `/v1/models` data as the fallback for servers without a custom prober (vLLM, Gufo, SGLang, etc.), replacing the vLLM-specific one by [@berney](https://github.com/berney)
+
+## v262 (Oct 2, 2026)
+
+systemone models are mega hyped right now. This release adds support for
+/v1/systemone for that fast thinking goodness(?). Also requests missing a
+Content-Type will get one automatically added for the inference endpoints.
+
+- [PR #1197](https://github.com/mostlygeek/llama-swap/pull/1197) Add /v1/systemone endpoint to POST JSON routes: route llama.cpp's new /v1/systemone decision model endpoint to the model named in the JSON body (#1195) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1194](https://github.com/mostlygeek/llama-swap/pull/1194) internal/server: accept JSON bodies with a missing or wrong Content-Type: fix a misleading "no model id could be identified" 404 when `curl -d` sent JSON as form-urlencoded; a middleware now relabels JSON object bodies as application/json and returns a 400 naming the expected format for unusable bodies (#1192) by [@mostlygeek](https://github.com/mostlygeek)
+
+## v261 (Sep 30, 2026)
+
+This release has a bunch of small compatibility improvements requested by the community.
+Also the changelog summaries have been changed to only AI for the list below. These notes at
+the top will be written by humans (or my dog) for humans. The AI's writing more correct but
+fuck it we have too much AI slop in our lives already.
+
+- [PR #1189](https://github.com/mostlygeek/llama-swap/pull/1189) Increase ComfyUI concurrency limit from 50 to 999: fix ComfyUI stuck on the splash screen via /comfyui because one tab makes more parallel requests than the old minimum of 50 allowed (#1188) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1187](https://github.com/mostlygeek/llama-swap/pull/1187) docker/unified: compile sm_70 in the CUDA 12 image for V100: fix ik-llama-server aborting on V100 GPUs, where only sm_61 PTX without a WMMA flash-attention kernel was available (#1185) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1158](https://github.com/mostlygeek/llama-swap/pull/1158) Hardware Detection: detect Intel GPUs on Linux via xpu-smi, including dedicated Arc memory, and read the Metal version on macOS across system_profiler key names by [@anantshri](https://github.com/anantshri)
+- [PR #1183](https://github.com/mostlygeek/llama-swap/pull/1183) docs/kb: document that tailcat.models accepts selectors: note that aliases, selectors, profile pins and peer model names are accepted, with a selector example by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1182](https://github.com/mostlygeek/llama-swap/pull/1182) Build audio.cpp with static eSpeak-ng and install phoneme data: link eSpeak-ng statically and ship its phoneme data so Kokoro, SanoTTS and Inflect phonemization works without a writable cache (#1181) by [@mostlygeek](https://github.com/mostlygeek)
+
+## v260
+
+This release fixes a crash at startup on macOS 27 with Apple M6 hardware
+(#1178). Hardware detection reads the CPU frequency through gopsutil, which
+expects a voltage-states5-sram property that is missing on M6. It passed the
+empty value straight to CFDataGetLength, which segfaulted before the server
+could start listening.
+
+As a temporary fix, gopsutil now points at a fork with the patch from
+shirou/gopsutil#2163, which checks for the missing property. This will be
+removed once the upstream project picks up the patch. Some Go dependencies
+were also updated as required by the newer gopsutil.
+
+- [PR #1180](https://github.com/mostlygeek/llama-swap/pull/1180) go.mod: use gopsutil PR #2163 to fix darwin/arm64 crash: replace gopsutil with a patched fork that guards the CPU frequency probe against a missing property on Apple M6
+
+## v259
+
+Logging is split into three separate streams: proxy, upstream and HTTP access
+logs. HTTP request lines used to be mixed in with the proxy log, which made it
+hard to search. They now have their own stream and their own tab in the log
+viewer. The logToStdout setting accepts a comma separated list of streams, such
+as "proxy,http", and the old values still work.
+
+Upgrading: log data has moved off GET /api/events to a new GET /api/events/logs
+endpoint. Pick streams with ?stream=proxy&stream=http. Tools that read logs
+from /api/events need to switch to the new endpoint.
+
+The UI sidebar can be resized by dragging its edge, and the width is
+remembered. The model page has a new header that shows the model name, a
+copyable ID, its state and how long it has been ready. The API also returns a
+new readySince field for models that are ready.
+
+The Hardware page now recognizes DGX Spark (GB10) systems. Before this, it
+could not count sockets on arm64, labeled the unified memory as dedicated
+memory it could not detect, showed only the efficiency cores and had no power
+figure. It now shows the system model, the hybrid CPU layout, shared memory
+and the nominal 140 W SoC power.
+
+The "install as app" prompt now works when apiKeys is set. The browser fetches
+the web app manifest without an API key, so it got a 401. The manifest is now
+served without auth, like the favicon.
+
+The release process now checks for Claude or Codex before generating the
+changelog and uses a newer model for it.
+
+- [PR #1177](https://github.com/mostlygeek/llama-swap/pull/1177) internal/server: serve web app manifest without requiring auth: let browsers fetch site.webmanifest when apiKeys is set so the install prompt appears
+- AGENTS.md: revise contribution guidelines for PRs: agents check pull requests and issues against CONTRIBUTING.md and ask when there is a problem
+- [PR #1172](https://github.com/mostlygeek/llama-swap/pull/1172) Refactor logging to support multiple streams and separate log endpoints: split proxy, upstream and HTTP logs, add /api/events/logs and allow a stream list in logToStdout
+- [PR #1163](https://github.com/mostlygeek/llama-swap/pull/1163) hw: detect DGX Spark (GB10) systems: report the system model, hybrid CPU, sockets, shared memory and nominal power on GB10 boxes by [@lemassykoi](https://github.com/lemassykoi)
+- [PR #1173](https://github.com/mostlygeek/llama-swap/pull/1173) ui: sidebar resize, model uptime tracking, small tweaks: drag to resize the sidebar and show how long each model has been ready
+- scripts/add-changelog.sh: use gpt-6-sol: update the model used to generate changelog entries with Codex
+- Makefile: detect harness before release: use Claude or Codex to generate the changelog and stop with an error when neither is installed
+
+## v258
+
+Tailcat is updated to v0.7.0 and now checks allowed clients in the HTTP
+handler. A client that is not allowed gets a 403 instead of a TCP timeout,
+which makes peer connections much easier to troubleshoot, and changes to
+tailcat.allow now apply on hot reload. A bug that dropped the connection when
+a node key was not recognized, which could leave clients hanging, now also
+returns a 403. Peer connections recover better when the server disconnects,
+and they wait longer for the first response header by default.
+
+Upgrading: an empty tailcat.allow list now denies every client. To keep
+allowing anyone to connect, set tailcat.allow to "\*".
+
+The output of cmdStop goes to the process log again, the same as cmd. This was
+lost in an earlier change (#790). A cmdStop that leaves a background child
+holding its output open can no longer hang the stop, and hitting that wait
+limit after a successful stop is logged as a warning instead of a failure.
+
+The Models page shows a status icon for each target of the selected profile,
+and those models can be loaded and unloaded from the profile pane.
+
+The unified Docker image adds mp3 support and native downloads to audio.cpp.
+The image build also stops failing on untagged main-branch commits. Those
+builds fell back to looking up the "latest" release through the GitHub API,
+which rate limited the shared CI runners. The installers now build the commit
+directly and fall back to git tags when the API is not available.
+
+Release notes on GitHub now use the CHANGELOG.md entry for the tag, and
+changelog entries are written as plain-language summaries that credit outside
+contributors.
+
+- release: improve generated changelog and release notes: generate readable changelog entries, credit outside contributors and use each entry as the GitHub release notes
+- [PR #1169](https://github.com/mostlygeek/llama-swap/pull/1169) internal/tailcat: various reliability and bug fixes: return a 403 for unrecognized node keys, improve peer reconnects and raise the default time to first header
+- [PR #1170](https://github.com/mostlygeek/llama-swap/pull/1170) ui: link profile targets and add load controls: show status and load/unload controls for profile target models by [@sousekd](https://github.com/sousekd)
+- [PR #1165](https://github.com/mostlygeek/llama-swap/pull/1165) internal/process: log cmdStop stdout and stderr: send cmdStop output to the process log and stop a lingering child from hanging it by [@dividehex](https://github.com/dividehex)
+- [PR #1166](https://github.com/mostlygeek/llama-swap/pull/1166) internal/tailcat: upgrade to tailcat v0.7.0 and use Server.Listen: check tailcat.allow per request, deny by default when empty and add a "\*" wildcard
+- [PR #1157](https://github.com/mostlygeek/llama-swap/pull/1157) docker/unified: audio.cpp add download and mp3 support: add mp3 and native download support
+- [PR #1156](https://github.com/mostlygeek/llama-swap/pull/1156) docker/unified: fix vllm-wrapper build on untagged commits: build untagged commits directly and fall back to git tags when the GitHub API is rate limited
+
 ## v257
 
 Adds Kubernetes-backed model lifecycle management with a Helm chart, readiness

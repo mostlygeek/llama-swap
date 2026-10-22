@@ -1,4 +1,5 @@
 import type { Model } from "./types";
+import { apiUrl } from "./apiPath";
 
 export interface GroupedModels {
   local: Model[];
@@ -38,8 +39,9 @@ export interface ModelOption {
 }
 
 export function modelServerPath(modelId: string): string {
-  if (modelId === "comfyui_auto") return "/comfyui/";
-  return `/upstream/${encodeURIComponent(modelId)}/`;
+  if (modelId === "comfyui_auto") return apiUrl("/comfyui/");
+  if (modelId === "audiocpp_auto") return apiUrl("/audiocpp/");
+  return apiUrl(`/upstream/${encodeURIComponent(modelId)}/`);
 }
 
 export function matchesCapabilities(model: Model, required: string[], matchAny = false): boolean {

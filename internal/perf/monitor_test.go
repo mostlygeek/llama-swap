@@ -1,6 +1,8 @@
 package perf
 
 import (
+	"context"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -194,6 +196,270 @@ func TestStart_SubscriberReceivesStats(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for sys stats")
 	}
+}
+
+// fakeGpuCollector stands in for the platform GPU collector. Each call to its
+// start method runs the next step: a step either fails to start, or returns a
+// channel that closes without a sample, or delivers one sample and then closes
+// or stays open until ctx is done. Its wait method records every restart wait
+// and returns at once, unless blockWait is set.
+type fakeGpuCollector struct {
+	mu    sync.Mutex
+	calls int
+	steps []fakeGpuStep
+	waits []time.Duration
+
+	// blockWait makes the first restart wait signal waiting, block until ctx
+	// is done, then signal waitDone.
+	blockWait bool
+	waiting   chan struct{}
+	waitDone  chan struct{}
+}
+
+type fakeGpuStep struct {
+	err      error
+	noSample bool
+	stayOpen bool
+}
+
+func (f *fakeGpuCollector) start(ctx context.Context, _ time.Duration, _ *logmon.Monitor) (chan []GpuStat, error) {
+	f.mu.Lock()
+	f.calls++
+	call := f.calls
+	step := fakeGpuStep{stayOpen: true}
+	if call <= len(f.steps) {
+		step = f.steps[call-1]
+	}
+	f.mu.Unlock()
+
+	if step.err != nil {
+		return nil, step.err
+	}
+
+	ch := make(chan []GpuStat, 1)
+	go func() {
+		defer close(ch)
+		if step.noSample {
+			// exits before it reports anything
+			return
+		}
+		// ID carries the call number so a test can tell collectors apart
+		select {
+		case ch <- []GpuStat{{ID: call}}:
+		case <-ctx.Done():
+			return
+		}
+		if step.stayOpen {
+			<-ctx.Done()
+		}
+	}()
+	return ch, nil
+}
+
+func (f *fakeGpuCollector) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func (f *fakeGpuCollector) wait(ctx context.Context, d time.Duration) bool {
+	f.mu.Lock()
+	f.waits = append(f.waits, d)
+	block := f.blockWait
+	f.mu.Unlock()
+
+	if block {
+		f.waiting <- struct{}{}
+		<-ctx.Done()
+		f.waitDone <- struct{}{}
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+		return true
+	}
+}
+
+func (f *fakeGpuCollector) waitHistory() []time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Duration(nil), f.waits...)
+}
+
+func newGpuTestMonitor(t *testing.T, f *fakeGpuCollector) (*Monitor, chan []GpuStat) {
+	t.Helper()
+	m, err := New(config.PerformanceConfig{Every: 100 * time.Millisecond}, newTestLogger())
+	require.NoError(t, err)
+	m.gpuStats = f.start
+	m.gpuWait = f.wait
+
+	_, gpuCh, unsub := m.Subscribe()
+	t.Cleanup(unsub)
+	return m, gpuCh
+}
+
+func waitGpuStat(t *testing.T, gpuCh chan []GpuStat, wantID int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case g := <-gpuCh:
+			if len(g) == 1 && g[0].ID == wantID {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for GPU stats from collector %d", wantID)
+		}
+	}
+}
+
+func TestStart_RestartsGpuCollectorAfterItStops(t *testing.T) {
+	// the first collector delivers one sample and exits, like nvidia-smi dying
+	f := &fakeGpuCollector{steps: []fakeGpuStep{{stayOpen: false}}}
+	m, gpuCh := newGpuTestMonitor(t, f)
+
+	m.Start()
+	defer m.Stop()
+
+	waitGpuStat(t, gpuCh, 1)
+	waitGpuStat(t, gpuCh, 2)
+	assert.Equal(t, 2, f.callCount())
+}
+
+func TestStart_RetriesWhenGpuCollectorRestartFails(t *testing.T) {
+	f := &fakeGpuCollector{steps: []fakeGpuStep{
+		{stayOpen: false},
+		{err: ErrNoGpuTool},
+		{err: errors.New("nvidia-smi start failed")},
+	}}
+	m, gpuCh := newGpuTestMonitor(t, f)
+
+	m.Start()
+	defer m.Stop()
+
+	waitGpuStat(t, gpuCh, 1)
+	waitGpuStat(t, gpuCh, 4)
+	assert.Equal(t, 4, f.callCount())
+}
+
+func TestStart_GpuCollectorNotRestartedAfterStop(t *testing.T) {
+	f := &fakeGpuCollector{}
+	m, gpuCh := newGpuTestMonitor(t, f)
+
+	m.Start()
+	waitGpuStat(t, gpuCh, 1)
+	m.Stop()
+
+	// several restart delays
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, 1, f.callCount())
+}
+
+func TestStart_GpuCollectorUnavailableAtStartIsNotRetried(t *testing.T) {
+	f := &fakeGpuCollector{steps: []fakeGpuStep{{err: ErrNoGpuTool}}}
+	m, _ := newGpuTestMonitor(t, f)
+
+	m.Start()
+	defer m.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, 1, f.callCount())
+	assert.Empty(t, f.waitHistory())
+}
+
+func TestStart_GpuRestartWaitDoublesUpToMax(t *testing.T) {
+	// one working collector, then restarts that exit without stats or fail
+	// to start, then a collector that works and stays up
+	f := &fakeGpuCollector{steps: []fakeGpuStep{
+		{stayOpen: false},
+		{noSample: true},
+		{err: errors.New("nvidia-smi start failed")},
+		{noSample: true},
+		{noSample: true},
+	}}
+	m, gpuCh := newGpuTestMonitor(t, f)
+
+	m.Start()
+	defer m.Stop()
+
+	waitGpuStat(t, gpuCh, 1)
+	waitGpuStat(t, gpuCh, 6)
+	assert.Equal(t, []time.Duration{
+		5 * time.Second,
+		10 * time.Second,
+		20 * time.Second,
+		30 * time.Second,
+		30 * time.Second,
+	}, f.waitHistory())
+}
+
+func TestStart_GpuRestartWaitResetsAfterStats(t *testing.T) {
+	f := &fakeGpuCollector{steps: []fakeGpuStep{
+		{stayOpen: false},
+		{noSample: true},
+		{noSample: true},
+		{stayOpen: false}, // delivers stats, so the wait starts over
+		{noSample: true},
+	}}
+	m, gpuCh := newGpuTestMonitor(t, f)
+
+	m.Start()
+	defer m.Stop()
+
+	waitGpuStat(t, gpuCh, 1)
+	waitGpuStat(t, gpuCh, 4)
+	waitGpuStat(t, gpuCh, 6)
+	assert.Equal(t, []time.Duration{
+		5 * time.Second,
+		10 * time.Second,
+		20 * time.Second,
+		5 * time.Second,
+		10 * time.Second,
+	}, f.waitHistory())
+}
+
+func TestStart_StopDuringRestartWaitEndsCollector(t *testing.T) {
+	f := &fakeGpuCollector{
+		steps:     []fakeGpuStep{{stayOpen: false}},
+		blockWait: true,
+		waiting:   make(chan struct{}, 1),
+		waitDone:  make(chan struct{}, 1),
+	}
+	m, gpuCh := newGpuTestMonitor(t, f)
+
+	m.Start()
+	waitGpuStat(t, gpuCh, 1)
+	select {
+	case <-f.waiting:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the restart wait to begin")
+	}
+
+	m.Stop()
+	select {
+	case <-f.waitDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("restart wait did not end after Stop")
+	}
+
+	// the loop must return instead of starting the collector again
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, 1, f.callCount())
+}
+
+func TestWaitOrDone_ReturnsTrueAfterDelay(t *testing.T) {
+	assert.True(t, waitOrDone(context.Background(), time.Millisecond))
+}
+
+func TestWaitOrDone_ReturnsFalseWhenContextDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	assert.False(t, waitOrDone(ctx, time.Hour))
+	assert.Less(t, time.Since(start), time.Second)
 }
 
 func TestReadSysStats(t *testing.T) {

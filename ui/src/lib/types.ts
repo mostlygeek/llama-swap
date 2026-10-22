@@ -32,6 +32,18 @@ export interface Model {
   capabilities?: ModelCapabilities;
   modalities?: ModelModalities;
   context_length?: number;
+  // when the model last became ready (RFC 3339); only set while ready
+  readySince?: string;
+  // how long the model had been ready when the server sent this (ms)
+  uptimeMs?: number;
+  // client-only: when the model became ready by this browser's clock,
+  // derived from uptimeMs on receipt so server clock skew doesn't matter
+  readyAt?: number;
+  // fraction loaded (0 to 1) the upstream last reported through its health
+  // check; only set while starting and the upstream reports progress
+  loadingProgress?: number;
+  // the loading step the upstream last reported; only set while starting
+  loadingMessage?: string;
   // selector-only fields from the v1/models llamaswap metadata
   strategy?: string;
   targets?: string[];
@@ -97,8 +109,10 @@ export interface ReqRespCapture {
   resp_body: string; // base64 encoded bytes
 }
 
+export type LogSource = "proxy" | "upstream" | "http";
+
 export interface LogData {
-  source: "upstream" | "proxy";
+  source: LogSource;
   data: string;
 }
 
@@ -206,10 +220,17 @@ export interface HardwareSnapshot {
   capture: HardwareCapture;
   architecture: HardwareArchitecture;
   operating_system: HardwareOperatingSystem;
+  system: HardwareSystem;
   environment: HardwareEnvironment;
   cpu: HardwareCPU;
   memory: HardwareMemory;
   accelerators: HardwareAccelerator[];
+}
+
+export interface HardwareSystem {
+  vendor: string | null;
+  model: string | null;
+  family: string | null;
 }
 
 export interface HardwareCapture {
@@ -263,6 +284,7 @@ export interface HardwareAccelerator {
   };
   driver: { name: string | null; version: string | null } | null;
   power_limit_watts: number | null;
+  nominal_power_watts: number | null;
 }
 
 export type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
@@ -352,6 +374,8 @@ export interface ChatMessage {
   reasoningTimeMs?: number;
   /** UI-only. Stats for the request that produced this assistant turn. */
   stats?: GenerationStats;
+  /** UI-only. Set when this turn failed or the user cancelled it. */
+  interrupted?: "error" | "cancelled";
 
   /** Wire fields. tool_calls is assistant-only; the rest are tool-only. */
   tool_calls?: ToolCall[];

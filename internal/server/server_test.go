@@ -32,6 +32,8 @@ type stubRouter struct {
 	serveHTTP     func(http.ResponseWriter, *http.Request)
 	shutdownCalls atomic.Int32
 	running       map[string]process.ProcessState
+	readySince    map[string]time.Time
+	loading       map[string]*process.LoadingProgress
 	unloadCalls   atomic.Int32
 	unloadModels  []string
 	unloadTimeout time.Duration
@@ -58,6 +60,13 @@ func (s *stubRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *stubRouter) RunningModels() map[string]process.ProcessState { return s.running }
+func (s *stubRouter) RunningStatus() map[string]process.Status {
+	out := make(map[string]process.Status, len(s.running))
+	for id, st := range s.running {
+		out[id] = process.Status{State: st, ReadySince: s.readySince[id], Loading: s.loading[id]}
+	}
+	return out
+}
 func (s *stubRouter) Unload(timeout time.Duration, models ...string) {
 	s.unloadCalls.Add(1)
 	s.unloadTimeout = timeout
@@ -81,16 +90,15 @@ func newTestServer(local router.LocalRouter, peer router.Router) *Server {
 // tests that exercise config-driven middleware wiring in routes().
 func newTestServerWithConfig(cfg config.Config, local router.LocalRouter, peer router.Router) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	proxylog := logmon.NewWriter(io.Discard)
+	logs := logmon.NewGroup(io.Discard, true, true, true)
+	proxylog := logs.ProxyLogs
 	st, err := sqlite.New("")
 	if err != nil {
 		panic(err)
 	}
 	s := &Server{
 		cfg:         cfg,
-		muxlog:      logmon.NewWriter(io.Discard),
-		proxylog:    proxylog,
-		upstreamlog: logmon.NewWriter(io.Discard),
+		logs:        logs,
 		inflight:    newInflightTracker(),
 		metrics:     newMetricsMonitor(proxylog, 0, 0, st),
 		store:       st,
@@ -167,7 +175,7 @@ func audioTaskRequest(model string) *http.Request {
 }
 
 func TestServer_New_GroupConfig(t *testing.T) {
-	discard := logmon.NewWriter(io.Discard)
+	discard := logmon.NewGroup(io.Discard, true, true, true)
 	cfg := config.Config{HealthCheckTimeout: 15}
 	cfg.Routing.Router.Use = "group"
 	st, err := sqlite.New("")
@@ -175,7 +183,7 @@ func TestServer_New_GroupConfig(t *testing.T) {
 		t.Fatalf("sqlite.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil, nil)
+	s, err := New(cfg, discard, nil, st, BuildInfo{}, nil, nil)
 	if err != nil {
 		t.Fatalf("New (group): %v", err)
 	}
@@ -188,7 +196,7 @@ func TestServer_New_GroupConfig(t *testing.T) {
 }
 
 func TestServer_New_MatrixConfig(t *testing.T) {
-	discard := logmon.NewWriter(io.Discard)
+	discard := logmon.NewGroup(io.Discard, true, true, true)
 	cfg := config.Config{HealthCheckTimeout: 15}
 	cfg.Models = map[string]config.ModelConfig{
 		"model": {
@@ -205,7 +213,7 @@ func TestServer_New_MatrixConfig(t *testing.T) {
 		t.Fatalf("sqlite.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil, nil)
+	s, err := New(cfg, discard, nil, st, BuildInfo{}, nil, nil)
 	if err != nil {
 		t.Fatalf("New (matrix): %v", err)
 	}
@@ -482,7 +490,7 @@ func TestServer_Preload(t *testing.T) {
 
 // TestServer_New_OnStartupProfile verifies New activates the configured startup profile.
 func TestServer_New_OnStartupProfile(t *testing.T) {
-	discard := logmon.NewWriter(io.Discard)
+	discard := logmon.NewGroup(io.Discard, true, true, true)
 	cfg := config.Config{HealthCheckTimeout: 15}
 	cfg.Profiles = map[string]config.ProfileConfig{
 		"coding": {Pins: map[string]string{"llm-code": "model"}},
@@ -493,7 +501,7 @@ func TestServer_New_OnStartupProfile(t *testing.T) {
 		t.Fatalf("sqlite.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil, nil)
+	s, err := New(cfg, discard, nil, st, BuildInfo{}, nil, nil)
 	if err != nil {
 		t.Fatalf("New (startup profile): %v", err)
 	}
@@ -560,4 +568,44 @@ func TestServer_LogStream_UnknownID_Returns400(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status=%d want 400", w.Code)
 	}
+}
+
+func TestProxy_ConfiguredVoicesOverrideUpstream(t *testing.T) {
+	cfg := config.Config{Models: map[string]config.ModelConfig{
+		"tts":      {Capabilities: config.ModelCapConfig{Voices: []string{"voicea", "voiceb", "voicec"}}},
+		"tts-none": {},
+	}}
+	local := newStubRouter([]string{"tts", "tts-none"}, "upstream")
+	s := newTestServerWithConfig(cfg, local, newStubRouter(nil, ""))
+
+	t.Run("configured voices are returned", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/audio/voices?model=tts", nil))
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q", ct)
+		}
+		var got struct {
+			Voices []string `json:"voices"`
+			Model  string   `json:"model"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(got.Voices, ",") != "voicea,voiceb,voicec" || got.Model != "tts" {
+			t.Errorf("unexpected body: %s", w.Body.String())
+		}
+	})
+
+	t.Run("model without voices goes to upstream", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/audio/voices?model=tts-none", nil))
+
+		if w.Body.String() != "upstream" {
+			t.Errorf("body = %q, want upstream", w.Body.String())
+		}
+	})
 }

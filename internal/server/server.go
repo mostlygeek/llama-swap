@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +24,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
+	"github.com/mostlygeek/llama-swap/internal/tailcat"
 )
 
 // Server owns the HTTP mux, cross-cutting middleware, and the local/peer model
@@ -30,9 +33,7 @@ import (
 type Server struct {
 	cfg config.Config
 
-	muxlog      *logmon.Monitor
-	proxylog    *logmon.Monitor
-	upstreamlog *logmon.Monitor
+	logs *logmon.Group
 
 	perf     *perf.Monitor
 	inflight *inflightTracker
@@ -123,7 +124,7 @@ func (s *Server) setActiveProfile(name string) (bool, error) {
 	s.activeProfile = name
 	s.profileMu.Unlock()
 
-	s.proxylog.Infof("active profile changed to %q", name)
+	s.logs.ProxyLogs.Infof("active profile changed to %q", name)
 	event.Emit(swaputil.ProfileChangedEvent{Active: name})
 	return true, nil
 }
@@ -147,6 +148,7 @@ var modelPostJSONRoutes = []string{
 	"/v1/images/generations",
 	"/sdapi/v1/txt2img",
 	"/sdapi/v1/img2img",
+	"/v1/systemone",
 
 	// audio.cpp generic task API
 	"/audioapi/v1/tasks/run",
@@ -205,24 +207,24 @@ type BuildInfo struct {
 	Date    string
 }
 
-func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs) (*Server, error) {
+func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
 	switch cfg.Routing.Router.Use {
 	case "matrix":
-		local, err = router.NewMatrix(cfg, proxylog, upstreamlog)
+		local, err = router.NewMatrix(cfg, logs)
 		if err != nil {
 			return nil, fmt.Errorf("creating matrix router: %w", err)
 		}
 	default: // "group"
-		local, err = router.NewGroup(cfg, proxylog, upstreamlog)
+		local, err = router.NewGroup(cfg, logs)
 		if err != nil {
 			return nil, fmt.Errorf("creating group router: %w", err)
 		}
 	}
 
-	peer, err := router.NewPeer(cfg, proxylog)
+	peer, err := router.NewPeer(cfg, logs.ProxyLogs)
 	if err != nil {
 		return nil, fmt.Errorf("creating peer router: %w", err)
 	}
@@ -234,12 +236,10 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	s := &Server{
 		cfg:           cfg,
-		muxlog:        muxlog,
-		proxylog:      proxylog,
-		upstreamlog:   upstreamlog,
+		logs:          logs,
 		perf:          perfMon,
 		inflight:      newInflightTracker(),
-		metrics:       newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, st),
+		metrics:       newMetricsMonitor(logs.ProxyLogs, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, st),
 		store:         st,
 		build:         build,
 		hardware:      hardware,
@@ -250,7 +250,7 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		shutdownCtx:   shutdownCtx,
 		shutdownFn:    shutdownFn,
 	}
-	s.capcompat = capcompat.New(st.Cache(), proxylog)
+	s.capcompat = capcompat.New(st.Cache(), logs.ProxyLogs)
 	s.capcompatCancel = event.On(s.onProcessStateChange)
 
 	// SysProvider is constructed here because this is where perf and hardware
@@ -282,16 +282,39 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.serveConfiguredVoices(w, r, data.ModelID) {
+		return
+	}
+
 	switch {
 	case s.local.Handles(data.ModelID):
-		s.proxylog.Debugf("dispatch: using local process for model: %s", data.ModelID)
+		s.logs.ProxyLogs.Debugf("dispatch: using local process for model: %s", data.ModelID)
 		s.local.ServeHTTP(w, r)
 	case s.peer.Handles(data.ModelID):
-		s.proxylog.Debugf("dispatch: using peer for model: %s", data.ModelID)
+		s.logs.ProxyLogs.Debugf("dispatch: using peer for model: %s", data.ModelID)
 		s.peer.ServeHTTP(w, r)
 	default:
 		swaputil.SendError(w, r, router.ErrNoRouterFound)
 	}
+}
+
+// serveConfiguredVoices answers GET /v1/audio/voices from the model's
+// capabilities.voices when it is set, without starting the model or contacting
+// the upstream. It reports whether it wrote the response.
+func (s *Server) serveConfiguredVoices(w http.ResponseWriter, r *http.Request, modelID string) bool {
+	if r.Method != http.MethodGet || r.URL.Path != "/v1/audio/voices" {
+		return false
+	}
+	mc, ok := s.cfg.Models[modelID]
+	if !ok || len(mc.Capabilities.Voices) == 0 {
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"voices": mc.Capabilities.Voices,
+		"model":  modelID,
+	})
+	return true
 }
 
 // stripVersionPrefix rewrites versionless /v/... requests to their /... form
@@ -314,7 +337,7 @@ func stripAudioAPIPrefix(r *http.Request) {
 func (s *Server) routes() {
 
 	authMW := CreateAuthMiddleware(s.cfg)
-	modelMWs := []chain.Middleware{authMW}
+	modelMWs := []chain.Middleware{authMW, createContentTypeMiddleware(s.cfg.MaxRequestBodyBytes())}
 	// globalConcurrencyLimit guards the top of the inference chain; a limit of
 	// 0 (the default) means no limit, so the handler is left out of the chain
 	// entirely rather than wrapping every request in a no-op semaphore.
@@ -358,8 +381,26 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /wol-health", handleHealth)
 	mux.HandleFunc("GET /{$}", handleRootRedirect)
 
-	// Embedded UI.
+	// Embedded UI. ServeMux's built-in /ui -> /ui/ redirect uses an absolute
+	// Location, which would drop a prefix-stripping reverse proxy's path
+	// prefix; this exact-match route keeps it relative instead (308 preserves
+	// the method).
+	mux.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
+		redirectRelative(w, "ui/", http.StatusPermanentRedirect)
+	})
 	mux.Handle("GET /ui/", chain.New(authMW).ThenFunc(s.handleUI))
+	// The browser fetches the web app manifest - and the icons it references -
+	// itself while deciding whether to offer installing the PWA, and it has no
+	// way to attach an API key to those requests. Serve them without auth so
+	// the install prompt isn't silently lost behind a 401 when apiKeys is set
+	// (issue #1175).
+	for _, name := range []string{
+		"site.webmanifest",
+		"web-app-manifest-192x192.png",
+		"web-app-manifest-512x512.png",
+	} {
+		mux.HandleFunc("GET /ui/"+name, s.handleUI)
+	}
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 
 	// Prometheus metrics (wrapped by apiChain, matches the legacy endpoint).
@@ -385,6 +426,11 @@ func (s *Server) routes() {
 	mux.Handle("/comfyui", apiChain.ThenFunc(handleComfyUIRedirect))
 	mux.Handle("/comfyui/{comfyPath...}", apiChain.ThenFunc(s.handleComfyUI))
 
+	// audio.cpp UI passthrough. This uses the fixed audiocpp_auto model so
+	// requests do not have to name a model.
+	mux.Handle("/audiocpp", apiChain.ThenFunc(handleAudioCppRedirect))
+	mux.Handle("/audiocpp/{audioCppPath...}", apiChain.ThenFunc(s.handleAudioCpp))
+
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))
 	mux.Handle("POST /api/models/unload/{model...}", apiChain.ThenFunc(s.handleAPIUnloadModel))
@@ -392,6 +438,7 @@ func (s *Server) routes() {
 	mux.Handle("PUT /api/profiles/active", apiChain.ThenFunc(s.handleAPIActiveProfile))
 	mux.Handle("POST /api/inflight/{id}/cancel", apiChain.ThenFunc(s.handleAPICancelInflight))
 	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
+	mux.Handle("GET /api/events/logs", apiChain.ThenFunc(s.handleAPILogEvents))
 	mux.Handle("GET /api/metrics/activity", apiChain.ThenFunc(s.handleAPIActivity))
 	mux.Handle("GET /api/metrics/stats", apiChain.ThenFunc(s.handleAPIActivityStats))
 	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))
@@ -407,7 +454,7 @@ func (s *Server) routes() {
 	mux.Handle("/api/mcp", apiChain.ThenFunc(s.handleAPIMCP))
 
 	s.mux = mux
-	s.handler = chain.New(CreateRequestLogMiddleware(s.proxylog), CreateCORSMiddleware(s.cfg)).Then(mux)
+	s.handler = chain.New(CreateRequestLogMiddleware(s.logs.HttpLogs), CreateCORSMiddleware(s.cfg)).Then(mux)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -420,6 +467,13 @@ func (s *Server) ServeTailcatHTTP(w http.ResponseWriter, r *http.Request) {
 	tc := s.cfg.Tailcat
 	if !s.cfg.TailcatEnabled() || tc == nil {
 		http.NotFound(w, r)
+		return
+	}
+	// tailcat.allow is enforced per request rather than by the Tailcat
+	// listener so config reloads can change it without restarting the
+	// listener, and so removed keys lose access on kept-alive connections.
+	if !tailcatClientAllowed(tc.Allow, r) {
+		http.Error(w, "Tailcat client not allowed", http.StatusForbidden)
 		return
 	}
 
@@ -439,7 +493,22 @@ func (s *Server) ServeTailcatHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if inference && r.Method != http.MethodOptions {
+		// Normalize first so the model lookup sees the same body format the
+		// model chain will. A body over the size cap gets a 413 so the client
+		// knows to send less; other body errors look like an unknown model.
+		if bodyErr := prepareModelBody(w, r, s.cfg.MaxRequestBodyBytes()); bodyErr != nil {
+			if bodyErr.status == http.StatusRequestEntityTooLarge {
+				swaputil.SendResponse(w, r, bodyErr.status, bodyErr.message)
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
 		model, err := swaputil.ExtractModel(r)
+		if bodyErr := bodyTooLargeFrom(err); bodyErr != nil {
+			swaputil.SendResponse(w, r, bodyErr.status, bodyErr.message)
+			return
+		}
 		if err != nil || !tailcatModelAllowed(tc.Models, model) {
 			http.NotFound(w, r)
 			return
@@ -447,6 +516,17 @@ func (s *Server) ServeTailcatHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r = r.WithContext(context.WithValue(r.Context(), tailcatRequestContextKey{}, true))
 	s.handler.ServeHTTP(w, r)
+}
+
+// tailcatClientAllowed reports whether the request's authenticated Tailcat
+// node key is in allow. Access is denied by default: an empty allow list
+// permits no client, and "*" permits every client.
+func tailcatClientAllowed(allow []string, r *http.Request) bool {
+	if slices.Contains(allow, config.TailcatAllowAll) {
+		return true
+	}
+	nodeKey, ok := tailcat.NodeKeyFromContext(r.Context())
+	return ok && slices.Contains(allow, nodeKey)
 }
 
 func isTailcatInferenceRequest(r *http.Request) bool {

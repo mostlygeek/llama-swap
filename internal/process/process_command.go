@@ -122,8 +122,9 @@ type ProcessCommand struct {
 	stopCh      chan stopReq
 	waitReadyCh chan waitReadyReq
 
-	// current ProcessState. Written only by run(); read by State() via atomic load.
-	state atomic.Value
+	// current Status. Written only by run(); read by State() and Status()
+	// via atomic load.
+	status atomic.Pointer[Status]
 
 	// stores the active reverse-proxy handler when the process is running.
 	// Written only by run(); read by ServeHTTP via atomic load.
@@ -156,7 +157,7 @@ func New(
 		waitReadyCh: make(chan waitReadyReq),
 		waitDelay:   cmdWaitDelay,
 	}
-	p.state.Store(StateStopped)
+	p.status.Store(&Status{State: StateStopped})
 
 	go p.run()
 	return p, nil
@@ -174,13 +175,21 @@ func (p *ProcessCommand) Logger() *logmon.Monitor { return p.processLogger }
 func (p *ProcessCommand) run() {
 	// Mutable state — only read/written from this goroutine. ServeHTTP reads
 	// p.handler concurrently, which is why handler is an atomic.Pointer.
-	// p.state mirrors `state` so State() can observe transitions; setState
+	// p.status mirrors `state` so State() can observe transitions; setState
 	// writes both.
 	state := StateStopped
 	setState := func(s ProcessState) {
 		old := state
 		state = s
-		p.state.Store(s)
+		next := &Status{State: s}
+		if s == StateReady {
+			if old == StateReady {
+				next.ReadySince = p.status.Load().ReadySince
+			} else {
+				next.ReadySince = time.Now()
+			}
+		}
+		p.status.Store(next)
 		if old != s {
 			event.Emit(swaputil.ProcessStateChangeEvent{
 				ProcessName: p.id,
@@ -476,6 +485,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       time.Duration(p.config.Timeouts.IdleConn) * time.Second,
+		DisableKeepAlives:     p.config.DisableKeepAlives,
 	}
 	reverseProxy.ErrorHandler = newProxyErrorHandler(p.id, p.proxyLogger)
 	reverseProxy.ModifyResponse = func(resp *http.Response) error {
@@ -574,7 +584,14 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 	case <-time.After(250 * time.Millisecond):
 	}
 
+	// The deadline is pushed back each time the reported progress value
+	// changes, so healthCheckTimeout bounds how long a load may go without
+	// progress rather than how long it may take in total. A message alone does
+	// not count: it can change while the load is stuck, e.g. a growing ETA.
+	// Without a progress value, the deadline is fixed as before.
 	deadline := time.Now().Add(healthCheckTimeout)
+	var lastReport *LoadingProgress
+	var lastProgress *float64
 	for {
 		select {
 		case <-startCtx.Done():
@@ -585,6 +602,9 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		}
 
 		if time.Now().After(deadline) {
+			if lastProgress != nil {
+				return abort(fmt.Errorf("health check timed out after %v without loading progress", healthCheckTimeout))
+			}
 			return abort(fmt.Errorf("health check timed out after %v", healthCheckTimeout))
 		}
 
@@ -601,6 +621,17 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 			break
 		} else if startCtx.Err() != nil {
 			return abort(ErrStartAborted)
+		}
+
+		if lp, ok := parseLoadingProgress(rr.Body.Bytes()); ok {
+			if lp.Progress != nil && (lastProgress == nil || *lp.Progress != *lastProgress) {
+				lastProgress = lp.Progress
+				deadline = time.Now().Add(healthCheckTimeout)
+			}
+			if !lp.equal(lastReport) {
+				lastReport = &lp
+				p.setLoading(lp)
+			}
 		}
 
 		select {
@@ -632,9 +663,20 @@ func (p *ProcessCommand) sendStopSignal(cmd *exec.Cmd) error {
 		if err == nil {
 			p.processLogger.Debugf("<%s> sendStopSignal() running stop command: %s", p.id, strings.Join(stopArgs, " "))
 			stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)
+			stopCmd.Stderr = p.processLogger
+			stopCmd.Stdout = p.processLogger
+			// Bound the pipe copy so a CmdStop that backgrounds a child
+			// holding stdout/stderr cannot block Run() indefinitely.
+			stopCmd.WaitDelay = p.waitDelay
 			stopCmd.Env = cmd.Env
 			setProcAttributes(stopCmd)
 			runErr := stopCmd.Run()
+			// ErrWaitDelay is only returned when the stop command itself
+			// succeeded, so it is not a failure to stop the process.
+			if errors.Is(runErr, exec.ErrWaitDelay) {
+				p.processLogger.Warnf("<%s> sendStopSignal() stop command exited but a child held its output open; output may be truncated", p.id)
+				runErr = nil
+			}
 			if runErr != nil {
 				p.processLogger.Errorf("<%s> sendStopSignal() stop command failed: %v", p.id, runErr)
 			} else {
@@ -796,10 +838,14 @@ func (p *ProcessCommand) Stop(timeout time.Duration) error {
 }
 
 func (p *ProcessCommand) State() ProcessState {
-	if s, ok := p.state.Load().(ProcessState); ok {
-		return s
+	return p.Status().State
+}
+
+func (p *ProcessCommand) Status() Status {
+	if st := p.status.Load(); st != nil {
+		return *st
 	}
-	return StateStopped
+	return Status{State: StateStopped}
 }
 
 func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,12 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "qwen3.8-flash-next-gufo",
+      "object": "model",
+      "created": 1791013543,
+      "owned_by": "gufo",
+      "context_length": 262144
+    }
+  ]
+}

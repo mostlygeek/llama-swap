@@ -10,7 +10,7 @@
     selectorModels,
     unloadAllModels,
   } from "../stores/api";
-  import { statusDotColor } from "../stores/modelLoad";
+  import { loadingMessage, loadingPercent, statusDotColor } from "../stores/modelLoad";
   import { showUnlistedModels as showUnlisted, showCapabilityTags } from "../stores/modelDisplay";
   import { listCapabilityBadges, capabilityBadgeClass } from "../lib/capabilities";
   import type { Model } from "../lib/types";
@@ -59,7 +59,9 @@
 </script>
 
 {#snippet modelRow(model: Model)}
-  <div class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5">
+  {@const percent = loadingPercent(model)}
+  {@const message = loadingMessage(model)}
+  <div class="hover:bg-muted/50 relative flex items-center gap-3 px-4 py-2.5">
     {#if !model.peerID}
       <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(model)}`}></span>
     {/if}
@@ -75,6 +77,9 @@
           · {model.aliases.join(", ")}
         {/if}
       </div>
+      {#if message}
+        <div class="text-muted-foreground truncate text-xs italic" title={message}>{message}</div>
+      {/if}
     </a>
     {#if $showCapabilityTags}
       {@const badges = listCapabilityBadges(model)}
@@ -87,7 +92,7 @@
       {/if}
     {/if}
     <span class="text-muted-foreground text-xs uppercase tracking-wide">
-      {model.state}
+      {model.state}{#if percent !== undefined}&nbsp;<span class="tabular-nums">{percent}%</span>{/if}
     </span>
     {#if model.unlisted}
       <Tag class="px-1.5 text-[0.625rem] uppercase">unlisted</Tag>
@@ -104,6 +109,12 @@
         <ExternalLink class="size-4" />
       </a>
       <ModelLoadButton {model} />
+    {/if}
+    {#if percent !== undefined}
+      <!-- Loading progress; the percentage next to the state carries it for screen readers. -->
+      <div aria-hidden="true" class="bg-muted absolute inset-x-0 bottom-0 h-0.5">
+        <div class="bg-warning h-full transition-[width] duration-500" style:width="{percent}%"></div>
+      </div>
     {/if}
   </div>
 {/snippet}
@@ -208,11 +219,31 @@
           {:else}
             <div class="divide-y">
               {#each profileMappings as [modelID, target] (modelID)}
-                <div class="hover:bg-muted/50 flex items-center gap-2 px-4 py-2.5">
+                {@const targetModel = target
+                  ? $models.find((m) => m.id === target) ??
+                    $models.find((m) => m.aliases?.includes(target))
+                  : undefined}
+                <div
+                  class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5 has-[>button]:py-1.5"
+                >
+                  {#if targetModel && !targetModel.peerID}
+                    <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(targetModel)}`} role="img" aria-label={`Model ${targetModel.state}`}></span>
+                  {/if}
                   <span class="max-w-[45%] truncate text-sm font-medium">{modelID}</span>
                   <span class="text-muted-foreground text-xs" aria-hidden="true">→</span>
                   {#if target}
-                    <span class="min-w-0 truncate text-sm">{target}</span>
+                    {#if targetModel}
+                      <a
+                        href="/models/{encodeURIComponent(targetModel.id)}"
+                        use:link
+                        class="min-w-0 flex-1 truncate text-sm hover:text-foreground hover:underline"
+                      >{target}</a>
+                      {#if !targetModel.peerID}
+                        <ModelLoadButton model={targetModel} />
+                      {/if}
+                    {:else}
+                      <span class="min-w-0 truncate text-sm">{target}</span>
+                    {/if}
                   {:else}
                     <Tag class="px-1.5 text-[0.625rem] uppercase">disabled</Tag>
                   {/if}
@@ -237,7 +268,7 @@
         <Card.Content class="p-0">
           <div class="divide-y">
             {#each $selectorModels as selector (selector.id)}
-              <div class="hover:bg-muted/50 flex items-center gap-2 px-4 py-2.5">
+              <div class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5">
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-sm font-medium">
                     {selector.name ? `${selector.id} - ${selector.name}` : selector.id}

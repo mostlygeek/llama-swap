@@ -1,55 +1,152 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Loading...</title>
 <style>
+:root {
+    --bg: #1a1c2c;
+    --panel: #262b44;
+    --ink: #f4f4f4;
+    --dim: #94b0c2;
+    --gold: #ffcd75;
+    --green: #38b764;
+    --red: #b13e53;
+}
+* { box-sizing: border-box; }
 body {
-    font-family: sans-serif;
+    margin: 0;
+    min-height: 100vh;
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 100vh;
-    margin: 0;
-    background: #f5f5f5;
+    padding: 24px;
+    background-color: var(--bg);
+    /* faint scanlines */
+    background-image: repeating-linear-gradient(
+        to bottom, transparent 0, transparent 3px, rgba(0, 0, 0, .18) 3px, rgba(0, 0, 0, .18) 4px);
+    color: var(--ink);
+    font-family: "Courier New", Courier, monospace;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    image-rendering: pixelated;
 }
-.loader {
+.box {
+    width: 100%;
+    max-width: 420px;
+    padding: 28px 24px;
     text-align: center;
+    background: var(--panel);
+    /* notched pixel border */
+    box-shadow:
+        0 -4px 0 0 var(--ink), 0 4px 0 0 var(--ink),
+        -4px 0 0 0 var(--ink), 4px 0 0 0 var(--ink),
+        8px 8px 0 0 rgba(0, 0, 0, .45);
 }
-.stats {
-    font-size: 18px;
-    color: #333;
-    margin: 20px 0;
+.sprite { overflow: visible; width: 120px; height: 132px; display: block; margin: 0 auto 18px; }
+h1 { margin: 0 0 14px; font-size: 22px; color: var(--gold); text-shadow: 3px 3px 0 #000; }
+p { margin: 8px 0; font-size: 14px; line-height: 1.6; color: var(--dim); }
+form { margin: 0; }
+.btn {
+    margin-top: 20px;
+    padding: 12px 22px;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    color: #1a1c2c;
+    background: var(--green);
+    border: 0;
+    cursor: pointer;
+    box-shadow:
+        0 -4px 0 0 #000, 0 4px 0 0 #000, -4px 0 0 0 #000, 4px 0 0 0 #000,
+        inset -4px -4px 0 0 #257953, inset 4px 4px 0 0 #a7f070;
 }
-.stats-label {
-    color: #666;
-    font-size: 14px;
+.btn:hover { background: #a7f070; }
+.btn:focus-visible { outline: 4px dashed var(--gold); outline-offset: 6px; }
+.btn:active { transform: translate(4px, 4px); }
+.blink { animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+    .blink, .bar i, .sprite, .sprite * { animation: none !important; }
 }
+
+.sprite { animation: bob 1s steps(1) infinite; }
+.led { animation: blink .5s steps(1) infinite; }
+.bay { animation: chase 1.2s steps(1) infinite; }
+@keyframes chase { 0% { fill: #38b764; } 25%, 100% { fill: #333c57; } }
+@keyframes bob { 50% { transform: translateY(-6px); } }
+.bar {
+    display: flex;
+    gap: 4px;
+    height: 24px;
+    margin: 20px 0 14px;
+    padding: 4px;
+    background: #000;
+    box-shadow: 0 0 0 4px var(--ink);
+}
+.bar i {
+    flex: 1;
+    background: var(--green);
+    opacity: .15;
+    animation: fill 2s infinite;
+}
+@keyframes fill { 0%, 49.9% { opacity: .15; } 50%, 100% { opacity: 1; } }
+/* with an estimate the blocks fill up with the elapsed time instead of looping */
+.bar.timed i { animation: none; }
+.bar.timed i.on { opacity: 1; }
+.bar.timed i.slow { animation: blink 1s steps(1) infinite; }
+.stats { font-size: 14px; color: var(--dim); }
+.stats b { color: var(--ink); }
 </style>
 </head>
 <body>
-<div class="loader">
+<main class="box" data-expected="0">
+    <svg class="sprite" viewBox="-2.5 -6 20 22" shape-rendering="crispEdges" aria-hidden="true"><path fill="#1a1c2c" d="M2 0h11v1h-11zM1 1h1v1h-1zM13 1h1v1h-1zM1 2h1v1h-1zM13 2h1v1h-1zM1 3h1v1h-1zM13 3h1v1h-1zM1 4h1v1h-1zM13 4h1v1h-1zM1 5h1v1h-1zM13 5h1v1h-1zM1 6h1v1h-1zM13 6h1v1h-1zM1 7h1v1h-1zM13 7h1v1h-1zM1 8h1v1h-1zM13 8h1v1h-1zM1 9h1v1h-1zM13 9h1v1h-1zM1 10h1v1h-1zM13 10h1v1h-1zM1 11h1v1h-1zM13 11h1v1h-1zM1 12h1v1h-1zM13 12h1v1h-1zM1 13h1v1h-1zM13 13h1v1h-1zM2 14h11v1h-11zM3 15h2v1h-2zM10 15h2v1h-2z"/><path fill="#94b0c2" d="M2 1h11v1h-11zM2 2h1v1h-1zM12 2h1v1h-1zM2 3h1v1h-1zM12 3h1v1h-1zM2 4h1v1h-1zM12 4h1v1h-1zM2 5h1v1h-1zM12 5h1v1h-1zM2 6h1v1h-1zM12 6h1v1h-1zM2 7h1v1h-1zM12 7h1v1h-1zM2 8h1v1h-1zM12 8h1v1h-1zM2 9h1v1h-1zM12 9h1v1h-1zM2 10h1v1h-1zM12 10h1v1h-1zM2 11h1v1h-1zM12 11h1v1h-1zM2 12h1v1h-1zM5 12h8v1h-8zM2 13h11v1h-11z"/><path fill="#566c86" d="M3 2h9v1h-9zM3 5h9v1h-9zM3 8h9v1h-9zM3 11h9v1h-9z"/><path class="led" fill="#38b764" d="M3 12h2v1h-2z"/><path class="bay" style="animation-delay:0.3s" fill="#333c57" d="M3 3h9v1h-9z"/><path class="bay" style="animation-delay:0.4s" fill="#333c57" d="M3 4h9v1h-9z"/><path class="bay" style="animation-delay:0.6s" fill="#333c57" d="M3 6h9v1h-9z"/><path class="bay" style="animation-delay:0.7s" fill="#333c57" d="M3 7h9v1h-9z"/><path class="bay" style="animation-delay:0.9s" fill="#333c57" d="M3 9h9v1h-9z"/><path class="bay" style="animation-delay:1.0s" fill="#333c57" d="M3 10h9v1h-9z"/></svg>
+    <h1>Powering up<span class="blink">_</span></h1>
     <p>Waking up upstream server...</p>
-    <div class="stats">
-        <div><span class="stats-label">Time elapsed:</span> <span id="elapsed">0s</span></div>
-        <div><span id="attempts">&nbsp;</span></div>
-    </div>
-</div>
+    <div class="bar" aria-hidden="true"><i style="animation-delay:0.00s"></i><i style="animation-delay:0.05s"></i><i style="animation-delay:0.10s"></i><i style="animation-delay:0.15s"></i><i style="animation-delay:0.20s"></i><i style="animation-delay:0.25s"></i><i style="animation-delay:0.30s"></i><i style="animation-delay:0.35s"></i><i style="animation-delay:0.40s"></i><i style="animation-delay:0.45s"></i><i style="animation-delay:0.50s"></i><i style="animation-delay:0.55s"></i><i style="animation-delay:0.60s"></i><i style="animation-delay:0.65s"></i><i style="animation-delay:0.70s"></i><i style="animation-delay:0.75s"></i><i style="animation-delay:0.80s"></i><i style="animation-delay:0.85s"></i><i style="animation-delay:0.90s"></i><i style="animation-delay:0.95s"></i></div>
+    <div class="stats">Time elapsed: <b id="elapsed">0s</b></div>
+    <div class="stats" id="estimate">&nbsp;</div>
+</main>
 <script>
 var startTime = Date.now();
-var attempts = 0;
+var expected = parseFloat(document.querySelector('.box').dataset.expected) || 0;
+var cells = document.querySelectorAll('.bar i');
+var estimate = document.getElementById('estimate');
+
+if (expected > 0) {
+    document.querySelector('.bar').classList.add('timed');
+    estimate.textContent = 'Last start: ' + expected.toFixed(0) + 's';
+} else {
+    estimate.textContent = 'No estimate yet';
+}
+
+// fill the bar in proportion to the last start time, but never show it as
+// full: only the server being ready finishes the job
+function updateBar(elapsed) {
+    var max = cells.length - 1;
+    var n = Math.min(Math.floor(elapsed / expected * cells.length), max);
+    for (var i = 0; i < cells.length; i++) {
+        cells[i].classList.toggle('on', i < n);
+        cells[i].classList.toggle('slow', n === max && i === max);
+    }
+    if (elapsed > expected) {
+        estimate.textContent = 'Taking longer than usual...';
+    }
+}
 
 setInterval(function() {
     var elapsed = (Date.now() - startTime) / 1000;
     document.getElementById('elapsed').textContent = elapsed.toFixed(1) + 's';
+    if (expected > 0) {
+        updateBar(elapsed);
+    }
 }, 100);
 
 // Check status every second
 setInterval(function() {
-    attempts++;
-    var dots = '.'.repeat((attempts % 10) || 10);
-    document.getElementById('attempts').textContent = dots;
-
     fetch('/status')
         .then(function(r) { return r.text(); })
         .then(function(t) {

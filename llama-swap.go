@@ -83,6 +83,9 @@ func configureTailcatListener(cfg *config.Config, keyPath string) error {
 	if cfg.Tailcat == nil || len(cfg.Tailcat.Models) == 0 {
 		return fmt.Errorf("-listen-tailcat requires tailcat.models to define at least one exposed model")
 	}
+	if len(cfg.Tailcat.Allow) == 0 {
+		slog.Warn(`tailcat.allow is empty: every Tailcat client will get 403 Forbidden; add client node keys, or "*" to allow any client`)
+	}
 	return nil
 }
 
@@ -168,10 +171,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Loggers are wired per cfg.LogToStdout: proxy/upstream feed muxLog, which
-	// owns the combined history served by /logs. They outlive config reloads,
-	// so a LogToStdout change requires a restart to take effect.
-	muxLog, proxyLog, upstreamLog := server.NewLoggers(cfg.LogToStdout)
+	// Loggers are wired per cfg.LogToStdout: the selected streams feed
+	// logs.MuxLogs, which owns the combined history served by /logs. They
+	// outlive config reloads, so a LogToStdout change requires a restart to
+	// take effect.
+	logs, err := server.NewLoggers(cfg.LogToStdout)
+	if err != nil {
+		slog.Error("failed to create loggers", "error", err)
+		os.Exit(1)
+	}
+	proxyLog := logs.ProxyLogs
 
 	applyLogSettings := func(cfg config.Config) {
 		level := logmon.LevelInfo
@@ -184,10 +193,8 @@ func main() {
 			level = logmon.LevelError
 		}
 		timeFormat := logTimeFormats[strings.ToLower(strings.TrimSpace(cfg.LogTimeFormat))]
-		for _, lg := range []*logmon.Monitor{proxyLog, upstreamLog} {
-			lg.SetLogLevel(level)
-			lg.SetLogTimeFormat(timeFormat)
-		}
+		logs.SetLogLevel(level)
+		logs.SetLogTimeFormat(timeFormat)
 	}
 
 	applyLogSettings(cfg)
@@ -240,7 +247,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, initialStore, buildInfo, hardwareSnapshot, referenceDocs)
+	initialSrv, err := server.New(cfg, logs, perfMon, initialStore, buildInfo, hardwareSnapshot, referenceDocs)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		initialStore.Close()
@@ -259,18 +266,20 @@ func main() {
 		activeMu.RUnlock()
 		srv.ServeTailcatHTTP(w, r)
 	})
+	tailcatLogger := func(cfg config.Config) tailcat.Logger {
+		if cfg.Tailcat != nil && cfg.Tailcat.Debug {
+			return proxyLog
+		}
+		return nil
+	}
 	startTailcat := func(cfg config.Config) (*tailcat.Server, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
-		opts := tailcat.ServerOptions{
-			PrivateKey:     tailcatPrivateKey,
-			AllowedClients: cfg.Tailcat.AllowedClients,
-			Handler:        tailcatHandler,
-		}
-		if cfg.Tailcat.Debug {
-			opts.Logger = proxyLog
-		}
-		return tailcat.Start(ctx, opts)
+		return tailcat.Start(ctx, tailcat.ServerOptions{
+			PrivateKey: tailcatPrivateKey,
+			Handler:    tailcatHandler,
+			Logger:     tailcatLogger(cfg),
+		})
 	}
 
 	var activeTailcat *tailcat.Server
@@ -346,7 +355,7 @@ func main() {
 			}
 		}
 
-		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, newStore, buildInfo, hardwareSnapshot, referenceDocs)
+		newSrv, err := server.New(newCfg, logs, perfMon, newStore, buildInfo, hardwareSnapshot, referenceDocs)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			if storeChanged {
@@ -357,6 +366,10 @@ func main() {
 
 		if currentTailcat != nil {
 			newSrv.SetTailcatAddress(currentTailcat.Address())
+			// The listener is never restarted: connected Tailcat clients do not
+			// reconnect to a restarted server. tailcat.allow is enforced by
+			// newSrv per request; only the debug logger needs updating here.
+			currentTailcat.SetLogger(tailcatLogger(newCfg))
 		}
 
 		activeMu.Lock()

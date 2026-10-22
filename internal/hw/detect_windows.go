@@ -27,9 +27,9 @@ type win32ComputerSystem struct {
 	Model        string
 }
 
-func detectPlatform(ctx context.Context, _ *HardwareSnapshot) ([]detectedAccelerator, error) {
+func detectPlatform(ctx context.Context, snapshot *HardwareSnapshot) ([]detectedAccelerator, error) {
 	var result []detectedAccelerator
-	if nvidia, err := detectNvidia(ctx); err == nil {
+	if nvidia, err := detectNvidia(ctx, snapshot); err == nil {
 		result = append(result, nvidia...)
 	}
 	if dxgi, err := detectDXGI(); err == nil {

@@ -6,6 +6,7 @@ import {
   formatCapacity,
   formatRelativeTime,
   formatAbsoluteTime,
+  formatUptime,
 } from "./format";
 
 describe("formatDuration", () => {
@@ -92,5 +93,22 @@ describe("formatAbsoluteTime", () => {
     expect(formatAbsoluteTime(new Date(2026, 11, 31, 23, 59, 59).toISOString())).toBe(
       "2026-12-31 23:59:59"
     );
+  });
+});
+
+describe("formatUptime", () => {
+  it("shows seconds under a minute", () => {
+    expect(formatUptime(0)).toBe("0s");
+    expect(formatUptime(42_900)).toBe("42s");
+  });
+
+  it("shows the two largest units", () => {
+    expect(formatUptime((5 * 60 + 12) * 1000)).toBe("5m 12s");
+    expect(formatUptime((2 * 3600 + 5 * 60 + 30) * 1000)).toBe("2h 5m");
+    expect(formatUptime((3 * 86400 + 4 * 3600 + 59 * 60) * 1000)).toBe("3d 4h");
+  });
+
+  it("clamps negative durations from clock skew to 0s", () => {
+    expect(formatUptime(-5000)).toBe("0s");
   });
 });

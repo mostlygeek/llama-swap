@@ -69,6 +69,9 @@ func (s HardwareSnapshot) Validate() error {
 		if accelerator.PowerLimitWatts != nil && (*accelerator.PowerLimitWatts <= 0 || math.IsNaN(*accelerator.PowerLimitWatts) || math.IsInf(*accelerator.PowerLimitWatts, 0)) {
 			return fmt.Errorf("%s.power_limit_watts must be positive and finite", path)
 		}
+		if accelerator.NominalPowerWatts != nil && (*accelerator.NominalPowerWatts <= 0 || math.IsNaN(*accelerator.NominalPowerWatts) || math.IsInf(*accelerator.NominalPowerWatts, 0)) {
+			return fmt.Errorf("%s.nominal_power_watts must be positive and finite", path)
+		}
 	}
 	return nil
 }

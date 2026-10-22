@@ -41,13 +41,20 @@ func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
 
 // CreateRequestContextMiddleware returns middleware that extracts model and
 // auth info from the request into the context. Requests where no model can be
-// identified are rejected with a 404.
+// identified are rejected with a 404, and bodies over the size cap with a 413.
+//
+// JSON and multipart bodies without a Content-Length are first read here, so
+// this is where their size cap is usually hit.
 func CreateRequestContextMiddleware(cfg config.Config) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r = markInflightStart(r)
 			data, err := swaputil.FetchContext(r, cfg)
 			if err != nil {
+				if bodyErr := bodyTooLargeFrom(err); bodyErr != nil {
+					swaputil.SendResponse(w, r, bodyErr.status, bodyErr.message)
+					return
+				}
 				swaputil.SendError(w, r, swaputil.ErrNoModelInContext)
 				return
 			}

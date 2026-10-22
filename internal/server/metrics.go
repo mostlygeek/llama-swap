@@ -446,7 +446,7 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Act
 				cachedTokens = c
 			}
 			// Remember the last usage block so buildMetrics can read the
-			// TabbyAPI rates it embeds there.
+			// backend rates it embeds there.
 			usage = u
 		}
 		if t := parsed.Get("timings"); t.Exists() {
@@ -474,7 +474,7 @@ func parseMetrics(modelID string, start time.Time, usage, timings, responseMetri
 // buildMetrics composes an ActivityLogEntry from accumulated token counts and
 // optional llama-server timings (which override input/output and provide rates)
 // or vLLM response metrics (rates and speculative decoding counters). TabbyAPI
-// embeds its rates and total time in the usage block, which supplies base rates
+// and oMLX embed rates in the usage block, which supplies base rates
 // when timings and metrics are absent.
 func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, usage, timings, responseMetrics gjson.Result) ActivityLogEntry {
 	wallDurationMs := int(time.Since(start).Milliseconds())
@@ -488,10 +488,16 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 	// block. These are base values that llama-server timings and vLLM metrics
 	// override when present.
 	if usage.Exists() {
-		if v := usage.Get("prompt_tokens_per_sec"); v.Exists() {
+		if v := usage.Get("prompt_tokens_per_sec"); v.Exists() && v.Type != gjson.Null {
+			promptPerSecond = v.Float()
+		} else if v := usage.Get("prompt_tokens_per_second"); v.Type == gjson.Number {
+			// oMLX reports prompt throughput using the long-form suffix.
 			promptPerSecond = v.Float()
 		}
-		if v := usage.Get("completion_tokens_per_sec"); v.Exists() {
+		if v := usage.Get("completion_tokens_per_sec"); v.Exists() && v.Type != gjson.Null {
+			tokensPerSecond = v.Float()
+		} else if v := usage.Get("generation_tokens_per_second"); v.Type == gjson.Number {
+			// oMLX calls completion throughput generation throughput.
 			tokensPerSecond = v.Float()
 		}
 		if v := usage.Get("total_time"); v.Exists() {

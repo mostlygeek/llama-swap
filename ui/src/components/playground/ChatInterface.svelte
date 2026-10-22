@@ -246,10 +246,11 @@
       if (isReasoning && reasoningStartTime > 0) {
         patchLast({ reasoningTimeMs: Date.now() - reasoningStartTime });
       }
+      patchLast({ interrupted: "cancelled" });
       return;
     }
     const message = error instanceof Error ? error.message : "An error occurred";
-    patchLast({ content: lastText() + `\n\n**Error:** ${message}` });
+    patchLast({ content: lastText() + `\n\n**Error:** ${message}`, interrupted: "error" });
   }
 
   /** The conversation to send, with the optional system prompt prepended. */
@@ -591,7 +592,8 @@
             stats={statsFor(idx)}
             statsLive={statsLiveFor(idx)}
             onEdit={message.role === "user" ? (newContent) => editMessage(idx, newContent) : undefined}
-            onRegenerate={message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
+            interrupted={message.interrupted}
+            onRegenerate={!isStreaming && message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
               ? () => regenerateFromIndex(idx - 1)
               : undefined}
           />
