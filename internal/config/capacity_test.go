@@ -34,6 +34,7 @@ const capacityRouting = `routing:
         pools: {ram: 10, gpu0: 8}
 `
 
+// TestConfig_Capacity checks pool requirements and zero-usage, zero-cost defaults.
 func TestConfig_Capacity(t *testing.T) {
 	cfg, err := LoadConfigFromReader(strings.NewReader(capacityModels + capacityRouting))
 	require.NoError(t, err)
@@ -55,6 +56,8 @@ func TestConfig_Capacity(t *testing.T) {
 	}
 }
 
+// TestConfig_CapacityValidation covers malformed, impossible, and overflowing
+// requirements and conflicts with legacy routing configuration.
 func TestConfig_CapacityValidation(t *testing.T) {
 	for _, tc := range []struct{ name, from, to, want string }{
 		{"zero total", "ram: 10", "ram: 0", "total must be a positive integer"},
@@ -110,6 +113,8 @@ func TestConfig_CapacityValidation(t *testing.T) {
 	require.ErrorContains(t, err, "sum of evict_cost")
 }
 
+// TestConfig_CapacityConfigSources checks pool merging across configuration
+// files and rejects duplicate pool identities even when their limits agree.
 func TestConfig_CapacityConfigSources(t *testing.T) {
 	dir := t.TempDir()
 	writeYAML(t, dir, "models.yaml", capacityModels)
@@ -128,6 +133,8 @@ func TestConfig_CapacityConfigSources(t *testing.T) {
 	require.ErrorContains(t, err, `duplicate pools`)
 }
 
+// TestConfig_CapacitySpillover checks coexistence against each resource pool,
+// treating undeclared model requirements as zero usage.
 func TestConfig_CapacitySpillover(t *testing.T) {
 	for _, pool := range []string{"ram", "gpu0"} {
 		for _, total := range []int{9, 10} {
@@ -150,6 +157,8 @@ func TestConfig_CapacitySpillover(t *testing.T) {
 	require.NoError(t, err, "undeclared requirements consume zero")
 }
 
+// TestConfig_CapacitySchema checks schema constraints and verifies valid
+// examples also load, including configurations with inactive router settings.
 func TestConfig_CapacitySchema(t *testing.T) {
 	data, err := os.ReadFile("../../config-schema.json")
 	require.NoError(t, err)
@@ -204,6 +213,8 @@ func TestConfig_CapacitySchema(t *testing.T) {
 	}
 }
 
+// TestConfig_CapacityGuideExamples keeps the routing guide's YAML examples
+// compatible with the loader on both Unix and Windows checkouts.
 func TestConfig_CapacityGuideExamples(t *testing.T) {
 	data, err := os.ReadFile("../../docs/kb/guides/routing/groups-and-matrix.md")
 	require.NoError(t, err)

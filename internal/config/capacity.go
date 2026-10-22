@@ -14,6 +14,7 @@ type CapacityConfig struct {
 	Pools map[string]int64 `yaml:"pools"`
 }
 
+// UnmarshalYAML accepts only a pools mapping with integer resource limits.
 func (c *CapacityConfig) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("capacity must be a mapping")
@@ -30,8 +31,8 @@ func (c *CapacityConfig) UnmarshalYAML(node *yaml.Node) error {
 	return node.Decode((*rawCapacity)(c))
 }
 
-// Check YAML tags before decoding: yaml.v3 otherwise truncates fractional values
-// when assigning to int64. Pool names are data, but must be nonempty strings.
+// validateCapacityMap checks pool names and integer YAML tags before decoding
+// so yaml.v3 cannot silently truncate fractional resource values.
 func validateCapacityMap(node *yaml.Node, path string) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("%s must be a mapping", path)
@@ -48,6 +49,8 @@ func validateCapacityMap(node *yaml.Node, path string) error {
 	return nil
 }
 
+// validateModelCapacity rejects invalid usage and costs independently of the
+// selected router; pool references are checked when capacity routing is active.
 func validateModelCapacity(model ModelConfig) error {
 	if model.EvictCost < 0 {
 		return fmt.Errorf("evict_cost must be a nonnegative integer")

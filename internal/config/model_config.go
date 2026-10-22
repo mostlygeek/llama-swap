@@ -188,6 +188,8 @@ type ModelConfig struct {
 	HealthCheckTimeout int `yaml:"healthCheckTimeout"`
 }
 
+// UnmarshalYAML applies model defaults and checks capacity values before YAML
+// numeric conversions can truncate fractional requirements or eviction costs.
 func (m *ModelConfig) UnmarshalYAML(node *yaml.Node) error {
 	type rawModelConfig ModelConfig
 	defaults := rawModelConfig{

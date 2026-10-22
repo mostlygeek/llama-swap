@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newCapacityPlanner builds a single-pool planner for focused scheduling tests.
 func newCapacityPlanner(total int64, usage map[string]int64, costs map[string]int64) *capacitySwapper {
 	models := make(map[string]config.ModelConfig, len(usage))
 	for id, amount := range usage {
@@ -24,6 +25,8 @@ func newCapacityPlanner(total int64, usage map[string]int64, costs map[string]in
 	return &capacitySwapper{capacity: &config.CapacityConfig{Pools: map[string]int64{"ram": total}}, models: models, logger: logmon.NewWriter(io.Discard)}
 }
 
+// TestCapacity_EvictionFor checks feasibility, manual costs, and deterministic
+// ties without allowing the planner to mutate the scheduler's snapshot.
 func TestCapacity_EvictionFor(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -62,6 +65,8 @@ func TestCapacity_EvictionFor(t *testing.T) {
 	}
 }
 
+// TestCapacity_DecisionCache verifies decision reuse for logging and invalidation
+// when either the target or the resident snapshot changes.
 func TestCapacity_DecisionCache(t *testing.T) {
 	s := newCapacityPlanner(10, map[string]int64{"a": 6, "b": 4, "x": 6, "y": 4}, map[string]int64{"a": 2, "x": 2})
 	var logs bytes.Buffer
@@ -97,6 +102,8 @@ func TestCapacity_DecisionCache(t *testing.T) {
 	require.Equal(t, []string{"a"}, s.EvictionFor("y", []string{"a", "x"}))
 }
 
+// TestCapacity_UnloadAndRestart checks that eviction and explicit unload release
+// capacity while retained models continue serving without restarting.
 func TestCapacity_UnloadAndRestart(t *testing.T) {
 	a, b, c := newFakeProcess("a"), newFakeProcess("b"), newFakeProcess("c")
 	a.autoReady, b.autoReady, c.autoReady = true, true, true
@@ -118,6 +125,7 @@ func TestCapacity_UnloadAndRestart(t *testing.T) {
 	require.Equal(t, int32(0), a.stopCalls.Load())
 }
 
+// BenchmarkCapacity_EvictionFor measures uncached planning as residency grows.
 func BenchmarkCapacity_EvictionFor(b *testing.B) {
 	for _, n := range []int{8, 16, 24} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
@@ -138,8 +146,8 @@ func BenchmarkCapacity_EvictionFor(b *testing.B) {
 	}
 }
 
-// Three requests arrive while the first two starts are pending. The third
-// cannot consume unreserved capacity, or stop a chosen victim mid-request.
+// TestCapacity_PendingStartsAndBusyEviction checks that pending starts reserve
+// capacity and that eviction waits for a chosen victim's active request to end.
 func TestCapacity_PendingStartsAndBusyEviction(t *testing.T) {
 	a, b, c := newFakeProcess("a"), newFakeProcess("b"), newFakeProcess("c")
 	a.serveBlock = make(chan struct{})
@@ -183,11 +191,15 @@ func TestCapacity_PendingStartsAndBusyEviction(t *testing.T) {
 	require.False(t, a.stoppedWhileServing.Load())
 }
 
+// TestCapacity_NewRejectsInvalidBudget checks constructor validation for callers
+// that supply configuration directly instead of using the config loader.
 func TestCapacity_NewRejectsInvalidBudget(t *testing.T) {
 	_, err := NewCapacity(config.Config{}, logmon.NewGroup(io.Discard, true, true, true))
 	require.ErrorContains(t, err, "capacity configuration is required")
 }
 
+// TestCapacity_Pools checks independent and overlapping resource constraints,
+// counting each model's eviction cost once across all pools it consumes.
 func TestCapacity_Pools(t *testing.T) {
 	model := func(cost, ram, gpu0, gpu1 int64) config.ModelConfig {
 		return config.ModelConfig{EvictCost: cost, Capacities: map[string]int64{"ram": ram, "gpu0": gpu0, "gpu1": gpu1}}
@@ -211,8 +223,8 @@ func TestCapacity_Pools(t *testing.T) {
 	}
 }
 
-// Sum retained model usage independently of the planner's deficit calculations.
-// Include empty requirements and zero/mixed costs to check all tie breakers.
+// TestCapacity_ExhaustiveOracle compares planning with independent subset
+// enumeration and checks feasible, irredundant results under search cutoffs.
 func TestCapacity_ExhaustiveOracle(t *testing.T) {
 	for _, poolCount := range []int{1, 3} {
 		t.Run(fmt.Sprintf("%d pools", poolCount), func(t *testing.T) {
@@ -300,6 +312,8 @@ func TestCapacity_ExhaustiveOracle(t *testing.T) {
 	}
 }
 
+// TestCapacity_SearchCutoffRetainsRedundantVictim checks that a cheaper plan
+// found before a cutoff does not evict a model that frees no needed resources.
 func TestCapacity_SearchCutoffRetainsRedundantVictim(t *testing.T) {
 	s := newCapacityPlanner(10, map[string]int64{"a": 0, "b": 6, "c": 2, "d": 2, "x": 4}, map[string]int64{"b": 6, "c": 4, "d": 4})
 	// The greedy seed evicts C+D (cost 8). DFS first finds A+B (cost 6)

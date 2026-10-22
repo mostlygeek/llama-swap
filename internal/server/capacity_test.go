@@ -21,8 +21,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Exercise real subprocesses through server dispatch, including preload, alias
-// and profile resolution, explicit unload, TTL, and constructing a new budget.
+// TestServer_CapacityProcessLifecycle exercises real subprocesses through server
+// dispatch, including preload, model resolution, unload, TTL, and a fresh budget.
 func TestServer_CapacityProcessLifecycle(t *testing.T) {
 	name := fmt.Sprintf("simple-responder_%s_%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {

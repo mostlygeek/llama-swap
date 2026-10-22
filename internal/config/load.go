@@ -11,6 +11,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// LoadConfigFromReader expands macros, applies defaults, and validates the
+// configuration, normalizing legacy and selected router settings.
 func LoadConfigFromReader(r io.Reader) (Config, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {

@@ -13,6 +13,8 @@ import (
 // Capacity shares process and scheduling machinery with Group and Matrix.
 type Capacity struct{ *baseRouter }
 
+// NewCapacity validates resource limits and starts a router using the shared
+// process lifecycle and scheduler with capacity-based eviction planning.
 func NewCapacity(conf config.Config, logs *logmon.Group) (*Capacity, error) {
 	capacity := conf.Routing.Router.Settings.Capacity
 	if err := config.ValidateCapacity(capacity, conf.Models); err != nil {
@@ -54,6 +56,8 @@ type capacitySwapper struct {
 	lastValid   bool
 }
 
+// EvictionFor plans evictions for a resident snapshot, caching the decision for
+// the scheduler's subsequent OnSwapStart call on the same event-loop goroutine.
 func (s *capacitySwapper) EvictionFor(target string, running []string) []string {
 	if s.lastValid && s.lastTarget == target && slices.Equal(s.lastRunning, running) {
 		return s.lastEvict
@@ -66,8 +70,8 @@ func (s *capacitySwapper) EvictionFor(target string, running []string) []string 
 	return evict
 }
 
-// Search only resident models, including pending starts. Minimize total cost,
-// then eviction count, then sorted IDs. Each model's cost is counted once even
+// evictionFor searches resident models, including pending starts, minimizing
+// total cost, then eviction count, then sorted IDs. Costs are counted once even
 // when it releases several resources. A feasible greedy seed keeps the decision
 // safe if the node budget is exhausted; optimality is not guaranteed then.
 func (s *capacitySwapper) evictionFor(target string, running []string) []string {
@@ -232,6 +236,7 @@ func (s *capacitySwapper) evictionFor(target string, running []string) []string 
 	return best
 }
 
+// OnSwapStart logs the cached eviction plan when the scheduler begins a swap.
 func (s *capacitySwapper) OnSwapStart(target string, running []string) {
 	evict := s.EvictionFor(target, running)
 	if len(evict) > 0 {

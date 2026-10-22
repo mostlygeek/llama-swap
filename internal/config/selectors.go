@@ -117,6 +117,8 @@ func validateSelectors(config Config) error {
 	return nil
 }
 
+// validateSpilloverCoexistence ensures local spillover targets can remain
+// resident together under the selected router's constraints.
 func validateSpilloverCoexistence(config Config, selectorID string, targets []string) error {
 	if len(targets) <= 1 {
 		return nil

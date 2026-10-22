@@ -207,6 +207,8 @@ type BuildInfo struct {
 	Date    string
 }
 
+// New constructs the selected local router, peer router, and HTTP handlers
+// using the supplied configuration and shared services.
 func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs) (*Server, error) {
 	var local router.LocalRouter
 	var err error
