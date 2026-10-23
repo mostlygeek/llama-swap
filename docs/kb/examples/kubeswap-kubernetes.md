@@ -445,7 +445,7 @@ mostly sharing the same pool shape) stays a few lines; for a small fleet
 like this one, the hand-written matrix is about the same length and gives
 you full DSL control. Other builder shapes (`pools` for per-category
 budgets, `manual` for a verbatim pass-through) and the `exclusive:` option
-are documented in the kubeswap-kubernetes article and the chart README.
+are documented in the `guides/tools/kubeswap` article and the chart README.
 
 ## Talking to it
 
@@ -496,7 +496,7 @@ curl -s $LS/v1/audio/speech -H 'Content-Type: application/json' \
 
 ## Related
 
-- `guides/operations/kubeswap-kubernetes` — how the wrapper works,
+- `guides/tools/kubeswap` — how the wrapper works,
   lifecycle semantics, GPU/CPU resource mapping, hand-rolled RBAC
 - `guides/operations/debugging-backends` — the status → logs → kubectl
   failure chain and the symptom table

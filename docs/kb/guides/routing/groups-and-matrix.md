@@ -121,7 +121,7 @@ Give slow cold-starting backends a high cost.
 
 When you deploy the head end with the kubeswap Helm chart, the chart's
 `config.matrix` values can *generate* this whole section from the model
-roster instead of you writing the DSL (see the kubeswap-kubernetes
+roster instead of you writing the DSL (see the `guides/tools/kubeswap`
 article's matrix-builder section); hand-written routing and the builder are
 mutually exclusive.
 
@@ -197,5 +197,5 @@ Higher numbers are serviced first. Models default to 0.
 
 - `reference/config/routing` — the full annotated section
 - `guides/model-runtime/ttl-and-unloading` — reclaiming VRAM from idle models
-- `guides/operations/kubeswap-kubernetes` — the kubeswap Helm chart, whose
+- `guides/tools/kubeswap` — the kubeswap Helm chart, whose
   `config.matrix` builds this section from the model roster

@@ -6,7 +6,16 @@ When a request arrives and llama-swap is unavailable, wol-proxy sends a WOL pack
 
 This utility helps conserve energy by allowing GPU-heavy servers to remain suspended when idle, as they can consume hundreds of watts even when not actively processing requests.
 
+## Build
+
+```shell
+go build -o wol-proxy ./cmd/wol-proxy
+# or: make wol-proxy   (writes to ./build)
+```
+
 ## Usage
+
+wol-proxy runs on an always-on machine on the same LAN as the llama-swap server. Point clients at wol-proxy instead of llama-swap.
 
 ```shell
 # minimal
@@ -27,6 +36,14 @@ $ ./wol-proxy -mac BA:DC:0F:FE:E0:00 -upstream http://192.168.1.13:8080 \
     -require-confirm
 ```
 
+## How it works
+
+- wol-proxy keeps an SSE connection open to the upstream's `/api/events`. While it is connected the upstream is "ready". If it fails or closes, the upstream is "not ready" and wol-proxy retries with a growing delay (up to 10 seconds).
+- Every 10 seconds it also requests the upstream's `/wol-health`. If that gets no response within 5 seconds (for example the machine suspended without closing the connection), the upstream is marked not ready.
+- A request that arrives while the upstream is not ready sends a Wake-on-LAN packet (UDP broadcast to port 9) and waits for the upstream to become ready. Requests to `/api/events` do not wake the server.
+- If `llama-swap` uses `apiKeys`, pass `-api-key` (or `LLAMA_SWAP_API_KEY`), otherwise wol-proxy cannot read `/api/events` and never sees the upstream as ready.
+- Wake-on-LAN must be enabled on the server's network card (and BIOS), and the packet is a LAN broadcast, so wol-proxy has to be on the same network segment as the server.
+
 ## Require confirmation
 
 By default any request wakes the server. With `-require-confirm`, nothing is sent until the user agrees:
@@ -40,4 +57,6 @@ While the server wakes up, a loading page shows a progress bar. The proxy rememb
 
 ## API
 
-`GET /status` - that's it. Everything else is proxied to the upstream server.
+`GET /status` returns the current upstream status (`ready` or `not ready`) and the number of consecutive connection failures. Everything else is proxied to the upstream server.
+
+See also the knowledge base article `docs/kb/guides/tools/wol-proxy.md`.
