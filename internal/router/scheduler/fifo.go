@@ -18,9 +18,11 @@ const defaultConcurrencyLimit = 10
 
 // activeSwap tracks one in-flight swap and the callers waiting on it.
 type activeSwap struct {
-	modelID string
-	evict   []string
-	waiters []HandlerReq
+	modelID    string
+	generation uint64
+	cancel     func()
+	evict      []string
+	waiters    []HandlerReq
 }
 
 // FIFO is the default scheduler. Requests are handled in a first-in, first-out order.
@@ -44,6 +46,8 @@ type FIFO struct {
 	reserved map[string]int
 	inFlight map[string]int
 	queued   []HandlerReq
+
+	nextGeneration uint64
 }
 
 // NewFIFO builds a FIFO scheduler. Per-model concurrency limits are derived
@@ -188,9 +192,10 @@ func (s *FIFO) OnCancel(req HandlerReq) {
 // items still blocked stay in place.
 func (s *FIFO) OnSwapDone(ev SwapDone) {
 	sw, ok := s.active[ev.ModelID]
-	if !ok {
+	if !ok || sw.generation != ev.Generation {
 		return
 	}
+	sw.cancel()
 	delete(s.active, ev.ModelID)
 
 	for _, w := range sw.waiters {
@@ -227,14 +232,14 @@ func (s *FIFO) OnUnload(targets []string, timeout time.Duration) {
 		targetSet[id] = true
 	}
 
-	// Release waiters of any in-flight swap whose target is being unloaded.
-	// The swap goroutine itself is left to finish on its own; when its
-	// SwapDone arrives, OnSwapDone will find no entry in active and drop it.
+	// Cancel and join swaps before stopping their targets: otherwise a swap
+	// still evicting siblings could restart its target after the unload.
 	for id := range targetSet {
 		sw, ok := s.active[id]
 		if !ok {
 			continue
 		}
+		sw.cancel()
 		for _, w := range sw.waiters {
 			s.grantError(w, unloadErr)
 		}
@@ -269,6 +274,7 @@ func (s *FIFO) OnUnload(targets []string, timeout time.Duration) {
 // OnShutdown grants err to every waiter still held by the scheduler.
 func (s *FIFO) OnShutdown(err error) {
 	for _, sw := range s.active {
+		sw.cancel()
 		for _, w := range sw.waiters {
 			s.grantError(w, err)
 		}
@@ -369,13 +375,16 @@ func (s *FIFO) limit(modelID string) int {
 // the set EvictionFor saw, forwarded to OnSwapStart so the planner logs against
 // the same picture it decided on.
 func (s *FIFO) startSwap(initial HandlerReq, evict, running []string) {
-	s.active[initial.Model] = &activeSwap{
-		modelID: initial.Model,
-		evict:   evict,
-		waiters: []HandlerReq{initial},
+	s.nextGeneration++
+	sw := &activeSwap{
+		modelID:    initial.Model,
+		generation: s.nextGeneration,
+		evict:      evict,
+		waiters:    []HandlerReq{initial},
 	}
+	s.active[initial.Model] = sw
 	s.planner.OnSwapStart(initial.Model, running)
-	s.effects.StartSwap(initial.Model, evict)
+	sw.cancel = s.effects.StartSwap(initial.Model, sw.generation, evict)
 }
 
 // enqueue inserts req into the queue in priority order: it goes just before the
