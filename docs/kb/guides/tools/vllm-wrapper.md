@@ -70,7 +70,7 @@ port; two models sharing one would wake the same server.
 | --- | --- | --- |
 | `--vllm-url` | required | base URL of the vLLM server |
 | `--sleep-level` | `1` | vLLM sleep level sent in the `/sleep` request |
-| `--stop-pid` | none | PID of the `serve` process to stop after vLLM is asleep; use `${PID}` |
+| `--stop-pid` | none | PID of the `serve` process to stop after vLLM is asleep. Set it to `${PID}`; without it the unload ends in a process-group kill |
 
 ## What goes wrong
 
@@ -80,9 +80,9 @@ port; two models sharing one would wake the same server.
   with `--enable-sleep-mode`; without it `cmdStop` fails.
 - **VRAM is not freed.** Check vLLM's own logs for the `/sleep` request and its
   result. What a sleep level frees is defined by vLLM, not by vllm-wrapper.
-- **The vLLM server dies with the model.** On a normal unload only `cmdStop` runs.
-  If llama-swap has to force-stop the model, it signals the whole process group,
-  which includes a vLLM started directly after `--`. Starting it with
-  `systemd-run` keeps it independent.
-- **`--stop-pid` missing.** `serve` keeps running, so llama-swap still sees the
-  model as loaded.
+- **vLLM is killed on unload and the next swap-in is a cold start.** llama-swap
+  treats the model as stopped when `serve` exits. Without `--stop-pid ${PID}` in
+  `cmdStop`, `serve` keeps running; after `unloadTimeout` (default 10s)
+  llama-swap kills the whole process group, including a vLLM started directly
+  after `--`. Always pass `--stop-pid ${PID}`. Starting vLLM with `systemd-run`
+  also keeps it out of the process group.

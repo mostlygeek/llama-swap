@@ -78,9 +78,11 @@ models:
       vllm-wrapper sleep
       --vllm-url http://127.0.0.1:8000
       --stop-pid ${PID}
-    # Optional flags:
+    # Flags:
     #   --sleep-level: sleep level to use (default: 1)
     #   --stop-pid: PID of the serve proxy to terminate after a successful sleep request
+    #     (always set it to ${PID}: llama-swap waits for `serve` to exit, and after unloadTimeout
+    #     kills the whole process group, including a directly started vLLM)
 ```
 
 When llama-swap stops the model, it will:
