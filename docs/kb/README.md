@@ -16,6 +16,8 @@ docs/kb/
     connectivity/*.md
     api-integration/*.md
     operations/*.md
+    upstreams/*.md       specific inference servers (comfyui, audio.cpp, ...)
+    tools/*.md           programs shipped in cmd/ (wol-proxy, vllm-wrapper, ...)
   examples/*.md    concrete, copy-pasteable configurations
   tutorials/*.md   start-to-finish walkthroughs
 ```
@@ -24,6 +26,15 @@ A document's **id** is its path without the extension, e.g.
 `guides/model-runtime/ttl-and-unloading`. Guide IDs include their topic
 directory. Ids are stable — renaming a file changes its id and
 breaks links from other articles.
+
+## Tool articles
+
+Programs in `cmd/` that users run get an article at `guides/tools/<binary>.md`
+(extra articles: `<binary>-<topic>.md`). Each tool also has a
+`cmd/<tool>/README.md` with why it exists, how to build it and basic usage.
+The article is a shorter version of the same material for the Docs agent, so
+some overlap is fine; keep the two in sync when the tool changes. Writing a new
+tool article is a decision for the maintainer, not every program in `cmd/` needs one.
 
 ## Frontmatter
 

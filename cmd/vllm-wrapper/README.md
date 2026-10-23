@@ -19,6 +19,8 @@ When using vLLM with llama-swap, you can leverage vLLM's sleep mode to drastical
 
 ## Installation
 
+vllm-wrapper is for Linux and macOS (it signals the `serve` process with Unix signals) and is also installed in the unified llama-swap container image.
+
 Build the binary from source:
 
 ```bash
@@ -76,9 +78,11 @@ models:
       vllm-wrapper sleep
       --vllm-url http://127.0.0.1:8000
       --stop-pid ${PID}
-    # Optional flags:
+    # Flags:
     #   --sleep-level: sleep level to use (default: 1)
     #   --stop-pid: PID of the serve proxy to terminate after a successful sleep request
+    #     (always set it to ${PID}: llama-swap waits for `serve` to exit, and after unloadTimeout
+    #     kills the whole process group, including a directly started vLLM)
 ```
 
 When llama-swap stops the model, it will:
@@ -149,7 +153,7 @@ cmd: |
   --vllm-url http://127.0.0.1:18000
   --listen :${PORT}
   --wait-timeout 5m
-  --journal-unit: vllm-qwen.service
+  --journal-unit vllm-qwen.service
   # optional systemd user unit whose new journal entries are forwarded to the wrapper's stdout, making vLLM logs available through llama-swap's upstream log stream.
   --
   systemd-run
@@ -200,7 +204,7 @@ sudo -u llama env \
 
 ### serve subcommand
 
-1. **Health check**: Sends a GET request to `${vllm-url}${health-path}` (default `/health`). If the response is HTTP 200, the daemon is considered healthy and awake, and we proceed to step 4.
+1. **Health check**: Sends a GET request to `${vllm-url}${health-path}` (default `/health`). If the response is HTTP 200, the daemon is reachable. It may still be asleep, so the wrapper sends it a wake-up request anyway (harmless if it is awake), waits up to 10 seconds for it to be healthy again, and proceeds to step 4.
 2. **Wake up**: If the health check fails (non‑200 or connection error), send a POST request to `${vllm-url}/wake_up`. If the wake‑up succeeds (HTTP 200 or 204), proceed to step 4.
 3. **Start daemon**: If the wake‑up fails (indicating the daemon is not running), use the command specified after `--` (argv-based, launched via `exec.Command`). The wrapper starts the command as a child process, then waits for the daemon to become healthy by polling the health path.
 4. **Reverse proxy**: Once the daemon is healthy, start an HTTP server listening on `${PORT}` (or the address provided to `--listen`) that proxies all requests to the vLLM upstream URL. The proxy preserves streaming responses by setting `X-Accel-Buffering: no`.
@@ -231,3 +235,5 @@ go build -o vllm-wrapper ./cmd/vllm-wrapper
 ```bash
 go test ./...
 ```
+
+See also the knowledge base articles `docs/kb/guides/tools/vllm-wrapper.md` and `docs/kb/guides/tools/vllm-wrapper-systemd.md`.

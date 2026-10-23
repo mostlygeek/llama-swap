@@ -30,6 +30,11 @@
 - Run `make test-dev` afterward; `TestKB_FrontmatterIsValid` in
   `internal/docagent` checks the frontmatter and that `config_keys` resolve.
 
+### Tools under `cmd/`
+
+- Before adding, changing or documenting a program under `cmd/` (or any
+  standalone tool), read `cmd/AGENTS.md`.
+
 ### git commit rules
 
 - Run `gofmt -w <file>` before committing to fix any formatting

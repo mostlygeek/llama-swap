@@ -653,3 +653,5 @@ error during a watch is printed and the watch continues.
 `kubeswap` is part of the llama-swap project and documented here in that
 context; it does work standalone against any HTTP server container
 (kubeconfig + the `--listen` port), should anyone want that.
+
+See also the knowledge base article `docs/kb/guides/tools/kubeswap.md`.
