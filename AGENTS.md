@@ -32,19 +32,9 @@
 
 ### Tools under `cmd/`
 
-- Every tool that users run (`wol-proxy`, `fake-model`, `vllm-wrapper`,
-  `kubeswap`, ...) has a `cmd/<tool>/README.md` that says why the tool
-  exists, how to build it, and how to use it, with basic usage examples.
-- When adding a new tool under `cmd/`, or any other tool-like program, ask the
-  user whether to write a knowledge base article for it. Do not add one
-  without asking: not everything under `cmd/` is a user-facing tool (e.g.
-  `simple-responder`, `test-concurrency`, `monitor-test`).
-- Tool articles live in `docs/kb/guides/tools/`, named after the binary
-  (`guides/tools/<tool>.md`; extra articles use `<tool>-<topic>.md`).
-- When changing a tool that has an article there (flags, behavior, build,
-  defaults), update both `cmd/<tool>/README.md` and its article in the same
-  change. The two may overlap; the article feeds the Help page's Docs agent
-  and is the shorter of the two.
+- When adding, changing or documenting a program under `cmd/` (or any other
+  standalone tool), read `cmd/AGENTS.md` first. It has the README and
+  knowledge base rules for tools.
 
 ### git commit rules
 
