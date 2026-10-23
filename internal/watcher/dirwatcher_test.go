@@ -144,7 +144,11 @@ func TestDirWatcher_MissingDirRecovers(t *testing.T) {
 	time.Sleep(testInterval * 2)
 
 	// Remove the directory. No fire expected on disappearance alone.
-	require.NoError(t, os.RemoveAll(dir))
+	// On Windows, an in-flight scan can briefly hold a directory handle that
+	// prevents deletion. Retry until that scan closes its handle.
+	require.Eventually(t, func() bool {
+		return os.RemoveAll(dir) == nil
+	}, time.Second, testInterval, "directory removal should succeed after an in-flight scan finishes")
 	time.Sleep(testInterval * 3)
 	require.Equal(t, int64(0), atomic.LoadInt64(&n), "directory removal alone must not fire")
 
