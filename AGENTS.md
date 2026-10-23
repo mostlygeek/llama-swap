@@ -32,9 +32,8 @@
 
 ### Tools under `cmd/`
 
-- When adding, changing or documenting a program under `cmd/` (or any other
-  standalone tool), read `cmd/AGENTS.md` first. It has the README and
-  knowledge base rules for tools.
+- Before adding, changing or documenting a program under `cmd/` (or any
+  standalone tool), read `cmd/AGENTS.md`.
 
 ### git commit rules
 
