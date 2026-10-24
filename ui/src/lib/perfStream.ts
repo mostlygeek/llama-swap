@@ -74,6 +74,11 @@ export class PerfHistory {
   }
 
   setMeta(meta: PerfMeta): void {
+    // GPUs only get appended while the server runs. A different order means
+    // the server restarted its monitor (config reload), so old series no
+    // longer line up with the new indexes.
+    const prefix = this.meta.gpus.every((g, i) => meta.gpus[i]?.key === g.key);
+    if (!prefix) this.gpu = { t: [], gpus: [] };
     this.meta = meta;
     while (this.gpu.gpus.length < meta.gpus.length) {
       this.gpu.gpus.push(emptyGpuSeries(this.gpu.t.length));
