@@ -20,6 +20,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
+	"github.com/mostlygeek/llama-swap/internal/mcptools/sourcecode"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/store"
@@ -209,7 +210,11 @@ type BuildInfo struct {
 
 // New constructs the selected local router, peer router, and HTTP handlers
 // using the supplied configuration and shared services.
-func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs) (*Server, error) {
+//
+// code serves llama-swap's own source over MCP. It is built once by the caller
+// and shared across reloads, so its checkout is fetched once per process; nil
+// leaves the code__* tools out.
+func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs, code *sourcecode.Provider) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
@@ -262,11 +267,15 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 
 	// SysProvider is constructed here because this is where perf and hardware
 	// are in scope; wiring those in later is a change to internal/mcptools.
-	tools, err := mcptools.New(
+	providers := []mcptools.Provider{
 		docagent.NewDocsProvider(refs),
 		mcptools.NewSysProvider(nil),
 		config.NewConfigProvider(cfg),
-	)
+	}
+	if code != nil {
+		providers = append(providers, code)
+	}
+	tools, err := mcptools.New(providers...)
 	if err != nil {
 		return nil, fmt.Errorf("building the MCP tool registry: %w", err)
 	}
@@ -458,7 +467,9 @@ func (s *Server) routes() {
 	// consumed by the Playground's agentic chat and by any external MCP client.
 	// Registered without a method so non-POST reaches the handler and gets a
 	// 405 with Allow, rather than the mux's bare 404.
-	mux.Handle("/api/mcp", apiChain.ThenFunc(s.handleAPIMCP))
+	if !s.cfg.HelpAgent.Disable {
+		mux.Handle("/api/mcp", apiChain.ThenFunc(s.handleAPIMCP))
+	}
 
 	s.mux = mux
 	s.handler = chain.New(CreateRequestLogMiddleware(s.logs.HttpLogs), CreateCORSMiddleware(s.cfg)).Then(mux)

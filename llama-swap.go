@@ -24,6 +24,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/mcptools/sourcecode"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/server"
@@ -240,6 +241,15 @@ func main() {
 	// depend on cfg.
 	referenceDocs := docagent.NewWithSchema(docs.Files, docsConfigSchema)
 
+	// Shared the same way, so the source checkout behind the code__* MCP
+	// tools is fetched at most once per process, on first use.
+	sourceCode := sourcecode.NewProvider(sourcecode.Options{
+		Ref:     sourcecode.RefForVersion(version),
+		Version: version,
+		Commit:  commit,
+		Logf:    proxyLog.Infof,
+	})
+
 	initialStorePath := configStorePath(cfg)
 	initialStore, err := sqlite.New(initialStorePath)
 	if err != nil {
@@ -247,7 +257,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	initialSrv, err := server.New(cfg, logs, perfMon, initialStore, buildInfo, hardwareSnapshot, referenceDocs)
+	initialSrv, err := server.New(cfg, logs, perfMon, initialStore, buildInfo, hardwareSnapshot, referenceDocs, sourceCode)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		initialStore.Close()
@@ -355,7 +365,7 @@ func main() {
 			}
 		}
 
-		newSrv, err := server.New(newCfg, logs, perfMon, newStore, buildInfo, hardwareSnapshot, referenceDocs)
+		newSrv, err := server.New(newCfg, logs, perfMon, newStore, buildInfo, hardwareSnapshot, referenceDocs, sourceCode)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			if storeChanged {

@@ -142,6 +142,10 @@ export interface UIConfig {
   activity: {
     session_id: string[];
   };
+  /** helpagent.disable hides the Help page; the server then has no /api/mcp. */
+  helpagent?: {
+    disable: boolean;
+  };
 }
 
 export interface NetIOStat {

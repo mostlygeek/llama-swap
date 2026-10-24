@@ -7,7 +7,7 @@
   import { toggleTheme, themeMode, appTitle } from "../stores/theme";
   import { currentRoute } from "../stores/route";
   import { playgroundActivity, docsAgentStreaming } from "../stores/playgroundActivity";
-  import { performanceEnabled, models, tailcatStatus } from "../stores/api";
+  import { performanceEnabled, models, tailcatStatus, helpAgentEnabled } from "../stores/api";
   import { showUnlistedModels } from "../stores/modelDisplay";
   import { modelsMenuOpen } from "../stores/sidebar";
   import type { Model } from "../lib/types";
@@ -225,18 +225,20 @@
   </Sidebar.Content>
 
   <Sidebar.Footer>
-    <Sidebar.Menu>
-      <Sidebar.MenuItem>
-        <Sidebar.MenuButton isActive={isActive("/help", $currentRoute)} tooltipContent="Help">
-          {#snippet child({ props })}
-            <a href="/help" use:link {...props}>
-              <CircleQuestionMark />
-              <span class={$docsAgentStreaming ? "activity-link" : ""}>Help</span>
-            </a>
-          {/snippet}
-        </Sidebar.MenuButton>
-      </Sidebar.MenuItem>
-    </Sidebar.Menu>
+    {#if $helpAgentEnabled}
+      <Sidebar.Menu>
+        <Sidebar.MenuItem>
+          <Sidebar.MenuButton isActive={isActive("/help", $currentRoute)} tooltipContent="Help">
+            {#snippet child({ props })}
+              <a href="/help" use:link {...props}>
+                <CircleQuestionMark />
+                <span class={$docsAgentStreaming ? "activity-link" : ""}>Help</span>
+              </a>
+            {/snippet}
+          </Sidebar.MenuButton>
+        </Sidebar.MenuItem>
+      </Sidebar.Menu>
+    {/if}
 
     <div
       class="flex items-center justify-between gap-2 group-data-[collapsible=icon]:flex-col-reverse"
