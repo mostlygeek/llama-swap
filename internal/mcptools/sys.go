@@ -8,29 +8,30 @@ import (
 	"time"
 )
 
-// SysProvider serves facts about the machine llama-swap is running on.
-//
-// Today that is only the clock. The namespace is chosen to grow: llama-swap
-// already collects system and GPU statistics (perf.Monitor, served at
-// /api/performance) and a hardware snapshot (hw.HardwareSnapshot, served at
-// /api/hardware), and both belong here. Wiring them in is a change to this
-// file, because the provider is constructed in server.New where both are
-// already in scope.
-//
-// Its real job right now is to make the registry's aggregation real: a second
-// namespace means cross-provider routing and per-tool annotations are
-// exercised rather than assumed.
+// SysProvider serves facts about the machine llama-swap is running on: the
+// clock, and current system and GPU usage when a PerformanceReporter is
+// given. The hardware snapshot (hw.HardwareSnapshot, served at /api/hardware)
+// also belongs here; wiring it in is a change to this file.
 type SysProvider struct {
 	// now is injectable so tests can assert against a fixed instant.
-	now func() time.Time
+	now  func() time.Time
+	perf PerformanceReporter
 }
 
-// NewSysProvider builds the provider. A nil clock uses time.Now.
-func NewSysProvider(now func() time.Time) *SysProvider {
+// PerformanceReporter describes current system and GPU usage as text.
+// perf.Monitor implements it. It is an interface because perf depends on
+// config, which depends on this package.
+type PerformanceReporter interface {
+	PerformanceReport(ctx context.Context) string
+}
+
+// NewSysProvider builds the provider. A nil clock uses time.Now. A nil perf
+// leaves out the performance tool.
+func NewSysProvider(now func() time.Time, perf PerformanceReporter) *SysProvider {
 	if now == nil {
 		now = time.Now
 	}
-	return &SysProvider{now: now}
+	return &SysProvider{now: now, perf: perf}
 }
 
 func (p *SysProvider) ID() string { return "sys" }
@@ -38,7 +39,7 @@ func (p *SysProvider) ID() string { return "sys" }
 func (p *SysProvider) Shutdown(time.Duration) error { return nil }
 
 func (p *SysProvider) Tools(context.Context) ([]Tool, error) {
-	return []Tool{
+	tools := []Tool{
 		{
 			Name:  "now",
 			Title: "Current date and time",
@@ -60,13 +61,36 @@ func (p *SysProvider) Tools(context.Context) ([]Tool, error) {
 				"additionalProperties": false,
 			},
 		},
-	}, nil
+	}
+	if p.perf != nil {
+		tools = append(tools, Tool{
+			Name:  "performance",
+			Title: "Current system and GPU usage",
+			Description: "Get the newest CPU, memory, load and per-GPU readings (utilization, VRAM and shared " +
+				"memory, temperature, fan, power) from llama-swap's performance monitor. GPUs are only read " +
+				"while a model is loaded unless performance.gpu.poll is always; the result says when a " +
+				"section was not sampled.",
+			Annotations: &Annotations{ReadOnlyHint: true, IdempotentHint: false},
+			Tags:        []string{"gpu", "vram", "cpu", "memory", "performance", "system"},
+			InputSchema: map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{},
+				"additionalProperties": false,
+			},
+		})
+	}
+	return tools, nil
 }
 
-func (p *SysProvider) Call(_ context.Context, name string, args map[string]json.RawMessage) (Result, error) {
+func (p *SysProvider) Call(ctx context.Context, name string, args map[string]json.RawMessage) (Result, error) {
 	switch name {
 	case "now":
 		return p.timeNow(args), nil
+	case "performance":
+		if p.perf == nil {
+			return Result{}, fmt.Errorf("unknown tool %q", name)
+		}
+		return CapResult(p.perf.PerformanceReport(ctx), MaxToolResultBytes), nil
 	default:
 		return Result{}, fmt.Errorf("unknown tool %q", name)
 	}

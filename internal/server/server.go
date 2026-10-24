@@ -265,11 +265,19 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 	s.capcompat = capcompat.New(st.Cache(), logs.ProxyLogs)
 	s.capcompatCancel = event.On(s.onProcessStateChange)
 
+	// poll: active needs to know whether a model is loaded, which only the
+	// router can say.
+	var perfReporter mcptools.PerformanceReporter
+	if perfMon != nil {
+		perfMon.SetModelsLoaded(func() bool { return len(s.local.RunningStatus()) > 0 })
+		perfReporter = perfMon
+	}
+
 	// SysProvider is constructed here because this is where perf and hardware
-	// are in scope; wiring those in later is a change to internal/mcptools.
+	// are in scope.
 	providers := []mcptools.Provider{
 		docagent.NewDocsProvider(refs),
-		mcptools.NewSysProvider(nil),
+		mcptools.NewSysProvider(nil, perfReporter),
 		config.NewConfigProvider(cfg),
 	}
 	if code != nil {
@@ -457,7 +465,7 @@ func (s *Server) routes() {
 	mux.Handle("GET /api/events/logs", apiChain.ThenFunc(s.handleAPILogEvents))
 	mux.Handle("GET /api/metrics/activity", apiChain.ThenFunc(s.handleAPIActivity))
 	mux.Handle("GET /api/metrics/stats", apiChain.ThenFunc(s.handleAPIActivityStats))
-	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))
+	mux.Handle("GET /api/events/performance", apiChain.ThenFunc(s.handleAPIPerformanceEvents))
 	mux.Handle("GET /api/version", apiChain.ThenFunc(s.handleAPIVersion))
 	mux.Handle("GET /api/hardware", apiChain.ThenFunc(s.handleAPIHardware))
 	mux.Handle("GET /api/tailcat", apiChain.ThenFunc(s.handleAPITailcat))

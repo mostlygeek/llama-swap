@@ -3,596 +3,319 @@ package perf
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/perf/probe"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newTestLogger() *logmon.Monitor {
-	return logmon.NewWriter(io.Discard)
+// fakeProbe returns canned samples, or err, and counts reads.
+type fakeProbe struct {
+	name string
+
+	mu      sync.Mutex
+	samples []probe.GpuSample
+	err     error
+	reads   int
 }
 
-func TestNew_DefaultConfig(t *testing.T) {
-	logger := newTestLogger()
+func (f *fakeProbe) Name() string { return f.name }
 
-	m, err := New(config.PerformanceConfig{}, logger)
-	require.NoError(t, err)
-	require.NotNil(t, m)
-
-	assert.Equal(t, 100*time.Millisecond, m.conf.Every)
+func (f *fakeProbe) Read(context.Context) ([]probe.GpuSample, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reads++
+	return f.samples, f.err
 }
 
-func TestNew_CustomConfig(t *testing.T) {
-	logger := newTestLogger()
+func (f *fakeProbe) readCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reads
+}
 
-	cfg := config.PerformanceConfig{
-		Every: 500 * time.Millisecond,
+func ptr[T any](v T) *T { return &v }
+
+func sample(key, name string, util float64) probe.GpuSample {
+	return probe.GpuSample{Key: key, Name: name, State: probe.GpuStateOK, UtilPct: &util}
+}
+
+// testClock is a manually advanced clock.
+type testClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *testClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *testClock) add(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+// newTestMonitor builds a monitor whose probes come from fakes and whose
+// clock is controlled by the test.
+func newTestMonitor(t *testing.T, mutate func(*config.PerformanceConfig), fakes ...*fakeProbe) (*Monitor, *testClock) {
+	t.Helper()
+	c := config.DefaultPerformanceConfig()
+	names := make([]string, 0, len(fakes))
+	for _, f := range fakes {
+		names = append(names, f.name)
+	}
+	c.GPU.Probes = names
+	if mutate != nil {
+		mutate(&c)
 	}
 
-	m, err := New(cfg, logger)
+	byName := map[string]*fakeProbe{}
+	for _, f := range fakes {
+		byName[f.name] = f
+	}
+	clock := &testClock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
+	m, err := New(config.DefaultPerformanceConfig(), logmon.NewWriter(io.Discard), nil)
 	require.NoError(t, err)
-
-	assert.Equal(t, 500*time.Millisecond, m.conf.Every)
+	m.now = clock.now
+	m.goos = "linux"
+	m.readSys = func() (SysStat, error) { return SysStat{Timestamp: clock.now(), MemTotalMB: 1024}, nil }
+	m.newProbe = func(name string, _ probe.Options) (probe.Probe, error) {
+		if f, ok := byName[name]; ok {
+			return f, nil
+		}
+		return nil, fmt.Errorf("%s: %w", name, probe.ErrUnavailable)
+	}
+	m.applyConfig(c)
+	t.Cleanup(m.Stop)
+	return m, clock
 }
 
-func TestNew_NilLogger(t *testing.T) {
-	m, err := New(config.PerformanceConfig{}, nil)
+func TestPerf_NewNeedsLogger(t *testing.T) {
+	_, err := New(config.DefaultPerformanceConfig(), nil, nil)
 	assert.Error(t, err)
-	assert.Nil(t, m)
 }
 
-func TestNew_BelowMinimumConfig(t *testing.T) {
-	logger := newTestLogger()
+func TestPerf_HigherPriorityProbeWins(t *testing.T) {
+	first := &fakeProbe{name: "nvidia-smi", samples: []probe.GpuSample{sample("0000:01:00.0", "RTX", 90)}}
+	second := &fakeProbe{name: "sysfs", samples: []probe.GpuSample{
+		sample("0000:01:00.0", "NVIDIA nvidia 0x2684", 10),
+		sample("0000:00:02.0", "Intel i915", 5),
+	}}
+	m, _ := newTestMonitor(t, nil, first, second)
 
-	cfg := config.PerformanceConfig{
-		Every: 1 * time.Millisecond,
-	}
-
-	m, err := New(cfg, logger)
-	require.NoError(t, err)
-
-	assert.Equal(t, 100*time.Millisecond, m.conf.Every)
+	m.readGPU(context.Background())
+	_, gpu := m.Latest(context.Background())
+	require.NotNil(t, gpu)
+	require.Len(t, gpu.GPUs, 2)
+	assert.Equal(t, "RTX", gpu.GPUs[0].Name)
+	assert.Equal(t, 90.0, *gpu.GPUs[0].UtilPct)
+	assert.Equal(t, "0000:00:02.0", gpu.GPUs[1].Key)
 }
 
-func TestSubscribe_ReturnsChannels(t *testing.T) {
-	m, err := New(config.PerformanceConfig{}, newTestLogger())
-	require.NoError(t, err)
+func TestPerf_FailedProbeRetriedWhenPollingResumes(t *testing.T) {
+	broken := &fakeProbe{name: "rocm-smi", err: errors.New("boom")}
+	ok := &fakeProbe{name: "sysfs", samples: []probe.GpuSample{sample("0000:03:00.0", "AMD", 1)}}
+	m, clock := newTestMonitor(t, nil, broken, ok)
 
-	sysCh, gpuCh, unsub := m.Subscribe()
-	defer unsub()
+	m.readGPU(context.Background())
+	clock.add(5 * time.Second)
+	m.readGPU(context.Background())
+	assert.Equal(t, 1, broken.readCount(), "a failed probe is skipped while polling continues")
+	assert.Equal(t, 2, ok.readCount())
 
-	assert.NotNil(t, sysCh)
-	assert.NotNil(t, gpuCh)
-	assert.NotNil(t, unsub)
+	// an idle gap longer than two intervals counts as resuming
+	clock.add(time.Minute)
+	m.readGPU(context.Background())
+	assert.Equal(t, 2, broken.readCount())
 }
 
-func TestSubscribe_UnsubscribeRemovesListeners(t *testing.T) {
-	m, err := New(config.PerformanceConfig{}, newTestLogger())
-	require.NoError(t, err)
+func TestPerf_AutoFallsBackWhenEveryPickedProbeFails(t *testing.T) {
+	// auto on an NVIDIA-only host picks nvidia-smi; in a container without
+	// it, every probe in the full list is tried
+	nvidia := &fakeProbe{name: "nvidia-smi", err: fmt.Errorf("x: %w", probe.ErrUnavailable)}
+	sysfs := &fakeProbe{name: "sysfs", samples: []probe.GpuSample{sample("0000:01:00.0", "NVIDIA", 3)}}
+	m, _ := newTestMonitor(t, nil, nvidia, sysfs)
+	m.hardware = &hw.HardwareSnapshot{Accelerators: []hw.Accelerator{
+		{Kind: "gpu", Vendor: ptr("NVIDIA"), Memory: hw.AcceleratorMemory{Kind: "dedicated"}},
+	}}
+	c := m.conf
+	c.GPU.Probes = []string{"auto"}
+	m.applyConfig(c)
+	require.Len(t, m.probes, 1)
 
-	_, _, unsub := m.Subscribe()
-
-	m.mutex.RLock()
-	assert.Len(t, m.sysListeners, 1)
-	assert.Len(t, m.gpuListeners, 1)
-	m.mutex.RUnlock()
-
-	unsub()
-
-	m.mutex.RLock()
-	assert.Len(t, m.sysListeners, 0)
-	assert.Len(t, m.gpuListeners, 0)
-	m.mutex.RUnlock()
+	m.readGPU(context.Background())
+	_, gpu := m.Latest(context.Background())
+	require.NotNil(t, gpu)
+	require.Len(t, gpu.GPUs, 1)
+	assert.Equal(t, 1, sysfs.readCount())
+	assert.Equal(t, 1, nvidia.readCount(), "a failed probe is not retried in the same read")
 }
 
-func TestSubscribe_MultipleSubscriptions(t *testing.T) {
-	m, err := New(config.PerformanceConfig{}, newTestLogger())
-	require.NoError(t, err)
+func TestPerf_ManualProbesDoNotFallBack(t *testing.T) {
+	nvidia := &fakeProbe{name: "nvidia-smi", err: errors.New("boom")}
+	sysfs := &fakeProbe{name: "sysfs"}
+	m, _ := newTestMonitor(t, nil, nvidia)
+	m.fallback = []probe.Probe{sysfs}
 
-	sysCh1, gpuCh1, unsub1 := m.Subscribe()
-	sysCh2, gpuCh2, unsub2 := m.Subscribe()
-	defer unsub1()
-	defer unsub2()
-
-	assert.NotEqual(t, sysCh1, sysCh2)
-	assert.NotEqual(t, gpuCh1, gpuCh2)
-
-	m.mutex.RLock()
-	assert.Len(t, m.sysListeners, 2)
-	assert.Len(t, m.gpuListeners, 2)
-	m.mutex.RUnlock()
+	m.readGPU(context.Background())
+	assert.Equal(t, 0, sysfs.readCount())
 }
 
-func TestCurrent_EmptyByDefault(t *testing.T) {
-	m, err := New(config.PerformanceConfig{}, newTestLogger())
-	require.NoError(t, err)
+func TestPerf_Exclude(t *testing.T) {
+	p := &fakeProbe{name: "sysfs", samples: []probe.GpuSample{
+		sample("0000:00:02.0", "Intel UHD 630", 1),
+		sample("0000:01:00.0", "RTX 4090", 2),
+		sample("GPU-abc", "RTX 3090", 3),
+	}}
+	m, _ := newTestMonitor(t, func(c *config.PerformanceConfig) {
+		c.GPU.Exclude = []string{"Intel UHD", "GPU-abc"}
+	}, p)
 
-	sysStats, gpuStats := m.Current()
-	assert.Empty(t, sysStats)
-	assert.Empty(t, gpuStats)
+	m.readGPU(context.Background())
+	_, gpu := m.Latest(context.Background())
+	require.Len(t, gpu.GPUs, 1)
+	assert.Equal(t, "RTX 4090", gpu.GPUs[0].Name)
 }
 
-func TestCurrent_ReturnsCopies(t *testing.T) {
-	m, err := New(config.PerformanceConfig{}, newTestLogger())
-	require.NoError(t, err)
+func TestPerf_SuspendedGPUKeepsKnownName(t *testing.T) {
+	p := &fakeProbe{name: "nvidia-smi", samples: []probe.GpuSample{sample("0000:01:00.0", "RTX 5090 Laptop", 5)}}
+	m, clock := newTestMonitor(t, nil, p)
+	m.readGPU(context.Background())
 
-	now := time.Now()
-	m.sysRing.Push(SysStat{Timestamp: now, MemTotalMB: 1024})
-	m.gpuRing.Push([]GpuStat{{Timestamp: now, ID: 0, Name: "gpu0"}})
+	p.samples = []probe.GpuSample{{Key: "0000:01:00.0", Name: "NVIDIA GPU", State: probe.GpuStateSuspended}}
+	clock.add(5 * time.Second)
+	m.readGPU(context.Background())
 
-	sysStats, gpuStats := m.Current()
-
-	assert.Len(t, sysStats, 1)
-	assert.Len(t, gpuStats, 1)
-	assert.Equal(t, 1024, sysStats[0].MemTotalMB)
-	assert.Equal(t, "gpu0", gpuStats[0].Name)
-
-	// modifying the returned slice should not affect the original
-	sysStats[0].MemTotalMB = 999
-	original, _ := m.Current()
-	assert.Equal(t, 1024, original[0].MemTotalMB)
+	_, gpu := m.Latest(context.Background())
+	require.Len(t, gpu.GPUs, 1)
+	assert.Equal(t, "RTX 5090 Laptop", gpu.GPUs[0].Name)
+	assert.Equal(t, "RTX 5090 Laptop", m.GPUName("0000:01:00.0"))
+	assert.Equal(t, []string{"0000:01:00.0"}, m.cloneStatus().Suspended)
 }
 
-func TestStart_CollectsSysStats(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping slow test")
-	}
+func TestPerf_WatchSendsMetaAndReadings(t *testing.T) {
+	p := &fakeProbe{name: "nvidia-smi", samples: []probe.GpuSample{sample("0000:01:00.0", "RTX", 5)}}
+	m, _ := newTestMonitor(t, nil, p)
+	m.SetModelsLoaded(func() bool { return true })
 
-	m, err := New(config.PerformanceConfig{Every: 100 * time.Millisecond}, newTestLogger())
-	require.NoError(t, err)
+	state, events, stop := m.Watch()
+	defer stop()
+	assert.Empty(t, state.GPUs)
+	assert.Equal(t, 5*time.Second, state.GPUEvery)
 
-	m.Start()
-
-	time.Sleep(350 * time.Millisecond)
-	m.Stop()
-
-	sysStats, _ := m.Current()
-	assert.NotEmpty(t, sysStats, "expected sys stats to be collected")
-}
-
-func TestStart_StopStopsGoroutines(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping slow test")
-	}
-
-	m, err := New(config.PerformanceConfig{Every: 100 * time.Millisecond}, newTestLogger())
-	require.NoError(t, err)
-
-	m.Start()
-	if m.stopCancel == nil {
-		t.Error("stopCancel should not be nil after Start()")
-	}
-
-	m.Stop()
-	if m.stopCancel != nil {
-		t.Error("stopCancel should be nil after Stop()")
-	}
-}
-
-func TestStart_SubscriberReceivesStats(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping slow test")
-	}
-
-	m, err := New(config.PerformanceConfig{Every: 100 * time.Millisecond}, newTestLogger())
-	require.NoError(t, err)
-
-	sysCh, _, unsub := m.Subscribe()
-	defer unsub()
-
-	m.Start()
-	defer m.Stop()
-
-	select {
-	case s := <-sysCh:
-		assert.False(t, s.Timestamp.IsZero())
-		assert.NotEmpty(t, s.CpuUtilPerCore)
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for sys stats")
-	}
-}
-
-// fakeGpuCollector stands in for the platform GPU collector. Each call to its
-// start method runs the next step: a step either fails to start, or returns a
-// channel that closes without a sample, or delivers one sample and then closes
-// or stays open until ctx is done. Its wait method records every restart wait
-// and returns at once, unless blockWait is set.
-type fakeGpuCollector struct {
-	mu    sync.Mutex
-	calls int
-	steps []fakeGpuStep
-	waits []time.Duration
-
-	// blockWait makes the first restart wait signal waiting, block until ctx
-	// is done, then signal waitDone.
-	blockWait bool
-	waiting   chan struct{}
-	waitDone  chan struct{}
-}
-
-type fakeGpuStep struct {
-	err      error
-	noSample bool
-	stayOpen bool
-}
-
-func (f *fakeGpuCollector) start(ctx context.Context, _ time.Duration, _ *logmon.Monitor) (chan []GpuStat, error) {
-	f.mu.Lock()
-	f.calls++
-	call := f.calls
-	step := fakeGpuStep{stayOpen: true}
-	if call <= len(f.steps) {
-		step = f.steps[call-1]
-	}
-	f.mu.Unlock()
-
-	if step.err != nil {
-		return nil, step.err
-	}
-
-	ch := make(chan []GpuStat, 1)
-	go func() {
-		defer close(ch)
-		if step.noSample {
-			// exits before it reports anything
-			return
-		}
-		// ID carries the call number so a test can tell collectors apart.
-		// One that stays open keeps reporting, as nvidia-smi does every
-		// interval: the monitor drops a sample when a listener has not read
-		// the previous one, so no single sample is guaranteed to arrive.
-		for {
-			select {
-			case ch <- []GpuStat{{ID: call}}:
-			case <-ctx.Done():
-				return
-			}
-			if !step.stayOpen {
-				return
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(5 * time.Millisecond):
-			}
-		}
-	}()
-	return ch, nil
-}
-
-func (f *fakeGpuCollector) callCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.calls
-}
-
-func (f *fakeGpuCollector) wait(ctx context.Context, d time.Duration) bool {
-	f.mu.Lock()
-	f.waits = append(f.waits, d)
-	block := f.blockWait
-	f.mu.Unlock()
-
-	if block {
-		f.waiting <- struct{}{}
-		<-ctx.Done()
-		f.waitDone <- struct{}{}
-		return false
-	}
-	select {
-	case <-ctx.Done():
-		return false
-	default:
-		return true
-	}
-}
-
-func (f *fakeGpuCollector) waitHistory() []time.Duration {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]time.Duration(nil), f.waits...)
-}
-
-// newGpuTestMonitor retains every scripted sample so immediate fake restarts
-// cannot overflow the single-slot listener used by production subscriptions.
-func newGpuTestMonitor(t *testing.T, f *fakeGpuCollector) (*Monitor, chan []GpuStat) {
-	t.Helper()
-	m, err := New(config.PerformanceConfig{Every: 100 * time.Millisecond}, newTestLogger())
-	require.NoError(t, err)
-	m.gpuStats = f.start
-	m.gpuWait = f.wait
-
-	gpuCh := make(chan []GpuStat, len(f.steps)+1)
-	m.gpuListeners[gpuCh] = struct{}{}
-	t.Cleanup(func() {
-		m.mutex.Lock()
-		defer m.mutex.Unlock()
-		delete(m.gpuListeners, gpuCh)
-	})
-	return m, gpuCh
-}
-
-func waitGpuStat(t *testing.T, gpuCh chan []GpuStat, wantID int) {
-	t.Helper()
-	deadline := time.After(2 * time.Second)
-	for {
+	m.readGPU(context.Background())
+	kinds := map[EventKind]Event{}
+	for len(kinds) < 3 {
 		select {
-		case g := <-gpuCh:
-			if len(g) == 1 && g[0].ID == wantID {
-				return
-			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for GPU stats from collector %d", wantID)
+		case e := <-events:
+			kinds[e.Kind] = e
+		case <-time.After(time.Second):
+			t.Fatalf("missing events, got %v", kinds)
 		}
 	}
+	assert.Equal(t, []GpuInfo{{Key: "0000:01:00.0", Name: "RTX"}}, kinds[EventMeta].GPUs)
+	assert.Equal(t, StateOK, kinds[EventStatus].Status.GPU)
+	assert.Len(t, kinds[EventGPU].GPU.GPUs, 1)
 }
 
-func TestStart_RestartsGpuCollectorAfterItStops(t *testing.T) {
-	// the first collector delivers one sample and exits, like nvidia-smi dying
-	f := &fakeGpuCollector{steps: []fakeGpuStep{{stayOpen: false}}}
-	m, gpuCh := newGpuTestMonitor(t, f)
+func TestPerf_PollActiveNeedsViewerAndLoadedModel(t *testing.T) {
+	p := &fakeProbe{name: "nvidia-smi", samples: []probe.GpuSample{sample("0000:01:00.0", "RTX", 5)}}
+	m, _ := newTestMonitor(t, nil, p)
+	loaded := false
+	var mu sync.Mutex
+	m.SetModelsLoaded(func() bool { mu.Lock(); defer mu.Unlock(); return loaded })
 
 	m.Start()
-	defer m.Stop()
+	// system stats default to poll: always and read right away
+	require.Eventually(t, func() bool { s, _ := m.Latest(context.Background()); return s != nil }, time.Second, 10*time.Millisecond)
+	assert.Equal(t, 0, p.readCount(), "poll: active GPUs wait for a viewer")
 
-	waitGpuStat(t, gpuCh, 1)
-	waitGpuStat(t, gpuCh, 2)
-	assert.Equal(t, 2, f.callCount())
-}
-
-func TestStart_RetriesWhenGpuCollectorRestartFails(t *testing.T) {
-	f := &fakeGpuCollector{steps: []fakeGpuStep{
-		{stayOpen: false},
-		{err: ErrNoGpuTool},
-		{err: errors.New("nvidia-smi start failed")},
-	}}
-	m, gpuCh := newGpuTestMonitor(t, f)
-
-	m.Start()
-	defer m.Stop()
-
-	waitGpuStat(t, gpuCh, 1)
-	waitGpuStat(t, gpuCh, 4)
-	assert.Equal(t, 4, f.callCount())
-}
-
-func TestStart_GpuCollectorNotRestartedAfterStop(t *testing.T) {
-	f := &fakeGpuCollector{}
-	m, gpuCh := newGpuTestMonitor(t, f)
-
-	m.Start()
-	waitGpuStat(t, gpuCh, 1)
-	m.Stop()
-
-	// several restart delays
-	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, 1, f.callCount())
-}
-
-func TestStart_GpuCollectorUnavailableAtStartIsNotRetried(t *testing.T) {
-	f := &fakeGpuCollector{steps: []fakeGpuStep{{err: ErrNoGpuTool}}}
-	m, _ := newGpuTestMonitor(t, f)
-
-	m.Start()
-	defer m.Stop()
-
-	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, 1, f.callCount())
-	assert.Empty(t, f.waitHistory())
-}
-
-func TestStart_GpuRestartWaitDoublesUpToMax(t *testing.T) {
-	// one working collector, then restarts that exit without stats or fail
-	// to start, then a collector that works and stays up
-	f := &fakeGpuCollector{steps: []fakeGpuStep{
-		{stayOpen: false},
-		{noSample: true},
-		{err: errors.New("nvidia-smi start failed")},
-		{noSample: true},
-		{noSample: true},
-	}}
-	m, gpuCh := newGpuTestMonitor(t, f)
-
-	m.Start()
-	defer m.Stop()
-
-	waitGpuStat(t, gpuCh, 1)
-	waitGpuStat(t, gpuCh, 6)
-	assert.Equal(t, []time.Duration{
-		5 * time.Second,
-		10 * time.Second,
-		20 * time.Second,
-		30 * time.Second,
-		30 * time.Second,
-	}, f.waitHistory())
-}
-
-func TestStart_GpuRestartWaitResetsAfterStats(t *testing.T) {
-	f := &fakeGpuCollector{steps: []fakeGpuStep{
-		{stayOpen: false},
-		{noSample: true},
-		{noSample: true},
-		{stayOpen: false}, // delivers stats, so the wait starts over
-		{noSample: true},
-	}}
-	m, gpuCh := newGpuTestMonitor(t, f)
-
-	m.Start()
-	defer m.Stop()
-
-	// Collector 4's single sample can be dropped if collector 1's is still
-	// unread, so wait only for collector 6, which keeps reporting. The wait
-	// resets because the monitor received collector 4's stats, whether or
-	// not this listener saw them.
-	waitGpuStat(t, gpuCh, 6)
-	assert.Equal(t, []time.Duration{
-		5 * time.Second,
-		10 * time.Second,
-		20 * time.Second,
-		5 * time.Second,
-		10 * time.Second,
-	}, f.waitHistory())
-}
-
-func TestStart_StopDuringRestartWaitEndsCollector(t *testing.T) {
-	f := &fakeGpuCollector{
-		steps:     []fakeGpuStep{{stayOpen: false}},
-		blockWait: true,
-		waiting:   make(chan struct{}, 1),
-		waitDone:  make(chan struct{}, 1),
-	}
-	m, gpuCh := newGpuTestMonitor(t, f)
-
-	m.Start()
-	waitGpuStat(t, gpuCh, 1)
-	select {
-	case <-f.waiting:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for the restart wait to begin")
-	}
-
-	m.Stop()
-	select {
-	case <-f.waitDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("restart wait did not end after Stop")
-	}
-
-	// the loop must return instead of starting the collector again
+	_, _, stop := m.Watch()
 	time.Sleep(50 * time.Millisecond)
-	assert.Equal(t, 1, f.callCount())
+	assert.Equal(t, 0, p.readCount(), "a viewer alone is not enough without a loaded model")
+	stop()
+
+	mu.Lock()
+	loaded = true
+	mu.Unlock()
+	_, _, stop = m.Watch()
+	defer stop()
+	require.Eventually(t, func() bool { return p.readCount() == 1 }, time.Second, 10*time.Millisecond, "a new viewer wakes the GPU loop")
 }
 
-func TestWaitOrDone_ReturnsTrueAfterDelay(t *testing.T) {
-	assert.True(t, waitOrDone(context.Background(), time.Millisecond))
+func TestPerf_LatestReadsOnDemandUnderPollActive(t *testing.T) {
+	p := &fakeProbe{name: "nvidia-smi", samples: []probe.GpuSample{sample("0000:01:00.0", "RTX", 5)}}
+	m, clock := newTestMonitor(t, nil, p)
+	m.Start()
+	m.SetModelsLoaded(func() bool { return false })
+
+	_, gpu := m.Latest(context.Background())
+	assert.Nil(t, gpu, "no model loaded: GPUs are not sampled")
+	assert.Equal(t, 0, p.readCount())
+
+	m.SetModelsLoaded(func() bool { return true })
+	_, gpu = m.Latest(context.Background())
+	require.NotNil(t, gpu)
+	assert.Equal(t, 1, p.readCount())
+
+	// a second scrape within the interval reuses the reading
+	_, _ = m.Latest(context.Background())
+	assert.Equal(t, 1, p.readCount())
+
+	// after the model unloads the old reading goes stale and is dropped
+	m.SetModelsLoaded(func() bool { return false })
+	clock.add(11 * time.Second)
+	_, gpu = m.Latest(context.Background())
+	assert.Nil(t, gpu)
 }
 
-func TestWaitOrDone_ReturnsFalseWhenContextDone(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+func TestPerf_HistoryKeepsLastHour(t *testing.T) {
+	p := &fakeProbe{name: "nvidia-smi", samples: []probe.GpuSample{sample("0000:01:00.0", "RTX", 5)}}
+	m, clock := newTestMonitor(t, nil, p)
 
-	start := time.Now()
-	assert.False(t, waitOrDone(ctx, time.Hour))
-	assert.Less(t, time.Since(start), time.Second)
+	m.readGPU(context.Background())
+	clock.add(50 * time.Minute)
+	m.readGPU(context.Background())
+	clock.add(20 * time.Minute)
+
+	state, _, stop := m.Watch()
+	defer stop()
+	require.Len(t, state.GPU, 1, "readings older than an hour are dropped")
 }
 
-func TestReadSysStats(t *testing.T) {
-	s, err := ReadSysStats()
-	require.NoError(t, err)
+func TestPerf_DisabledSections(t *testing.T) {
+	m, _ := newTestMonitor(t, func(c *config.PerformanceConfig) { c.GPU.Disabled = true })
+	state, _, stop := m.Watch()
+	defer stop()
+	assert.Equal(t, time.Duration(0), state.GPUEvery)
+	assert.Equal(t, StateDisabled, state.Status.GPU)
+	assert.Equal(t, StatePaused, state.Status.System)
 
-	assert.False(t, s.Timestamp.IsZero())
-	assert.NotEmpty(t, s.CpuUtilPerCore)
-	assert.Greater(t, s.MemTotalMB, 0)
+	m.UpdateConfig(config.PerformanceConfig{Disabled: true})
+	assert.False(t, m.Enabled())
 }
 
-func TestCurrent_ConcurrentAccess(t *testing.T) {
-	m, err := New(config.PerformanceConfig{}, newTestLogger())
-	require.NoError(t, err)
+func TestPerf_UpdateConfigRebuildsProbes(t *testing.T) {
+	a := &fakeProbe{name: "nvidia-smi", samples: []probe.GpuSample{sample("0000:01:00.0", "A", 1)}}
+	b := &fakeProbe{name: "sysfs", samples: []probe.GpuSample{sample("0000:02:00.0", "B", 1)}}
+	m, _ := newTestMonitor(t, nil, a, b)
+	c := m.conf
+	c.GPU.Probes = []string{"sysfs"}
+	m.UpdateConfig(c)
 
-	m.sysRing.Push(SysStat{Timestamp: time.Now(), MemTotalMB: 1024})
-	m.gpuRing.Push([]GpuStat{{Timestamp: time.Now(), ID: 0}})
-
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sys, gpu := m.Current()
-			assert.Len(t, sys, 1)
-			assert.Len(t, gpu, 1)
-		}()
-	}
-	wg.Wait()
-}
-
-func TestParseNvidiaSmiLine_ValidLine(t *testing.T) {
-	line := "0, NVIDIA GeForce RTX 3080, GPU-12345678-1234-1234-1234-123456789abc, 65, 80, 8192, 10240, 75, 250"
-
-	stat := ParseNvidiaSmiLine(line)
-	require.NotNil(t, stat)
-
-	assert.Equal(t, 0, stat.ID)
-	assert.Equal(t, "NVIDIA GeForce RTX 3080", stat.Name)
-	assert.Equal(t, "GPU-12345678-1234-1234-1234-123456789abc", stat.UUID)
-	assert.Equal(t, 65, stat.TempC)
-	assert.Equal(t, 80.0, stat.GpuUtilPct)
-	assert.Equal(t, 8192, stat.MemUsedMB)
-	assert.Equal(t, 10240, stat.MemTotalMB)
-	assert.Equal(t, 75.0, stat.FanSpeedPct)
-	assert.Equal(t, 250.0, stat.PowerDrawW)
-	assert.InDelta(t, 80.0, stat.MemUtilPct, 0.01)
-}
-
-func TestParseNvidiaSmiLine_ShortLine(t *testing.T) {
-	line := "0, NVIDIA GPU, GPU-123"
-
-	stat := ParseNvidiaSmiLine(line)
-	assert.Nil(t, stat)
-}
-
-func TestParseNvidiaSmiLine_MissingFields(t *testing.T) {
-	line := "0, NVIDIA GPU, GPU-123, 65, 80, 8192, 10240, 75"
-
-	stat := ParseNvidiaSmiLine(line)
-	assert.Nil(t, stat)
-}
-
-func TestParseNvidiaSmiLine_ZeroMemoryTotal(t *testing.T) {
-	line := "0, NVIDIA GPU, GPU-123, 65, 80, 0, 0, 75, 250"
-
-	stat := ParseNvidiaSmiLine(line)
-	require.NotNil(t, stat)
-	assert.Equal(t, 0.0, stat.MemUtilPct)
-}
-
-const ioregSample = `+-o AGXAcceleratorG13X  <class AGXAcceleratorG13X, id 0x1000009a1, registered, matched, active, busy 0 (39191 ms), retain 108>
-    {
-      "model" = "Apple M1 Pro"
-      "gpu-core-count" = 16
-      "PerformanceStatistics" = {"In use system memory (driver)"=0,"Alloc system memory"=14511046656,"Tiler Utilization %"=34,"recoveryCount"=0,"Renderer Utilization %"=34,"Device Utilization %"=34,"In use system memory"=7688503296}
-      "IOClass" = "AGXAcceleratorG13X"
-    }`
-
-func TestParseIoregOutput_ValidOutput(t *testing.T) {
-	const memTotalMB = 32768
-
-	stat := ParseIoregOutput([]byte(ioregSample), memTotalMB)
-	require.NotNil(t, stat)
-
-	assert.Equal(t, 0, stat.ID)
-	assert.Equal(t, "Apple M1 Pro (16-core GPU)", stat.Name)
-	assert.Equal(t, 34.0, stat.GpuUtilPct)
-	assert.Equal(t, 7688503296/(1024*1024), stat.MemUsedMB)
-	assert.Equal(t, memTotalMB, stat.MemTotalMB)
-	assert.InDelta(t, float64(stat.MemUsedMB)/memTotalMB*100, stat.MemUtilPct, 0.01)
-	// Not exposed by ioreg.
-	assert.Equal(t, 0, stat.TempC)
-	assert.Equal(t, 0.0, stat.PowerDrawW)
-	assert.Equal(t, 0.0, stat.FanSpeedPct)
-}
-
-func TestParseIoregOutput_NoGpuDevice(t *testing.T) {
-	stat := ParseIoregOutput([]byte("no gpu here"), 32768)
-	assert.Nil(t, stat)
-}
-
-func TestParseIoregOutput_ZeroMemTotal(t *testing.T) {
-	stat := ParseIoregOutput([]byte(ioregSample), 0)
-	require.NotNil(t, stat)
-	assert.Equal(t, 0.0, stat.MemUtilPct)
-}
-
-func TestParseIoregOutput_MissingModel(t *testing.T) {
-	const out = `"Device Utilization %"=50,"In use system memory"=1048576`
-
-	stat := ParseIoregOutput([]byte(out), 1024)
-	require.NotNil(t, stat)
-	assert.Equal(t, "Apple GPU", stat.Name)
-	assert.Equal(t, 50.0, stat.GpuUtilPct)
-	assert.Equal(t, 1, stat.MemUsedMB)
+	m.readGPU(context.Background())
+	_, gpu := m.Latest(context.Background())
+	require.Len(t, gpu.GPUs, 1)
+	assert.Equal(t, "B", gpu.GPUs[0].Name)
 }
