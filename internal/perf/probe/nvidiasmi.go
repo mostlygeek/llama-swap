@@ -51,7 +51,11 @@ func (p *nvidiaSmi) Read(ctx context.Context) ([]GpuSample, error) {
 		if len(awake) == 0 {
 			return suspended, nil
 		}
-		args = append(args, "--id="+strings.Join(awake, ","))
+		ids := make([]string, len(awake))
+		for i, key := range awake {
+			ids[i] = "0000" + key // nvidia-smi's 8-digit domain form
+		}
+		args = append(args, "--id="+strings.Join(ids, ","))
 	}
 
 	out, err := p.run(ctx, bin, args...)

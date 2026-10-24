@@ -268,5 +268,5 @@ func TestProbe_NvidiaSmiQueriesOnlyAwakeGPUs(t *testing.T) {
 	assert.Equal(t, "0000:02:00.0", samples[0].Key)
 	assert.Equal(t, "0000:01:00.0", samples[1].Key)
 	require.Len(t, run.calls, 1)
-	assert.Contains(t, run.calls[0], "--id=0000:01:00.0")
+	assert.Contains(t, run.calls[0], "--id=00000000:01:00.0")
 }

@@ -49,6 +49,16 @@ describe("PerfHistory", () => {
     expect(hasGpuField(h, "fanPct")).toBe(false);
   });
 
+  it("drops GPU series when the GPU order changes", () => {
+    const h = new PerfHistory();
+    h.setMeta({ every: { gpu: 5 }, gpus: [{ key: "a", name: "A" }] });
+    h.addGpu({ t: [100], gpus: [{ util: [50] }] });
+    h.setMeta({ every: { gpu: 5 }, gpus: [{ key: "b", name: "B" }] });
+    expect(h.gpu.t).toEqual([]);
+    expect(h.gpu.gpus).toHaveLength(1);
+    expect(h.gpu.gpus[0].util).toEqual([]);
+  });
+
   it("keeps only the last hour", () => {
     const h = new PerfHistory();
     h.addSys(sysMsg([0, 1000], 1));
