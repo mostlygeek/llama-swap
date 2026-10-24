@@ -353,7 +353,6 @@
   const gpuPowerDatasets = $derived(buildGpuDatasets(filteredGpuStats, "power_draw_w"));
   const hasVramTemp = $derived(filteredGpuStats.some((g) => g.vram_temp_c > 0));
   const gpuFanDatasets = $derived(buildGpuDatasets(filteredGpuStats, "fan_speed_pct"));
-  const hasFan = $derived(filteredGpuStats.some((g) => g.fan_speed_pct > 0));
 </script>
 
 <div class="space-y-6">
@@ -429,16 +428,14 @@
           yMin={0}
           yLabel="W"
         />
-        {#if hasFan}
-          <PerformanceChart
-            title="GPU Fan Speed (%)"
-            labels={gpuLabels}
-            datasets={gpuFanDatasets}
-            yMin={0}
-            yMax={100}
-            yLabel="%"
-          />
-        {/if}
+        <PerformanceChart
+          title="GPU Fan Speed (%)"
+          labels={gpuLabels}
+          datasets={gpuFanDatasets}
+          yMin={0}
+          yMax={100}
+          yLabel="%"
+        />
       </div>
     {/if}
   </section>
