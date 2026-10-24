@@ -29,8 +29,10 @@
 
   interface Dataset {
     label: string;
-    data: number[];
+    // null is a reading that was not taken or not reported; the line breaks there
+    data: (number | null)[];
     borderColor: string;
+    borderDash?: number[];
   }
 
   interface Props {
@@ -124,11 +126,13 @@
           label: ds.label,
           data: [...ds.data],
           borderColor: ds.borderColor,
+          borderDash: ds.borderDash,
           backgroundColor: ds.borderColor + "20",
           borderWidth: 1.5,
           pointRadius: 0,
           tension: 0.4,
           fill: false,
+          spanGaps: false,
         })),
       },
       options: buildOptions($isDarkMode),
@@ -155,11 +159,13 @@
       label: ds.label,
       data: [...ds.data],
       borderColor: ds.borderColor,
+      borderDash: ds.borderDash,
       backgroundColor: ds.borderColor + "20",
       borderWidth: 1.5,
       pointRadius: 0,
       tension: 0.4,
       fill: false,
+      spanGaps: false,
     }));
     chart.update("none");
   });

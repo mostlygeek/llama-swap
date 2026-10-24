@@ -8,7 +8,6 @@ import type {
   ReqRespCapture,
   InFlightStats,
   InflightRequestEntry,
-  PerformanceResponse,
   UIConfig,
   Profile,
   ProfileState,
@@ -181,6 +180,12 @@ export function handleAPIEventMessage(data: string): void {
 
     case "uiConfig": {
       uiConfig.set(JSON.parse(message.data) as UIConfig);
+      break;
+    }
+
+    // Whether to show the Performance page; its data has its own stream.
+    case "performance": {
+      performanceEnabled.set((JSON.parse(message.data) as { enabled: boolean }).enabled);
       break;
     }
 
@@ -459,34 +464,6 @@ export async function getCapture(id: number): Promise<ReqRespCapture | null> {
     return await response.json();
   } catch (error) {
     console.error("Failed to fetch capture:", error);
-    return null;
-  }
-}
-
-export async function checkPerformanceEnabled(): Promise<void> {
-  try {
-    const response = await fetch(apiUrl("/api/performance"));
-    if (!response.ok) {
-      performanceEnabled.set(false);
-      return;
-    }
-    const data = await response.json();
-    performanceEnabled.set(data.enabled);
-  } catch {
-    performanceEnabled.set(false);
-  }
-}
-
-export async function fetchPerformance(after?: string): Promise<PerformanceResponse | null> {
-  try {
-    const url = after ? `/api/performance?after=${encodeURIComponent(after)}` : "/api/performance";
-    const response = await fetch(apiUrl(url));
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.error("Failed to fetch performance data:", error);
     return null;
   }
 }

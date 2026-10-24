@@ -1,13 +1,22 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fetchPerformance } from "../stores/api";
+  import { apiUrl } from "../lib/apiPath";
   import { persistentStore } from "../stores/persistent";
-  import type { SysStat, GpuStat } from "../lib/types";
+  import {
+    PerfHistory,
+    chartAxis,
+    onAxis,
+    hasGpuField,
+    lastValue,
+    type GpuField,
+    type PerfMeta,
+    type PerfState,
+    type PerfSysMessage,
+    type PerfGpuMessage,
+  } from "../lib/perfStream";
   import PerformanceChart from "../components/PerformanceChart.svelte";
   import SegmentedControl from "../components/SegmentedControl.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { Button } from "$lib/components/ui/button/index.js";
-  import { RefreshCw } from "@lucide/svelte";
 
   const COLORS = [
     "#3b82f6",
@@ -29,345 +38,249 @@
   ];
 
   const WINDOWS = [
-    { label: "5 min", ms: 5 * 60 * 1000 },
-    { label: "15 min", ms: 15 * 60 * 1000 },
-    { label: "1 hr", ms: 60 * 60 * 1000 },
-  ] as const;
-
-  const INTERVALS = [
-    { label: "Off", ms: 0 },
-    { label: "5s", ms: 5000 },
-    { label: "10s", ms: 10000 },
-    { label: "30s", ms: 30000 },
-    { label: "60s", ms: 60000 },
+    { label: "5 min", seconds: 5 * 60 },
+    { label: "15 min", seconds: 15 * 60 },
+    { label: "1 hr", seconds: 60 * 60 },
   ] as const;
 
   let selectedWindow = persistentStore("perf-window", 0);
-  let selectedInterval = persistentStore("perf-refresh-interval", 0);
-  let sysData = $state<SysStat[]>([]);
-  let gpuData = $state<GpuStat[]>([]);
-  let refreshing = $state(false);
 
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let visible = $state(true);
-  let mounted = $state(false);
+  // PerfHistory is a plain object; bumping revision re-runs the charts.
+  const history = new PerfHistory();
+  let revision = $state(0);
+  let connected = $state(false);
+  let source: EventSource | null = null;
 
-  function cutoffTime(): number {
-    return Date.now() - WINDOWS[$selectedWindow].ms;
+  function connect() {
+    if (source) return;
+    const es = new EventSource(apiUrl("/api/events/performance"));
+    source = es;
+    // the server resends the last hour on every (re)connect
+    es.onopen = () => {
+      history.reset();
+      connected = true;
+      revision++;
+    };
+    es.onerror = () => {
+      connected = false;
+    };
+    const on = <T,>(name: string, apply: (data: T) => void) => {
+      es.addEventListener(name, (e) => {
+        apply(JSON.parse((e as MessageEvent).data) as T);
+        revision++;
+      });
+    };
+    on<PerfMeta>("meta", (m) => history.setMeta(m));
+    on<PerfState>("state", (s) => history.setState(s));
+    on<PerfSysMessage>("sys", (m) => history.addSys(m));
+    on<PerfGpuMessage>("gpu", (m) => history.addGpu(m));
   }
 
-  function formatDelta(ts: string, refTime: number): string {
-    const diffMs = new Date(ts).getTime() - refTime;
-    const diffSec = Math.round(diffMs / 1000);
-    const absSec = Math.abs(diffSec);
-    const sign = diffSec <= 0 ? "-" : "+";
-    if (absSec < 60) return `${sign}${absSec}s`;
-    const min = Math.floor(absSec / 60);
-    const sec = absSec % 60;
-    if (sec === 0) return `${sign}${min}m`;
-    return `${sign}${min}:${sec.toString().padStart(2, "0")}`;
-  }
-
-  const sysLabels = $derived.by(() => {
-    const stats = filteredSysStats;
-    if (stats.length === 0) return [];
-    const refTime = new Date(stats[stats.length - 1].timestamp).getTime();
-    return stats.map((s) => formatDelta(s.timestamp, refTime));
-  });
-
-  async function loadAll() {
-    const resp = await fetchPerformance();
-    if (resp) {
-      sysData = resp.sys_stats ?? [];
-      gpuData = resp.gpu_stats ?? [];
-    }
-  }
-
-  async function loadIncremental() {
-    const lastTs = sysData.length > 0 ? sysData[sysData.length - 1].timestamp : undefined;
-    const resp = await fetchPerformance(lastTs);
-    if (resp) {
-      const newSys = resp.sys_stats ?? [];
-      const newGpu = resp.gpu_stats ?? [];
-      if (newSys.length > 0) {
-        sysData = [...sysData, ...newSys];
-      }
-      if (newGpu.length > 0) {
-        gpuData = [...gpuData, ...newGpu];
-      }
-    }
-  }
-
-  function startPolling() {
-    stopPolling();
-    const ms = INTERVALS[$selectedInterval].ms;
-    if (ms <= 0) return;
-    pollTimer = setInterval(() => {
-      if (visible) {
-        loadIncremental();
-      }
-    }, ms);
-  }
-
-  function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
+  // An open stream counts as a viewer, which lets poll: active read. Closing
+  // it while the tab is hidden lets idle GPUs sleep.
+  function disconnect() {
+    source?.close();
+    source = null;
+    connected = false;
   }
 
   function handleVisibility() {
-    visible = !document.hidden;
-    if (visible && mounted) {
-      loadAll().then(() => startPolling());
-    } else {
-      stopPolling();
-    }
+    if (document.hidden) disconnect();
+    else connect();
   }
-
-  function handleIntervalChange(i: number) {
-    $selectedInterval = i;
-    if (visible && mounted) {
-      startPolling();
-    }
-  }
-
-  async function manualRefresh() {
-    refreshing = true;
-    await loadIncremental();
-    refreshing = false;
-  }
-
-  $effect(() => {
-    return () => {
-      stopPolling();
-    };
-  });
 
   onMount(() => {
-    mounted = true;
+    connect();
     document.addEventListener("visibilitychange", handleVisibility);
-    loadAll().then(() => startPolling());
-
     return () => {
-      mounted = false;
-      stopPolling();
       document.removeEventListener("visibilitychange", handleVisibility);
+      disconnect();
     };
   });
 
-  // --- System charts (filtered by time window) ---
-
-  const filteredSysStats = $derived(sysData.filter((s) => new Date(s.timestamp).getTime() >= cutoffTime()));
-
-  const cpuDatasets = $derived.by(() => {
-    const stats = filteredSysStats;
-    if (stats.length === 0) return [];
-    const coreCount = stats[0].cpu_util_per_core.length;
-    const datasets = [];
-    for (let i = 0; i < coreCount; i++) {
-      datasets.push({
-        label: `Core ${i}`,
-        data: stats.map((s) => s.cpu_util_per_core[i]),
-        borderColor: COLORS[i % COLORS.length],
-      });
-    }
-    return datasets;
+  const windowSeconds = $derived(WINDOWS[$selectedWindow].seconds);
+  const view = $derived.by(() => {
+    void revision;
+    return {
+      meta: history.meta,
+      state: history.state,
+      sys: history.sys,
+      gpu: history.gpu,
+    };
   });
 
+  // --- System charts ---
+
+  const sysAxis = $derived(chartAxis(view.sys.t, view.meta.every.system ?? 5, windowSeconds));
+
+  const cpuDatasets = $derived(
+    view.sys.cpu.map((series, i) => ({
+      label: `Core ${i}`,
+      data: onAxis(series, sysAxis),
+      borderColor: COLORS[i % COLORS.length],
+    })),
+  );
+
   const memSwapDatasets = $derived.by(() => {
-    const stats = filteredSysStats;
-    if (stats.length === 0) return [];
+    const s = view.sys;
+    const pct = (used: number[], total: number[]) => used.map((u, i) => (total[i] > 0 ? (u / total[i]) * 100 : null));
     return [
-      {
-        label: "Memory Used %",
-        data: stats.map((s) => (s.mem_used_mb / s.mem_total_mb) * 100),
-        borderColor: "#3b82f6",
-      },
-      {
-        label: "Swap Used %",
-        data: stats.map((s) => (s.swap_total_mb > 0 ? (s.swap_used_mb / s.swap_total_mb) * 100 : 0)),
-        borderColor: "#8b5cf6",
-      },
+      { label: "Memory Used %", data: onAxis(pct(s.memUsed, s.memTotal), sysAxis), borderColor: "#3b82f6" },
+      { label: "Swap Used %", data: onAxis(pct(s.swapUsed, s.swapTotal), sysAxis), borderColor: "#8b5cf6" },
     ];
   });
 
   const latestMemSwap = $derived.by(() => {
-    const stats = filteredSysStats;
-    if (stats.length === 0) return null;
-    const s = stats[stats.length - 1];
+    const s = view.sys;
+    const i = s.t.length - 1;
+    if (i < 0) return null;
     return {
-      mem_total_mb: s.mem_total_mb,
-      mem_used_mb: s.mem_used_mb,
-      mem_used_pct: ((s.mem_used_mb / s.mem_total_mb) * 100).toFixed(1),
-      swap_total_mb: s.swap_total_mb,
-      swap_used_mb: s.swap_used_mb,
-      swap_used_pct: s.swap_total_mb > 0 ? ((s.swap_used_mb / s.swap_total_mb) * 100).toFixed(1) : null,
+      memUsed: s.memUsed[i],
+      memTotal: s.memTotal[i],
+      memPct: s.memTotal[i] > 0 ? ((s.memUsed[i] / s.memTotal[i]) * 100).toFixed(1) : "0",
+      swapUsed: s.swapUsed[i],
+      swapTotal: s.swapTotal[i],
+      swapPct: s.swapTotal[i] > 0 ? ((s.swapUsed[i] / s.swapTotal[i]) * 100).toFixed(1) : null,
     };
   });
 
-  const loadDatasets = $derived.by(() => {
-    const stats = filteredSysStats;
-    if (stats.length === 0) return [];
-    return [
-      {
-        label: "1 min",
-        data: stats.map((s) => s.load_avg_1),
-        borderColor: "#10b981",
-      },
-      {
-        label: "5 min",
-        data: stats.map((s) => s.load_avg_5),
-        borderColor: "#f59e0b",
-      },
-      {
-        label: "15 min",
-        data: stats.map((s) => s.load_avg_15),
-        borderColor: "#ef4444",
-      },
-    ];
-  });
+  const loadDatasets = $derived([
+    { label: "1 min", data: onAxis(view.sys.load1, sysAxis), borderColor: "#10b981" },
+    { label: "5 min", data: onAxis(view.sys.load5, sysAxis), borderColor: "#f59e0b" },
+    { label: "15 min", data: onAxis(view.sys.load15, sysAxis), borderColor: "#ef4444" },
+  ]);
 
-  const netBandwidthDatasets = $derived.by(() => {
-    const stats = filteredSysStats;
-    if (stats.length < 2) return [];
-
-    const ifaceNames = new Set<string>();
-    for (const s of stats) {
-      for (const n of s.net_io ?? []) {
-        ifaceNames.add(n.name);
-      }
-    }
-
-    const interfaces = [...ifaceNames].sort();
-    if (interfaces.length === 0) return [];
-
-    const datasets: { label: string; data: number[]; borderColor: string }[] = [];
-    let colorIdx = 0;
-
-    for (const iface of interfaces) {
-      const recvData: number[] = [];
-      const sentData: number[] = [];
-
-      for (let i = 1; i < stats.length; i++) {
-        const prev = stats[i - 1];
-        const curr = stats[i];
-        const prevIO = (prev.net_io ?? []).find((n) => n.name === iface);
-        const currIO = (curr.net_io ?? []).find((n) => n.name === iface);
-
-        if (!prevIO || !currIO) {
-          recvData.push(0);
-          sentData.push(0);
-          continue;
-        }
-
-        const dtMs = new Date(curr.timestamp).getTime() - new Date(prev.timestamp).getTime();
-        if (dtMs <= 0) {
-          recvData.push(0);
-          sentData.push(0);
-          continue;
-        }
-
-        const dtSec = dtMs / 1000;
-        recvData.push((((currIO.bytes_recv - prevIO.bytes_recv) / dtSec) * 8) / 1_000_000);
-        sentData.push((((currIO.bytes_sent - prevIO.bytes_sent) / dtSec) * 8) / 1_000_000);
-      }
-
-      datasets.push({
-        label: `${iface} in`,
-        data: recvData,
-        borderColor: COLORS[colorIdx % COLORS.length],
-      });
-      colorIdx++;
-      datasets.push({
-        label: `${iface} out`,
-        data: sentData,
-        borderColor: COLORS[colorIdx % COLORS.length],
-      });
-      colorIdx++;
-    }
-
-    return datasets;
-  });
-
-  const netBandwidthLabels = $derived.by(() => {
-    const stats = filteredSysStats;
-    if (stats.length < 2) return [];
-    const refTime = new Date(stats[stats.length - 1].timestamp).getTime();
-    return stats.slice(1).map((s) => formatDelta(s.timestamp, refTime));
-  });
-
-  // --- GPU charts (filtered by time window) ---
-
-  const filteredGpuStats = $derived(gpuData.filter((g) => new Date(g.timestamp).getTime() >= cutoffTime()));
-
-  const hasGpuData = $derived(gpuData.length > 0);
-
-  const gpuLabels = $derived.by(() => {
-    const seen = new Set<string>();
-    const labels: string[] = [];
-    const stats = filteredGpuStats;
-    if (stats.length === 0) return [];
-    const refTime = new Date(stats[stats.length - 1].timestamp).getTime();
-    for (const g of stats) {
-      const label = formatDelta(g.timestamp, refTime);
-      if (!seen.has(label)) {
-        seen.add(label);
-        labels.push(label);
-      }
-    }
-    return labels;
-  });
-
-  function buildGpuDatasets(
-    stats: GpuStat[],
-    field: keyof Pick<GpuStat, "gpu_util_pct" | "mem_util_pct" | "temp_c" | "vram_temp_c" | "power_draw_w">,
-  ) {
-    if (stats.length === 0) return [];
-
-    const byId = new Map<number, { name: string; values: number[] }>();
-    for (const g of stats) {
-      if (!byId.has(g.id)) {
-        byId.set(g.id, { name: g.name, values: [] });
-      }
-      byId.get(g.id)!.values.push(g[field] as number);
-    }
-
-    const datasets = [];
-    let colorIdx = 0;
-    for (const [id, entry] of byId) {
-      datasets.push({
-        label: entry.name || `GPU ${id}`,
-        data: entry.values,
-        borderColor: COLORS[colorIdx % COLORS.length],
-      });
-      colorIdx++;
-    }
-    return datasets;
+  // Mbit/s between consecutive readings; null across a paused gap.
+  function rates(t: number[], counter: number[], every: number): (number | null)[] {
+    return counter.map((v, i) => {
+      if (i === 0) return null;
+      const dt = t[i] - t[i - 1];
+      if (dt <= 0 || dt > 2 * every || v < counter[i - 1]) return null;
+      return (((v - counter[i - 1]) / dt) * 8) / 1_000_000;
+    });
   }
 
-  const gpuUtilDatasets = $derived(buildGpuDatasets(filteredGpuStats, "gpu_util_pct"));
-  const gpuMemDatasets = $derived(buildGpuDatasets(filteredGpuStats, "mem_util_pct"));
-  const gpuTempDatasets = $derived(buildGpuDatasets(filteredGpuStats, "temp_c"));
-  const gpuVramTempDatasets = $derived(buildGpuDatasets(filteredGpuStats, "vram_temp_c"));
-  const gpuPowerDatasets = $derived(buildGpuDatasets(filteredGpuStats, "power_draw_w"));
-  const hasVramTemp = $derived(filteredGpuStats.some((g) => g.vram_temp_c > 0));
+  const netDatasets = $derived.by(() => {
+    const s = view.sys;
+    const every = view.meta.every.system ?? 5;
+    const datasets: { label: string; data: (number | null)[]; borderColor: string }[] = [];
+    let color = 0;
+    for (const iface of Object.keys(s.net).sort()) {
+      datasets.push({
+        label: `${iface} in`,
+        data: onAxis(rates(s.t, s.net[iface].recv, every), sysAxis),
+        borderColor: COLORS[color++ % COLORS.length],
+      });
+      datasets.push({
+        label: `${iface} out`,
+        data: onAxis(rates(s.t, s.net[iface].sent, every), sysAxis),
+        borderColor: COLORS[color++ % COLORS.length],
+      });
+    }
+    return datasets;
+  });
+
+  // --- GPU charts ---
+
+  const gpuAxis = $derived(chartAxis(view.gpu.t, view.meta.every.gpu ?? 5, windowSeconds));
+
+  // Two identical cards get their index added so the legend tells them apart.
+  const gpuNames = $derived.by(() => {
+    const names = view.meta.gpus.map((g) => g.name || g.key);
+    return names.map((n, i) => (names.filter((m) => m === n).length > 1 ? `${n} #${i}` : n));
+  });
+
+  function gpuDatasets(field: GpuField, scale = 1) {
+    void revision;
+    return view.gpu.gpus.flatMap((series, i) =>
+      series[field].some((v) => v !== null)
+        ? [
+            {
+              label: gpuNames[i] ?? `GPU ${i}`,
+              data: onAxis(
+                series[field].map((v) => (v === null ? null : v * scale)),
+                gpuAxis,
+              ),
+              borderColor: COLORS[i % COLORS.length],
+            },
+          ]
+        : [],
+    );
+  }
+
+  const MB_TO_GIB = 1 / 1024;
+
+  // VRAM is a solid line and shared memory (GTT, unified) a dashed one.
+  const gpuMemDatasets = $derived.by(() => {
+    void revision;
+    return view.gpu.gpus.flatMap((series, i) => {
+      const out = [];
+      const color = COLORS[i % COLORS.length];
+      const name = gpuNames[i] ?? `GPU ${i}`;
+      if (series.vramUsed.some((v) => v !== null)) {
+        out.push({
+          label: `${name} VRAM`,
+          data: onAxis(series.vramUsed.map((v) => (v === null ? null : v * MB_TO_GIB)), gpuAxis),
+          borderColor: color,
+        });
+      }
+      if (series.sharedUsed.some((v) => v !== null)) {
+        out.push({
+          label: `${name} shared`,
+          data: onAxis(series.sharedUsed.map((v) => (v === null ? null : v * MB_TO_GIB)), gpuAxis),
+          borderColor: color,
+          borderDash: [6, 4],
+        });
+      }
+      return out;
+    });
+  });
+
+  function gib(mb: number | null): string {
+    return mb === null ? "?" : (mb / 1024).toFixed(1);
+  }
+
+  const gpuMemSummary = $derived.by(() => {
+    void revision;
+    return view.gpu.gpus.flatMap((series, i) => {
+      const parts = [];
+      const vramUsed = lastValue(series.vramUsed);
+      if (vramUsed !== null) parts.push(`VRAM ${gib(vramUsed)} / ${gib(lastValue(series.vramTotal))} GiB`);
+      const sharedUsed = lastValue(series.sharedUsed);
+      if (sharedUsed !== null) parts.push(`shared ${gib(sharedUsed)} / ${gib(lastValue(series.sharedTotal))} GiB`);
+      return parts.length ? [{ name: gpuNames[i] ?? `GPU ${i}`, text: parts.join(", ") }] : [];
+    });
+  });
+
+  const gpuUtilDatasets = $derived(gpuDatasets("util"));
+  const gpuTempDatasets = $derived(gpuDatasets("tempC"));
+  const gpuVramTempDatasets = $derived(gpuDatasets("vramTempC"));
+  const gpuPowerDatasets = $derived(gpuDatasets("powerW"));
+  const gpuFanDatasets = $derived(gpuDatasets("fanPct"));
+
+  const has = $derived.by(() => {
+    void revision;
+    return {
+      util: hasGpuField(history, "util"),
+      mem: hasGpuField(history, "vramUsed") || hasGpuField(history, "sharedUsed"),
+      temp: hasGpuField(history, "tempC"),
+      vramTemp: hasGpuField(history, "vramTempC"),
+      power: hasGpuField(history, "powerW"),
+      fan: hasGpuField(history, "fanPct"),
+    };
+  });
+  const hasGpuData = $derived(view.gpu.t.length > 0 && view.meta.gpus.length > 0);
+  const suspendedNames = $derived((view.state.suspended ?? []).map((i) => gpuNames[i] ?? `GPU ${i}`));
 </script>
 
 <div class="space-y-6">
   <div class="flex items-center justify-between">
     <h2 class="text-xl font-semibold text-foreground">Performance (Experimental)</h2>
     <div class="flex items-center gap-4">
+      {#if !connected}
+        <span class="text-xs text-muted-foreground">Connecting…</span>
+      {/if}
       <SegmentedControl items={WINDOWS} selected={$selectedWindow} onSelect={(i) => ($selectedWindow = i)} />
-      <SegmentedControl
-        items={INTERVALS}
-        selected={$selectedInterval}
-        onSelect={handleIntervalChange}
-        label="Refresh:"
-      />
-      <Button variant="outline" size="icon-sm" title="Refresh" onclick={manualRefresh} disabled={refreshing}>
-        <RefreshCw class={refreshing ? "animate-spin" : ""} />
-      </Button>
     </div>
   </div>
   <p class="text-sm text-muted-foreground">
@@ -379,108 +292,163 @@
 
   <!-- GPU Section -->
   <section class="space-y-4">
-    <h3 class="text-lg font-medium text-foreground">GPU</h3>
-    {#if !hasGpuData}
+    <div class="flex flex-wrap items-center gap-2">
+      <h3 class="text-lg font-medium text-foreground">GPU</h3>
+      {#if view.state.gpu === "paused"}
+        <span class="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          Paused: GPUs are read only while a model is loaded
+        </span>
+      {/if}
+      {#each suspendedNames as name (name)}
+        <span class="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">{name}: suspended</span>
+      {/each}
+    </div>
+    {#if view.state.gpu === "disabled"}
       <Card.Root class="py-0">
         <Card.Content class="p-4">
-          <p class="text-muted-foreground">No GPU data available</p>
+          <p class="text-muted-foreground">GPU monitoring is disabled (performance.gpu.disabled)</p>
+        </Card.Content>
+      </Card.Root>
+    {:else if !hasGpuData}
+      <Card.Root class="py-0">
+        <Card.Content class="p-4">
+          <p class="text-muted-foreground">No GPU data yet</p>
         </Card.Content>
       </Card.Root>
     {:else}
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <PerformanceChart
-          title="GPU Utilization (%)"
-          labels={gpuLabels}
-          datasets={gpuUtilDatasets}
-          yMin={0}
-          yMax={100}
-          yLabel="%"
-        />
-        <PerformanceChart
-          title="GPU Memory Utilization (%)"
-          labels={gpuLabels}
-          datasets={gpuMemDatasets}
-          yMin={0}
-          yMax={100}
-          yLabel="%"
-        />
-        <PerformanceChart
-          title="GPU Temperature (°C)"
-          labels={gpuLabels}
-          datasets={gpuTempDatasets}
-          yMin={0}
-          yLabel="°C"
-        />
-        {#if hasVramTemp}
+        {#if has.util}
+          <PerformanceChart
+            title="GPU Utilization (%)"
+            labels={gpuAxis.labels}
+            datasets={gpuUtilDatasets}
+            yMin={0}
+            yMax={100}
+            yLabel="%"
+          />
+        {/if}
+        {#if has.mem}
+          <div>
+            <PerformanceChart
+              title="GPU Memory Used (GiB)"
+              labels={gpuAxis.labels}
+              datasets={gpuMemDatasets}
+              yMin={0}
+              yLabel="GiB"
+            />
+            <div class="flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground mt-1 px-4">
+              {#each gpuMemSummary as row (row.name)}
+                <span>{row.name}: <span class="text-foreground font-medium">{row.text}</span></span>
+              {/each}
+            </div>
+          </div>
+        {/if}
+        {#if has.temp}
+          <PerformanceChart
+            title="GPU Temperature (°C)"
+            labels={gpuAxis.labels}
+            datasets={gpuTempDatasets}
+            yMin={0}
+            yLabel="°C"
+          />
+        {/if}
+        {#if has.vramTemp}
           <PerformanceChart
             title="GPU VRAM Temperature (°C)"
-            labels={gpuLabels}
+            labels={gpuAxis.labels}
             datasets={gpuVramTempDatasets}
             yMin={0}
             yLabel="°C"
           />
         {/if}
-        <PerformanceChart
-          title="GPU Power Draw (W)"
-          labels={gpuLabels}
-          datasets={gpuPowerDatasets}
-          yMin={0}
-          yLabel="W"
-        />
+        {#if has.power}
+          <PerformanceChart
+            title="GPU Power Draw (W)"
+            labels={gpuAxis.labels}
+            datasets={gpuPowerDatasets}
+            yMin={0}
+            yLabel="W"
+          />
+        {/if}
+        {#if has.fan}
+          <PerformanceChart
+            title="GPU Fan Speed (%)"
+            labels={gpuAxis.labels}
+            datasets={gpuFanDatasets}
+            yMin={0}
+            yMax={100}
+            yLabel="%"
+          />
+        {/if}
       </div>
     {/if}
   </section>
 
   <!-- System Section -->
   <section class="space-y-4">
-    <h3 class="text-lg font-medium text-foreground">System</h3>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <PerformanceChart
-        title="CPU Utilization (%)"
-        labels={sysLabels}
-        datasets={cpuDatasets}
-        yMin={0}
-        yMax={100}
-        yLabel="%"
-        showLegend={false}
-      />
-      <div>
+    <div class="flex flex-wrap items-center gap-2">
+      <h3 class="text-lg font-medium text-foreground">System</h3>
+      {#if view.state.system === "paused"}
+        <span class="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          Paused: system stats are read only while a model is loaded
+        </span>
+      {/if}
+    </div>
+    {#if view.state.system === "disabled"}
+      <Card.Root class="py-0">
+        <Card.Content class="p-4">
+          <p class="text-muted-foreground">System monitoring is disabled (performance.system.disabled)</p>
+        </Card.Content>
+      </Card.Root>
+    {:else}
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <PerformanceChart
-          title="Memory & Swap Usage (%)"
-          labels={sysLabels}
-          datasets={memSwapDatasets}
+          title="CPU Utilization (%)"
+          labels={sysAxis.labels}
+          datasets={cpuDatasets}
           yMin={0}
           yMax={100}
           yLabel="%"
-        />
-        {#if latestMemSwap}
-          <div class="flex items-center justify-center gap-4 text-xs text-muted-foreground mt-1 px-4">
-            <span
-              >Mem: <span class="text-foreground font-medium"
-                >{latestMemSwap.mem_used_mb.toLocaleString()} / {latestMemSwap.mem_total_mb.toLocaleString()} MB ({latestMemSwap.mem_used_pct}%)</span
-              ></span
-            >
-            {#if latestMemSwap.swap_used_pct !== null}
-              <span
-                >Swap: <span class="text-foreground font-medium"
-                  >{latestMemSwap.swap_used_mb.toLocaleString()} / {latestMemSwap.swap_total_mb.toLocaleString()} MB ({latestMemSwap.swap_used_pct}%)</span
-                ></span
-              >
-            {/if}
-          </div>
-        {/if}
-      </div>
-      <PerformanceChart title="Load Average" labels={sysLabels} datasets={loadDatasets} yMin={0} />
-      {#if netBandwidthDatasets.length > 0}
-        <PerformanceChart
-          title="Network Bandwidth (Mbit/s)"
-          labels={netBandwidthLabels}
-          datasets={netBandwidthDatasets}
-          yMin={0}
-          yLabel="Mbit/s"
           showLegend={false}
         />
-      {/if}
-    </div>
+        <div>
+          <PerformanceChart
+            title="Memory & Swap Usage (%)"
+            labels={sysAxis.labels}
+            datasets={memSwapDatasets}
+            yMin={0}
+            yMax={100}
+            yLabel="%"
+          />
+          {#if latestMemSwap}
+            <div class="flex items-center justify-center gap-4 text-xs text-muted-foreground mt-1 px-4">
+              <span
+                >Mem: <span class="text-foreground font-medium"
+                  >{latestMemSwap.memUsed.toLocaleString()} / {latestMemSwap.memTotal.toLocaleString()} MB ({latestMemSwap.memPct}%)</span
+                ></span
+              >
+              {#if latestMemSwap.swapPct !== null}
+                <span
+                  >Swap: <span class="text-foreground font-medium"
+                    >{latestMemSwap.swapUsed.toLocaleString()} / {latestMemSwap.swapTotal.toLocaleString()} MB ({latestMemSwap.swapPct}%)</span
+                  ></span
+                >
+              {/if}
+            </div>
+          {/if}
+        </div>
+        <PerformanceChart title="Load Average" labels={sysAxis.labels} datasets={loadDatasets} yMin={0} />
+        {#if netDatasets.length > 0}
+          <PerformanceChart
+            title="Network Bandwidth (Mbit/s)"
+            labels={sysAxis.labels}
+            datasets={netDatasets}
+            yMin={0}
+            yLabel="Mbit/s"
+            showLegend={false}
+          />
+        {/if}
+      </div>
+    {/if}
   </section>
 </div>
