@@ -603,6 +603,7 @@ func TestServer_APIPerformance_Unavailable(t *testing.T) {
 func TestServer_APIEvents_InitialPayload(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 	s.cfg.UI.Activity.SessionID = []string{"X-Trace-ID"}
+	s.cfg.HelpAgent.Disable = true
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(ctx)
@@ -623,7 +624,7 @@ func TestServer_APIEvents_InitialPayload(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	for _, want := range []string{`"type":"modelStatus"`, `"type":"inflight"`, `"type":"uiConfig"`, `"type":"profileChanged"`, `X-Trace-ID`} {
+	for _, want := range []string{`"type":"modelStatus"`, `"type":"inflight"`, `"type":"uiConfig"`, `"type":"profileChanged"`, `X-Trace-ID`, `\"helpagent\":{\"disable\":true}`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("initial SSE payload missing %s; body=%q", want, body)
 		}

@@ -243,14 +243,24 @@ func (f *fakeGpuCollector) start(ctx context.Context, _ time.Duration, _ *logmon
 			// exits before it reports anything
 			return
 		}
-		// ID carries the call number so a test can tell collectors apart
-		select {
-		case ch <- []GpuStat{{ID: call}}:
-		case <-ctx.Done():
-			return
-		}
-		if step.stayOpen {
-			<-ctx.Done()
+		// ID carries the call number so a test can tell collectors apart.
+		// One that stays open keeps reporting, as nvidia-smi does every
+		// interval: the monitor drops a sample when a listener has not read
+		// the previous one, so no single sample is guaranteed to arrive.
+		for {
+			select {
+			case ch <- []GpuStat{{ID: call}}:
+			case <-ctx.Done():
+				return
+			}
+			if !step.stayOpen {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Millisecond):
+			}
 		}
 	}()
 	return ch, nil
@@ -415,8 +425,10 @@ func TestStart_GpuRestartWaitResetsAfterStats(t *testing.T) {
 	m.Start()
 	defer m.Stop()
 
-	waitGpuStat(t, gpuCh, 1)
-	waitGpuStat(t, gpuCh, 4)
+	// Collector 4's single sample can be dropped if collector 1's is still
+	// unread, so wait only for collector 6, which keeps reporting. The wait
+	// resets because the monitor received collector 4's stats, whether or
+	// not this listener saw them.
 	waitGpuStat(t, gpuCh, 6)
 	assert.Equal(t, []time.Duration{
 		5 * time.Second,

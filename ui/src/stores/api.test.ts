@@ -20,6 +20,7 @@ import {
   setActiveProfile,
   tailcatStatus,
   uiConfig,
+  helpAgentEnabled,
 } from "./api";
 
 afterEach(() => {
@@ -184,6 +185,15 @@ describe("api store event handling", () => {
       data: JSON.stringify({ activity: { session_id: ["X-Trace-ID"] } }),
     }));
     expect(get(uiConfig).activity.session_id).toEqual(["X-Trace-ID"]);
+    expect(get(helpAgentEnabled)).toBe(true);
+  });
+
+  it("hides Help when the config sets helpagent.disable", () => {
+    handleAPIEventMessage(JSON.stringify({
+      type: "uiConfig",
+      data: JSON.stringify({ activity: { session_id: [] }, helpagent: { disable: true } }),
+    }));
+    expect(get(helpAgentEnabled)).toBe(false);
   });
 
   it("increments activity revision for activity events", () => {

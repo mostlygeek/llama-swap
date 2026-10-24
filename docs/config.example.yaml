@@ -91,6 +91,15 @@ performance:
   # - minimum duration 5s
   every: 15s
 
+# helpagent: the UI's Help page, a chat that answers questions about llama-swap
+# from its documentation, configuration and source code
+helpagent:
+  # disable: boolean
+  # - optional, default: false
+  # - true hides Help in the UI and does not serve the /api/mcp endpoint
+  #   whose tools the Help page uses
+  disable: false
+
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
 # - the ${PORT} macro can be used in model.cmd and model.proxy settings

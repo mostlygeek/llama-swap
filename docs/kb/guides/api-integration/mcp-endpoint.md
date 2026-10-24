@@ -1,10 +1,10 @@
 ---
 title: Connecting an MCP client to llama-swap
-summary: Point any MCP client at /api/mcp to search and read llama-swap's documentation.
+summary: Point any MCP client at /api/mcp to search llama-swap's documentation and source code.
 category: guides
-tags: [mcp, tools, agent, api, integration]
-config_keys: [apiKeys]
-updated: 2026-09-04
+tags: [mcp, tools, agent, api, integration, source, code, help, disable]
+config_keys: [apiKeys, helpagent.disable]
+updated: 2026-10-23
 ---
 
 # Connecting an MCP client to llama-swap
@@ -49,6 +49,23 @@ Authorization: Bearer sk-your-key
 `x-api-key` and HTTP Basic work too. With no `apiKeys` configured the endpoint
 is open, so treat it the same way you treat the rest of llama-swap — see
 `guides/api-integration/api-keys-and-auth`.
+
+## Turning it off
+
+`helpagent.disable` turns off both the UI's Help page and this endpoint:
+
+```yaml
+helpagent:
+  disable: true
+```
+
+The Help item leaves the sidebar, `/help` in the UI goes to the home page, and
+`/api/mcp` answers `404`, so no MCP client can use these tools. It takes effect
+on a config reload. The default is `false`.
+
+Turn it off when nobody uses Help, or when this instance should not offer its
+configuration and source code tools at all. Protecting the endpoint with
+`apiKeys` is the alternative when Help should stay.
 
 ## The tools
 
@@ -107,9 +124,52 @@ is stopped while it is still building it.
 | --- | --- |
 | `sys__now` | current date and time, in UTC, server local time, and an optional named timezone |
 
-Every tool is annotated `readOnlyHint`, so clients that ask before running tools can
-safely auto-approve them. Only `sys__now` is *not* `idempotentHint` — the answer is
-supposed to change between calls.
+**`code__*` — llama-swap's source code**
+
+| tool | what it does |
+| --- | --- |
+| `code__grep` | regex search over the source, ripgrep style, returning `path:line: text` matches; narrow with a directory or file `path` such as `internal/config` and a `glob` such as `*.go` |
+| `code__read` | one file, lines numbered `L12:`, with a GitHub link to the same lines; `offset` and `limit` page through it |
+| `code__find` | file paths matching a glob such as `**/*_test.go` |
+| `code__ls` | one directory's entries, directories marked with a trailing `/` |
+| `code__status` | whether the source is downloaded, its commit, and whether it is out of date against the repository and against this build |
+| `code__update` | download the source, or download it again when it is out of date; `force` downloads even when it looks current |
+
+These let an agent check the documentation against the code that implements it.
+The documentation is in the source too: document id
+`guides/model-runtime/ttl-and-unloading` is the file
+`docs/kb/guides/model-runtime/ttl-and-unloading.md`.
+
+The source is a shallow git checkout of the release this binary was built from
+(`v266` for llama-swap v266; `main` for a development build). It is fetched from
+github.com by `code__update` or the first grep, read, find or ls call, not at
+startup, and kept under the user cache directory (`~/.cache/llama-swap/source` on
+Linux) so a restart reuses it. A checkout on disk is never refreshed on its own:
+`code__status` asks the repository which commit the ref is at now, and
+`code__update` downloads it again when that has moved. A release tag does not
+move, so this matters for `main`.
+
+The `code__*` tools need the `git` command line tool on the machine running
+llama-swap, on its `PATH`. That includes inside a container: install git in the
+image if you want these tools there.
+
+What goes wrong:
+
+- **git is not installed.** Every `code__*` tool says so and tells the agent to
+  ask you to install git. `code__status` reports `git: not installed`.
+- **No network access.** The call returns `isError` saying the source is not
+  available, and retries at most once a minute; `code__update` retries at once.
+  The other tools keep working, including an existing checkout.
+- **`code__status` cannot reach the repository.** The checkout stays usable;
+  `code__update` with `force` skips the check and clones again.
+- **The first call says "still downloading".** The fetch took longer than 30
+  seconds. It carries on in the background; call again.
+
+Every tool except `code__update` is annotated `readOnlyHint`, so clients that ask
+before running tools can safely auto-approve them. `code__update` replaces the
+cached checkout on the server, and changes nothing else. `sys__now` and
+`code__status` are not `idempotentHint` — their answers are supposed to change
+between calls.
 
 A good first request is `docs__list_docs` — it is the map of everything available.
 
@@ -170,6 +230,8 @@ Only protocol problems — an unknown method, a header mismatch, a malformed bod
 - Results are size-capped so they fit a local model's context window.
   `docs__get_doc` says so when it truncates and tells you the `offset` to continue
   from; `config__get_config` never truncates, it asks you for a narrower `query`.
+  A cut-off `code__*` result ends with a bracketed notice saying what was left out
+  and how to get it, such as `[Showing lines 1-200 of 387. Use offset=201 to continue.]`.
 
 ## Related
 

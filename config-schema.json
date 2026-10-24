@@ -293,6 +293,19 @@
             "default": {},
             "description": "Configuration for CPU, RAM and GPU monitoring statistics."
         },
+        "helpagent": {
+            "type": "object",
+            "properties": {
+                "disable": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Hide the UI's Help page and do not serve the /api/mcp endpoint its documentation, configuration and source code tools use."
+                }
+            },
+            "additionalProperties": false,
+            "default": {},
+            "description": "Configuration for the UI's Help page and the /api/mcp endpoint."
+        },
         "startPort": {
             "type": "integer",
             "default": 5800,

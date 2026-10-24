@@ -629,7 +629,12 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		sendUIConfig := func() {
-			if j, err := json.Marshal(s.cfg.UI); err == nil {
+			// The UI hides its Help page when the help agent is disabled.
+			uiConfig := struct {
+				config.UIConfig
+				HelpAgent config.HelpAgentConfig `json:"helpagent"`
+			}{s.cfg.UI, s.cfg.HelpAgent}
+			if j, err := json.Marshal(uiConfig); err == nil {
 				send(messageEnvelope{Type: msgTypeUIConfig, Data: string(j)})
 			}
 		}

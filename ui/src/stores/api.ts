@@ -42,8 +42,11 @@ export const inFlightRequests = writable<number>(0);
 export const inflightRequestEntries = writable<InflightRequestEntry[]>([]);
 const defaultUIConfig = (): UIConfig => ({
   activity: { session_id: ["X-Session-ID", "X-Litellm-Session-Id"] },
+  helpagent: { disable: false },
 });
 export const uiConfig = writable<UIConfig>(defaultUIConfig());
+/** False when the config sets helpagent.disable, which hides the Help page. */
+export const helpAgentEnabled = derived(uiConfig, ($uiConfig) => !$uiConfig.helpagent?.disable);
 export const performanceEnabled = writable<boolean>(false);
 export const tailcatStatus = writable<TailcatStatus>({ enabled: false, address: "", models: [] });
 export const versionInfo = writable<VersionInfo>({

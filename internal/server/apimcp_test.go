@@ -885,3 +885,22 @@ func TestServer_APIMCP_TolerantArgumentTypes(t *testing.T) {
 		t.Error("stringified max_lines rejected")
 	}
 }
+
+func TestServer_MCPNotServedWhenHelpAgentDisabled(t *testing.T) {
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
+
+	enabled := newMCPServer()
+	w := httptest.NewRecorder()
+	enabled.ServeHTTP(w, mcpRequest(body, mcpProtocolVersion, "tools/list", ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("enabled: status = %d, want 200", w.Code)
+	}
+
+	cfg := config.Config{HelpAgent: config.HelpAgentConfig{Disable: true}}
+	disabled := newTestServerWithConfig(cfg, newStubRouter(nil, ""), newStubRouter(nil, ""))
+	w = httptest.NewRecorder()
+	disabled.ServeHTTP(w, mcpRequest(body, mcpProtocolVersion, "tools/list", ""))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("disabled: status = %d, want 404: helpagent.disable leaves /api/mcp unregistered", w.Code)
+	}
+}
