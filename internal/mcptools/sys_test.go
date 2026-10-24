@@ -13,7 +13,7 @@ import (
 var fixedClock = time.Date(2026, 3, 14, 15, 9, 26, 0, time.UTC)
 
 func newTestSys() *SysProvider {
-	return NewSysProvider(func() time.Time { return fixedClock })
+	return NewSysProvider(func() time.Time { return fixedClock }, nil)
 }
 
 func callSys(t *testing.T, p *SysProvider, args string) Result {
@@ -121,7 +121,7 @@ func TestSysProvider_UnknownTool(t *testing.T) {
 
 func TestSysProvider_DefaultsTheClock(t *testing.T) {
 	before := time.Now()
-	result, err := NewSysProvider(nil).Call(context.Background(), "now", nil)
+	result, err := NewSysProvider(nil, nil).Call(context.Background(), "now", nil)
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -130,5 +130,32 @@ func TestSysProvider_DefaultsTheClock(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, before.UTC().Format("2006-01-02")) {
 		t.Errorf("a nil clock did not fall back to time.Now:\n%s", result.Content)
+	}
+}
+
+type fakeReporter string
+
+func (f fakeReporter) PerformanceReport(context.Context) string { return string(f) }
+
+func TestSysProvider_PerformanceTool(t *testing.T) {
+	p := NewSysProvider(nil, fakeReporter("gpus: not sampled\n"))
+	tools, err := p.Tools(context.Background())
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+	if names := namesOf(tools); len(names) != 2 || names[1] != "performance" {
+		t.Fatalf("tools = %v, want now and performance", names)
+	}
+
+	result, err := p.Call(context.Background(), "performance", nil)
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if result.Content != "gpus: not sampled\n" {
+		t.Errorf("content = %q", result.Content)
+	}
+
+	if _, err := newTestSys().Call(context.Background(), "performance", nil); err == nil {
+		t.Error("performance is an unknown tool without a reporter")
 	}
 }

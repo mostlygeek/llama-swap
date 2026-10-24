@@ -29,6 +29,7 @@ func detectPlatform(ctx context.Context, snapshot *HardwareSnapshot) ([]detected
 	if sysfs, err := detectDRMSysfs(); err == nil {
 		result = append(result, sysfs...)
 	}
+	markAMDAPUs(result, "/sys/bus/pci/devices")
 	snapshot.System = detectSystem("/sys/class/dmi/id")
 	if snapshot.CPU.SocketCount == nil {
 		// arm64 systems have no physical id in /proc/cpuinfo, so the socket

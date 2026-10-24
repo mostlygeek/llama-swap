@@ -82,14 +82,71 @@ ui:
 # performance: configuration for system monitoring statistics
 # - timing values are duration strings like 1s, 1h30m, 90m, 2h10s, etc.
 performance:
-  # disabled: boolean
+  # disabled: turn off all performance monitoring
   # - default: false
+  # - when true nothing is collected, /metrics has no performance gauges and
+  #   the Performance page is hidden
   disabled: false
 
-  # every: delay between polling for new performance statistics
-  # - default: 5s
-  # - minimum duration 5s
-  every: 15s
+  # system: CPU, RAM, swap, load average and network stats
+  system:
+    # disabled: turn off system stats only
+    # - default: false
+    disabled: false
+
+    # every: delay between readings
+    # - default: 5s
+    # - minimum duration 5s
+    every: 5s
+
+    # poll: when readings are taken
+    # - default: always
+    # - always: on every tick
+    # - active: only while a model is loaded and someone is watching (the
+    #   Performance page is open, /metrics is scraped or an MCP tool asks)
+    poll: always
+
+  # gpu: GPU stats
+  gpu:
+    # disabled: turn off GPU stats but keep system stats
+    # - default: false
+    disabled: false
+
+    # every: delay between readings
+    # - default: 5s
+    # - minimum duration 5s
+    every: 5s
+
+    # poll: when readings are taken, same values as system.poll
+    # - default: active, so an idle GPU is never woken by monitoring
+    poll: active
+
+    # skipSuspended: Linux only, read the PCI power state first and do not
+    # probe a GPU that is runtime suspended
+    # - default: true
+    skipSuspended: true
+
+    # probes: which GPU probes run
+    # - default: [auto], pick probes from the detected hardware
+    # - a list runs only those probes. When two probes report the same GPU the
+    #   one listed first wins.
+    # - valid probes: nvidia-smi, rocm-smi, lact, xpu-smi, sysfs, d3dkmt,
+    #   mactop, ioreg
+    probes:
+      - auto
+
+    # exclude: hide GPUs whose PCI bus ID or UUID equals an entry, or whose
+    # name contains one
+    # - default: []
+    exclude: []
+
+    # settings: per-probe settings, keyed by probe name
+    # - optional
+    # - path: location of the CLI (nvidia-smi, rocm-smi, xpu-smi, mactop, ioreg)
+    # - socket: daemon socket (lact)
+    settings:
+      rocm-smi:
+        path: /opt/rocm/bin/rocm-smi
 
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800

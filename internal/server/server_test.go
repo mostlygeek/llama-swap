@@ -121,7 +121,7 @@ func newTestServerWithReference(local router.LocalRouter, peer router.Router, fs
 
 	registry, err := mcptools.New(
 		docagent.NewDocsProvider(s.reference),
-		mcptools.NewSysProvider(func() time.Time { return testClock }),
+		mcptools.NewSysProvider(func() time.Time { return testClock }, nil),
 		config.NewConfigProvider(s.cfg),
 	)
 	if err != nil {

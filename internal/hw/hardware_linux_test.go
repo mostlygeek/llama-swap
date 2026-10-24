@@ -226,3 +226,43 @@ func TestHardware_ParseROCmCSV(t *testing.T) {
 		t.Fatalf("parseROCmCSV() = %+v", got)
 	}
 }
+
+func TestHardware_LinuxMarkAMDAPUs(t *testing.T) {
+	root := t.TempDir()
+	write := func(dir, file, value string) {
+		t.Helper()
+		path := filepath.Join(root, dir, file)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(value+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// APU: 512 MiB carveout, 96 GiB GTT
+	write("0000:c3:00.0", "mem_info_vram_total", "536870912")
+	write("0000:c3:00.0", "mem_info_gtt_total", "103079215104")
+	// discrete: 24 GiB VRAM, 32 GiB GTT
+	write("0000:03:00.0", "mem_info_vram_total", "25753026560")
+	write("0000:03:00.0", "mem_info_gtt_total", "34359738368")
+
+	amd := func(id string) detectedAccelerator {
+		return detectedAccelerator{identity: id, value: Accelerator{Vendor: stringPtr("AMD"), Memory: AcceleratorMemory{Kind: "dedicated"}}}
+	}
+	accelerators := []detectedAccelerator{
+		amd("0000:c3:00.0"),
+		amd("0000:03:00.0"),
+		amd("0000:09:00.0"), // no sysfs entry
+		{identity: "0000:c3:00.0", value: Accelerator{Vendor: stringPtr("NVIDIA"), Memory: AcceleratorMemory{Kind: "dedicated"}}},
+	}
+	markAMDAPUs(accelerators, root)
+
+	if got := accelerators[0].value.Memory; got.Kind != "unified" || got.CapacityBytes == nil || *got.CapacityBytes != 536870912+103079215104 {
+		t.Errorf("APU memory = %+v, want unified with VRAM+GTT capacity", got)
+	}
+	for i, a := range accelerators[1:] {
+		if a.value.Memory.Kind != "dedicated" {
+			t.Errorf("accelerator %d kind = %q, want dedicated", i+1, a.value.Memory.Kind)
+		}
+	}
+}

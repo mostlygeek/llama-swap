@@ -589,11 +589,11 @@ func configWithModels(models ...string) config.Config {
 	return cfg
 }
 
-func TestServer_APIPerformance_Unavailable(t *testing.T) {
+func TestServer_APIPerformanceEvents_Unavailable(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 
 	w := httptest.NewRecorder()
-	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/performance", nil))
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/events/performance", nil))
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", w.Code)
@@ -623,7 +623,7 @@ func TestServer_APIEvents_InitialPayload(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	for _, want := range []string{`"type":"modelStatus"`, `"type":"inflight"`, `"type":"uiConfig"`, `"type":"profileChanged"`, `X-Trace-ID`} {
+	for _, want := range []string{`"type":"modelStatus"`, `"type":"inflight"`, `"type":"uiConfig"`, `"type":"performance"`, `{\"enabled\":false}`, `"type":"profileChanged"`, `X-Trace-ID`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("initial SSE payload missing %s; body=%q", want, body)
 		}
