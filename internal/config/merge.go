@@ -15,14 +15,15 @@ import (
 // such keys name discrete entities (a model, a group, a peer, etc.) and a
 // duplicate means the user has split one entity across files by mistake.
 var identityMapPaths = map[string]bool{
-	"models":                         true,
-	"groups":                         true,
-	"profiles":                       true,
-	"selectors":                      true,
-	"peers":                          true,
-	"matrix":                         true,
-	"routing.router.settings.groups": true,
-	"routing.router.settings.matrix": true,
+	"models":                                 true,
+	"groups":                                 true,
+	"profiles":                               true,
+	"selectors":                              true,
+	"peers":                                  true,
+	"matrix":                                 true,
+	"routing.router.settings.groups":         true,
+	"routing.router.settings.matrix":         true,
+	"routing.router.settings.capacity.pools": true,
 }
 
 // LoadConfigSources loads and merges configuration from -config (optional)

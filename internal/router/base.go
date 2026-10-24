@@ -177,8 +177,17 @@ func (b *baseRouter) ModelState(modelID string) (process.ProcessState, bool) {
 }
 
 // StartSwap implements scheduler.Effects, launching the swap goroutine.
-func (b *baseRouter) StartSwap(modelID string, evict []string) {
-	go b.doSwap(modelID, evict)
+func (b *baseRouter) StartSwap(modelID string, generation uint64, evict []string) func() {
+	ctx, cancel := context.WithCancel(b.shutdownCtx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		b.doSwap(ctx, modelID, generation, evict)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 // GrantError implements scheduler.Effects.
@@ -240,7 +249,7 @@ func (b *baseRouter) trackedServe(modelID string, p process.Process) http.Handle
 	}
 }
 
-func (b *baseRouter) doSwap(modelID string, toStop []string) {
+func (b *baseRouter) doSwap(ctx context.Context, modelID string, generation uint64, toStop []string) {
 	timeout := b.healthCheckTimeout()
 
 	var wg sync.WaitGroup
@@ -254,6 +263,9 @@ func (b *baseRouter) doSwap(modelID string, toStop []string) {
 		}(b.processes[mID], mID)
 	}
 	wg.Wait()
+	if ctx.Err() != nil {
+		return
+	}
 
 	// EnsureReady rather than a State() check followed by Run: the router must
 	// not assume anything about the process. Deciding out here means acting on
@@ -262,16 +274,15 @@ func (b *baseRouter) doSwap(modelID string, toStop []string) {
 	// process nobody was ever going to start (issue #946). EnsureReady makes
 	// the same decision inside the process, where the state is owned.
 	target := b.processes[modelID]
-	err := target.EnsureReady(b.shutdownCtx, timeout)
-	if err != nil && b.shutdownCtx.Err() == nil {
-		// Quiet during shutdown: every in-flight swap fails at once there, and
-		// that is expected rather than worth a warning per model.
+	err := target.EnsureReady(ctx, timeout)
+	if err != nil && ctx.Err() == nil {
+		// Cancellation during unload or shutdown is expected.
 		b.logger.Warnf("%s: starting %s failed: %v", b.name, modelID, err)
 	}
 
 	select {
-	case b.swapDoneCh <- scheduler.SwapDone{ModelID: modelID, Err: err}:
-	case <-b.shutdownCtx.Done():
+	case b.swapDoneCh <- scheduler.SwapDone{ModelID: modelID, Generation: generation, Err: err}:
+	case <-ctx.Done():
 	}
 }
 

@@ -438,6 +438,25 @@
                     "macros": {
                         "$ref": "#/definitions/macros"
                     },
+                    "capacities": {
+                        "type": "object",
+                        "description": "Resource requirements for the capacity router, in each pool's units. Keys must name declared pools. Omitted pools consume zero; an omitted or empty dictionary declares no usage.",
+                        "default": {},
+                        "propertyNames": {"pattern": "\\S"},
+                        "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9223372036854775807
+                        },
+                        "examples": [{"gpu0": 12, "ram": 128}]
+                    },
+                    "evict_cost": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9223372036854775807,
+                        "default": 0,
+                        "description": "Manual cost of evicting this model in the capacity router. Higher costs favor retention. Minimize summed cost, then eviction count, then sorted model IDs; a bounded search may return a feasible nonoptimal plan."
+                    },
                     "cmd": {
                         "type": "string",
                         "minLength": 1,
@@ -977,16 +996,17 @@
                 },
                 "router": {
                     "type": "object",
-                    "description": "Router configuration. Selects between the group and matrix swapping strategies.",
+                    "description": "Router configuration. Selects group, matrix, or capacity swapping.",
                     "properties": {
                         "use": {
                             "type": "string",
                             "enum": [
                                 "group",
-                                "matrix"
+                                "matrix",
+                                "capacity"
                             ],
                             "default": "group",
-                            "description": "Router to use. 'group' uses static groups, 'matrix' uses the solver-based swap matrix."
+                            "description": "Router to use. 'group' uses static groups, 'matrix' uses allowed combinations, 'capacity' uses declared resource pools."
                         },
                         "settings": {
                             "type": "object",
@@ -996,18 +1016,71 @@
                                 },
                                 "matrix": {
                                     "$ref": "#/definitions/matrixConfig"
+                                },
+                                "capacity": {
+                                    "type": "object",
+                                    "description": "Independent resource limits in operator-chosen integer units. Model capacities use the same units as their referenced pools. No automatic measurement.",
+                                    "required": ["pools"],
+                                    "properties": {
+                                        "pools": {
+                                            "type": "object",
+                                            "minProperties": 1,
+                                            "propertyNames": {"pattern": "\\S"},
+                                            "additionalProperties": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 9223372036854775807
+                                            }
+                                        }
+                                    },
+                                    "additionalProperties": false
                                 }
                             },
                             "additionalProperties": false
                         }
                     },
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "allOf": [
+                        {
+                            "if": {
+                                "required": ["use"],
+                                "properties": {"use": {"const": "capacity"}}
+                            },
+                            "then": {
+                                "required": ["settings"],
+                                "properties": {
+                                    "settings": {
+                                        "required": ["capacity"]
+                                    }
+                                }
+                            }
+                        }
+                    ]
                 }
             },
             "additionalProperties": false
         }
     },
     "allOf": [
+        {
+            "if": {
+                "required": ["routing"],
+                "properties": {
+                    "routing": {
+                        "required": ["router"],
+                        "properties": {
+                            "router": {
+                                "required": ["use"],
+                                "properties": {"use": {"const": "capacity"}}
+                            }
+                        }
+                    }
+                }
+            },
+            "then": {
+                "not": {"anyOf": [{"required": ["groups"]}, {"required": ["matrix"]}]}
+            }
+        },
         {
             "if": {
                 "required": [

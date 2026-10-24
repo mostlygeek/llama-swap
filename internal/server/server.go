@@ -207,11 +207,18 @@ type BuildInfo struct {
 	Date    string
 }
 
+// New constructs the selected local router, peer router, and HTTP handlers
+// using the supplied configuration and shared services.
 func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
 	switch cfg.Routing.Router.Use {
+	case "capacity":
+		local, err = router.NewCapacity(cfg, logs)
+		if err != nil {
+			return nil, fmt.Errorf("creating capacity router: %w", err)
+		}
 	case "matrix":
 		local, err = router.NewMatrix(cfg, logs)
 		if err != nil {

@@ -116,6 +116,71 @@ func TestBaseRouter_RunningStatus(t *testing.T) {
 	}
 }
 
+func TestBaseRouter_CancelSwapDuringEviction(t *testing.T) {
+	target := newFakeProcess("target")
+	victim := newFakeProcess("victim")
+	victim.markReady()
+	victim.stopBlock = make(chan struct{})
+	b := newTestBase(t, map[string]process.Process{"target": target, "victim": victim}, &stubPlanner{})
+	releaseStop := sync.OnceFunc(func() { close(victim.stopBlock) })
+	t.Cleanup(releaseStop)
+
+	ctx, cancel := context.WithCancel(b.shutdownCtx)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		b.doSwap(ctx, "target", 1, []string{"victim"})
+	}()
+	waitSignal(t, victim.stopStarted, "eviction started")
+
+	// Unload invalidates the swap before its eviction finishes. It must never
+	// proceed to EnsureReady, even though stopping the victim still completes.
+	cancel()
+	releaseStop()
+	waitSignal(t, done, "cancelled swap exited")
+	if got := target.runCalls.Load(); got != 0 {
+		t.Errorf("target started %d times after its swap was cancelled", got)
+	}
+	if target.State() != process.StateStopped {
+		t.Errorf("target state=%q want stopped", target.State())
+	}
+}
+
+func TestBaseRouter_CancelSwapJoinsGoroutine(t *testing.T) {
+	for _, ready := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ready=%t", ready), func(t *testing.T) {
+			p := newFakeProcess("a")
+			p.autoReady = ready
+			// Leave the event loop stopped so a successful swap cannot deliver
+			// its completion. Cancellation must release that send as well as
+			// an EnsureReady that is still waiting for readiness.
+			b, err := newBaseRouter("test", config.Config{}, map[string]process.Process{"a": p}, logmon.NewWriter(io.Discard), &stubPlanner{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(b.shutdownFn)
+			t.Cleanup(b.procCancel)
+			cancel := b.StartSwap("a", 1, nil)
+			waitSignal(t, p.runStarted, "swap started")
+			done := make(chan struct{})
+			go func() {
+				cancel()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("cancel did not join the swap goroutine")
+			}
+			b.StopProcesses(time.Second, []string{"a"})
+			if p.State() != process.StateStopped {
+				t.Errorf("state=%q want stopped after cancelling and stopping", p.State())
+			}
+		})
+	}
+}
+
 func TestBaseRouter_UnloadAll(t *testing.T) {
 	a := newFakeProcess("a")
 	a.markReady()

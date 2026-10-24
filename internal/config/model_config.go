@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -142,6 +144,11 @@ type ModelConfig struct {
 	Unlisted      bool     `yaml:"unlisted"`
 	UseModelName  string   `yaml:"useModelName"`
 
+	// Capacities declares resource usage for the capacity router. Missing pools
+	// consume zero; higher EvictCost favors keeping this model resident.
+	Capacities map[string]int64 `yaml:"capacities"`
+	EvictCost  int64            `yaml:"evict_cost"`
+
 	// #179 for /v1/models
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
@@ -181,7 +188,9 @@ type ModelConfig struct {
 	HealthCheckTimeout int `yaml:"healthCheckTimeout"`
 }
 
-func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+// UnmarshalYAML applies model defaults and checks capacity values before YAML
+// numeric conversions can truncate fractional requirements or eviction costs.
+func (m *ModelConfig) UnmarshalYAML(node *yaml.Node) error {
 	type rawModelConfig ModelConfig
 	defaults := rawModelConfig{
 		Cmd:              "",
@@ -214,7 +223,18 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		defaults.CmdStop = "taskkill /f /t /pid ${PID}"
 	}
 
-	if err := unmarshal(&defaults); err != nil {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i].Value, node.Content[i+1]
+		if key == "capacities" {
+			if err := validateCapacityMap(value, "capacities"); err != nil {
+				return err
+			}
+		}
+		if key == "evict_cost" && value.Tag != "!!int" {
+			return fmt.Errorf("evict_cost must be an integer")
+		}
+	}
+	if err := node.Decode(&defaults); err != nil {
 		return err
 	}
 
