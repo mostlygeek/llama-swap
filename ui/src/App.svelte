@@ -14,7 +14,6 @@
   import { Check, ChevronDown } from "@lucide/svelte";
   import {
     activeProfile,
-    checkPerformanceEnabled,
     enableAPIEvents,
     helpAgentEnabled,
     profiles,
@@ -138,7 +137,6 @@
     const cleanupScreenWidth = initScreenWidth();
     const cleanupSystemTheme = initSystemThemeListener();
     enableAPIEvents(true);
-    checkPerformanceEnabled();
     import("./routes/Playground.svelte").then((m) => {
       PlaygroundComponent = m.default;
     });
