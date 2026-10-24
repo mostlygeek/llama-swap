@@ -106,10 +106,11 @@ is stopped while it is still building it.
 | tool | what it does |
 | --- | --- |
 | `sys__now` | current date and time, in UTC, server local time, and an optional named timezone |
+| `sys__performance` | newest CPU, memory and per-GPU readings; GPUs are only read while a model is loaded unless `performance.gpu.poll` is `always` (see `guides/operations/performance-monitoring`) |
 
 Every tool is annotated `readOnlyHint`, so clients that ask before running tools can
-safely auto-approve them. Only `sys__now` is *not* `idempotentHint` — the answer is
-supposed to change between calls.
+safely auto-approve them. Only `sys__now` and `sys__performance` are *not*
+`idempotentHint` — their answers are supposed to change between calls.
 
 A good first request is `docs__list_docs` — it is the map of everything available.
 
