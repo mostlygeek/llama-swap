@@ -117,8 +117,23 @@ func validateSelectors(config Config) error {
 	return nil
 }
 
+// validateSpilloverCoexistence ensures local spillover targets can remain
+// resident together under the selected router's constraints.
 func validateSpilloverCoexistence(config Config, selectorID string, targets []string) error {
 	if len(targets) <= 1 {
+		return nil
+	}
+	if config.Routing.Router.Use == "capacity" {
+		capacity := config.Routing.Router.Settings.Capacity
+		for pool, total := range capacity.Pools {
+			var used int64
+			for _, target := range targets {
+				used += config.Models[target].Capacities[pool]
+			}
+			if used > total {
+				return fmt.Errorf("selectors.%s spillover targets exceed capacity total in pool %q", selectorID, pool)
+			}
+		}
 		return nil
 	}
 

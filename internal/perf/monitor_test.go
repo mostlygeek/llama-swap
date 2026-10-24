@@ -288,6 +288,8 @@ func (f *fakeGpuCollector) waitHistory() []time.Duration {
 	return append([]time.Duration(nil), f.waits...)
 }
 
+// newGpuTestMonitor retains every scripted sample so immediate fake restarts
+// cannot overflow the single-slot listener used by production subscriptions.
 func newGpuTestMonitor(t *testing.T, f *fakeGpuCollector) (*Monitor, chan []GpuStat) {
 	t.Helper()
 	m, err := New(config.PerformanceConfig{Every: 100 * time.Millisecond}, newTestLogger())
@@ -295,8 +297,13 @@ func newGpuTestMonitor(t *testing.T, f *fakeGpuCollector) (*Monitor, chan []GpuS
 	m.gpuStats = f.start
 	m.gpuWait = f.wait
 
-	_, gpuCh, unsub := m.Subscribe()
-	t.Cleanup(unsub)
+	gpuCh := make(chan []GpuStat, len(f.steps)+1)
+	m.gpuListeners[gpuCh] = struct{}{}
+	t.Cleanup(func() {
+		m.mutex.Lock()
+		defer m.mutex.Unlock()
+		delete(m.gpuListeners, gpuCh)
+	})
 	return m, gpuCh
 }
 

@@ -43,8 +43,9 @@ type grantRec struct {
 }
 
 type startRec struct {
-	model string
-	evict []string
+	model      string
+	generation uint64
+	evict      []string
 }
 
 type stopRec struct {
@@ -59,15 +60,17 @@ type fakeEffects struct {
 	serveResult  map[string]bool                 // GrantServe return per model (default true)
 	lastServeReq HandlerReq
 
-	starts []startRec
-	grants []grantRec
-	stops  []stopRec
+	starts    []startRec
+	grants    []grantRec
+	stops     []stopRec
+	cancelled map[uint64]bool
 }
 
 func newFakeEffects() *fakeEffects {
 	return &fakeEffects{
 		states:      map[string]process.ProcessState{},
 		serveResult: map[string]bool{},
+		cancelled:   map[uint64]bool{},
 	}
 }
 
@@ -87,8 +90,19 @@ func (f *fakeEffects) RunningModels() map[string]process.ProcessState {
 	return out
 }
 
-func (f *fakeEffects) StartSwap(modelID string, evict []string) {
-	f.starts = append(f.starts, startRec{model: modelID, evict: evict})
+func (f *fakeEffects) StartSwap(modelID string, generation uint64, evict []string) func() {
+	f.starts = append(f.starts, startRec{model: modelID, generation: generation, evict: evict})
+	return func() { f.cancelled[generation] = true }
+}
+
+// swapDone returns a completion for the most recently started swap of modelID.
+func (f *fakeEffects) swapDone(modelID string, err error) SwapDone {
+	for i := len(f.starts) - 1; i >= 0; i-- {
+		if start := f.starts[i]; start.model == modelID {
+			return SwapDone{ModelID: modelID, Generation: start.generation, Err: err}
+		}
+	}
+	panic("no swap started for " + modelID)
 }
 
 func (f *fakeEffects) GrantError(req HandlerReq, err error) {
@@ -302,7 +316,7 @@ func TestFIFO_OnDemandStartThenServe(t *testing.T) {
 
 	// Swap finishes, model is now ready.
 	eff.states["a"] = process.StateReady
-	s.OnSwapDone(SwapDone{ModelID: "a"})
+	s.OnSwapDone(eff.swapDone("a", nil))
 
 	if got := eff.served("a"); got != 1 {
 		t.Errorf("served(a)=%d want 1 after swap done", got)
@@ -323,7 +337,7 @@ func TestFIFO_JoinInFlightSwap(t *testing.T) {
 	}
 
 	eff.states["a"] = process.StateReady
-	s.OnSwapDone(SwapDone{ModelID: "a"})
+	s.OnSwapDone(eff.swapDone("a", nil))
 
 	if got := eff.served("a"); got != 3 {
 		t.Errorf("served(a)=%d want 3 (one swap serves all waiters)", got)
@@ -338,7 +352,7 @@ func TestFIFO_SwapDoneError_FailsAllWaiters(t *testing.T) {
 	s.OnRequest(req("a"))
 	s.OnRequest(req("a"))
 
-	s.OnSwapDone(SwapDone{ModelID: "a", Err: errors.New("boom")})
+	s.OnSwapDone(eff.swapDone("a", errors.New("boom")))
 
 	if eff.served("a") != 0 {
 		t.Errorf("served(a)=%d want 0 on swap error", eff.served("a"))
@@ -366,7 +380,7 @@ func TestFIFO_QueueOnEvictionCollision(t *testing.T) {
 
 	// a becomes ready and is granted (now serving, inFlight[a]=1).
 	eff.states["a"] = process.StateReady
-	s.OnSwapDone(SwapDone{ModelID: "a"})
+	s.OnSwapDone(eff.swapDone("a", nil))
 	if got := eff.startsFor("b"); got != 0 {
 		t.Fatalf("b started while a is serving: StartSwap(b)=%d want 0", got)
 	}
@@ -422,7 +436,7 @@ func TestFIFO_OverlappingEvictSetsDoNotRunInParallel(t *testing.T) {
 	// a's swap completes and x is gone; b can now evict nothing and start.
 	eff.states["a"] = process.StateReady
 	eff.states["x"] = process.StateStopped
-	s.OnSwapDone(SwapDone{ModelID: "a"})
+	s.OnSwapDone(eff.swapDone("a", nil))
 	if got := eff.startsFor("b"); got != 1 {
 		t.Fatalf("StartSwap(b)=%d want 1 after a's swap drained", got)
 	}
@@ -446,7 +460,7 @@ func TestFIFO_QueueDrainPromotesMultiple(t *testing.T) {
 	}
 
 	eff.states["a"] = process.StateReady
-	s.OnSwapDone(SwapDone{ModelID: "a"})
+	s.OnSwapDone(eff.swapDone("a", nil))
 
 	// b and c have empty evict sets and don't evict a, so both start now.
 	if eff.startsFor("b") != 1 || eff.startsFor("c") != 1 {
@@ -479,7 +493,7 @@ func TestFIFO_QueueCollation(t *testing.T) {
 	// Drain a, then its served requests, which promotes b; repeat for b -> c.
 	drain := func(model string, waiters int) {
 		eff.states[model] = process.StateReady
-		s.OnSwapDone(SwapDone{ModelID: model})
+		s.OnSwapDone(eff.swapDone(model, nil))
 		for i := 0; i < waiters; i++ {
 			s.OnServeDone(ServeDoneEvent{ModelID: model})
 		}
@@ -536,7 +550,7 @@ func TestFIFO_GrantServeFalseDoesNotLeakInFlight(t *testing.T) {
 
 	s.OnRequest(req("a"))
 	eff.states["a"] = process.StateReady
-	s.OnSwapDone(SwapDone{ModelID: "a"}) // grant fails, inFlight[a] stays 0
+	s.OnSwapDone(eff.swapDone("a", nil)) // grant fails, inFlight[a] stays 0
 
 	// b evicts a; since a is not in-flight, b should start immediately.
 	s.OnRequest(req("b"))
@@ -578,6 +592,9 @@ func TestFIFO_OnUnload_ReleasesActiveWaiters(t *testing.T) {
 
 	s.OnUnload([]string{"a"}, time.Second)
 
+	if !eff.cancelled[eff.starts[0].generation] {
+		t.Error("unload did not cancel the active swap")
+	}
 	if got := eff.errored("a"); got != 2 {
 		t.Errorf("errored(a)=%d want 2 (active swap waiters released)", got)
 	}
@@ -586,6 +603,54 @@ func TestFIFO_OnUnload_ReleasesActiveWaiters(t *testing.T) {
 	}
 	if eff.stops[0].timeout != time.Second {
 		t.Errorf("StopProcesses timeout=%v want 1s", eff.stops[0].timeout)
+	}
+}
+
+// A completion from an unloaded swap must not finish a later swap for the same
+// model. Drive the event ordering directly so the regression needs no sleeps.
+func TestFIFO_OnUnload_IgnoresStaleSwapCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "success"},
+		{name: "error", err: errors.New("old swap failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eff := newFakeEffects()
+			eff.states["a"] = process.StateStopped
+			s := newFIFO(&stubPlanner{}, eff)
+
+			s.OnRequest(reqCh("a"))
+			oldCompletion := eff.swapDone("a", tc.err)
+			s.OnUnload([]string{"a"}, time.Second)
+			if got := eff.errored("a"); got != 1 {
+				t.Fatalf("errored(a)=%d want 1 (unloaded request released)", got)
+			}
+
+			newRequest := reqCh("a")
+			s.OnRequest(newRequest)
+			if got := eff.startsFor("a"); got != 2 {
+				t.Fatalf("StartSwap(a)=%d want 2 (new request starts a new swap)", got)
+			}
+			newSwap := s.active["a"]
+			grantsBefore := len(eff.grants)
+
+			// The first swap reports its result while the second is still loading.
+			s.OnSwapDone(oldCompletion)
+
+			if s.active["a"] != newSwap {
+				t.Error("stale completion removed the newer active swap")
+			}
+			if len(eff.grants) != grantsBefore {
+				t.Error("stale completion responded to the newer request before its swap completed")
+			}
+
+			s.OnSwapDone(eff.swapDone("a", nil))
+			if eff.served("a") != 1 || eff.lastServeReq.Respond != newRequest.Respond {
+				t.Error("new swap completion did not serve the newer request")
+			}
+		})
 	}
 }
 
@@ -675,7 +740,7 @@ func TestFIFO_OnCancel_QueuedRequest(t *testing.T) {
 
 	// a's swap finishes; drainQueue runs but b is gone — no swap for b.
 	eff.states["a"] = process.StateReady
-	s.OnSwapDone(SwapDone{ModelID: "a"})
+	s.OnSwapDone(eff.swapDone("a", nil))
 
 	if got := eff.startsFor("b"); got != 0 {
 		t.Errorf("StartSwap(b)=%d want 0 (cancelled request should not trigger a load)", got)
@@ -707,7 +772,7 @@ func TestFIFO_OnCancel_SwapWaiter(t *testing.T) {
 
 	// Swap finishes: only the live waiter is granted.
 	eff.states["a"] = process.StateReady
-	s.OnSwapDone(SwapDone{ModelID: "a"})
+	s.OnSwapDone(eff.swapDone("a", nil))
 
 	if got := eff.served("a"); got != 1 {
 		t.Errorf("served(a)=%d want 1 (only the non-cancelled waiter)", got)
@@ -860,7 +925,7 @@ func TestFIFO_ConcurrencyLimit_SwapWaiters(t *testing.T) {
 
 	// Swap completes: only the two admitted requests are served.
 	eff.states["a"] = process.StateReady
-	s.OnSwapDone(SwapDone{ModelID: "a"})
+	s.OnSwapDone(eff.swapDone("a", nil))
 
 	if got := eff.served("a"); got != 2 {
 		t.Fatalf("served(a)=%d want 2", got)
@@ -903,14 +968,14 @@ func TestFIFO_ConcurrencyLimit_QueuedWaitersReserveCapacity(t *testing.T) {
 	}
 
 	eff.states["b"] = process.StateReady
-	s.OnSwapDone(SwapDone{ModelID: "b"})
+	s.OnSwapDone(eff.swapDone("b", nil))
 	s.OnServeDone(ServeDoneEvent{ModelID: "b"})
 	if got := eff.startsFor("a"); got != 1 {
 		t.Fatalf("StartSwap(a)=%d want 1 after b drains", got)
 	}
 
 	eff.states["a"] = process.StateReady
-	s.OnSwapDone(SwapDone{ModelID: "a"})
+	s.OnSwapDone(eff.swapDone("a", nil))
 	if got := eff.served("a"); got != 2 {
 		t.Fatalf("served(a)=%d want 2", got)
 	}
