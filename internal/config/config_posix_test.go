@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -267,9 +266,7 @@ groups:
 			"X-Session-ID",
 			"X-Litellm-Session-Id",
 		}}},
-		Performance: PerformanceConfig{
-			Every: 5 * time.Second,
-		},
+		Performance: DefaultPerformanceConfig(),
 		Profiles: map[string]ProfileConfig{
 			"test": {
 				Description: "Test profile",

@@ -118,7 +118,7 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 
 // requestLogPathSkips lists path prefixes excluded from the access log because
 // they are polled frequently and would drown out useful entries.
-var requestLogPathSkips = []string{"/wol-health", "/api/performance", "/metrics"}
+var requestLogPathSkips = []string{"/wol-health", "/metrics"}
 
 // statusRecorder wraps an http.ResponseWriter to capture the response status
 // code and the number of body bytes written, so the access log can report

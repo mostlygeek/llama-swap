@@ -2,31 +2,34 @@ package perf
 
 import (
 	"fmt"
+	"io"
 	"net/http"
-	"sort"
 	"strings"
+
+	"github.com/mostlygeek/llama-swap/internal/perf/probe"
 )
 
 const mbToBytes = int64(1024 * 1024)
 
-// MetricsHandler returns an http.HandlerFunc serving Prometheus text format metrics
-// with the most recent system and GPU stats.
+// MetricsHandler serves the newest system and GPU readings in Prometheus text
+// format. A scrape counts as a viewer: under poll: active it takes a fresh
+// reading when a model is loaded. GPU gauges are left out when the GPUs
+// were not sampled (no model loaded), and so is any field a probe did not
+// report.
 func (m *Monitor) MetricsHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sysStats, gpuStats := m.Current()
+		sys, gpu := m.Latest(r.Context())
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-
-		if len(sysStats) > 0 {
-			writeSysMetrics(w, sysStats[len(sysStats)-1])
+		if sys != nil {
+			writeSysMetrics(w, *sys)
 		}
-
-		if len(gpuStats) > 0 {
-			writeGpuMetrics(w, latestPerGPU(gpuStats))
+		if gpu != nil {
+			writeGpuMetrics(w, gpu.GPUs)
 		}
 	}
 }
 
-func writeSysMetrics(w http.ResponseWriter, s SysStat) {
+func writeSysMetrics(w io.Writer, s SysStat) {
 	fmt.Fprintf(w, "# HELP llamaswap_cpu_util_percent CPU utilization per core (0-100)\n")
 	fmt.Fprintf(w, "# TYPE llamaswap_cpu_util_percent gauge\n")
 	for i, pct := range s.CpuUtilPerCore {
@@ -70,57 +73,45 @@ func writeSysMetrics(w http.ResponseWriter, s SysStat) {
 	}
 }
 
-func writeGpuMetrics(w http.ResponseWriter, gpus []GpuStat) {
-	if len(gpus) == 0 {
-		return
+func writeGpuMetrics(w io.Writer, gpus []probe.GpuSample) {
+	mb := func(v *int) *float64 {
+		if v == nil {
+			return nil
+		}
+		b := float64(int64(*v) * mbToBytes)
+		return &b
 	}
-
-	type gpuMetric struct {
+	metrics := []struct {
 		help  string
 		name  string
-		value func(GpuStat) float64
-	}
-
-	metrics := []gpuMetric{
-		{"GPU temperature in Celsius", "llamaswap_gpu_temperature_celsius", func(g GpuStat) float64 { return float64(g.TempC) }},
-		{"GPU VRAM temperature in Celsius", "llamaswap_gpu_vram_temperature_celsius", func(g GpuStat) float64 { return float64(g.VramTempC) }},
-		{"GPU utilization percent (0-100)", "llamaswap_gpu_util_percent", func(g GpuStat) float64 { return g.GpuUtilPct }},
-		{"GPU memory utilization percent (0-100)", "llamaswap_gpu_memory_util_percent", func(g GpuStat) float64 { return g.MemUtilPct }},
-		{"GPU memory used in bytes", "llamaswap_gpu_memory_used_bytes", func(g GpuStat) float64 { return float64(g.MemUsedMB) * float64(mbToBytes) }},
-		{"GPU memory total in bytes", "llamaswap_gpu_memory_total_bytes", func(g GpuStat) float64 { return float64(g.MemTotalMB) * float64(mbToBytes) }},
-		{"GPU fan speed percent (0-100)", "llamaswap_gpu_fan_speed_percent", func(g GpuStat) float64 { return g.FanSpeedPct }},
-		{"GPU power draw in watts", "llamaswap_gpu_power_draw_watts", func(g GpuStat) float64 { return g.PowerDrawW }},
+		value func(probe.GpuSample) *float64
+	}{
+		{"GPU temperature in Celsius", "llamaswap_gpu_temperature_celsius", func(g probe.GpuSample) *float64 { return g.TempC }},
+		{"GPU VRAM temperature in Celsius", "llamaswap_gpu_vram_temperature_celsius", func(g probe.GpuSample) *float64 { return g.VramTempC }},
+		{"GPU utilization percent (0-100)", "llamaswap_gpu_util_percent", func(g probe.GpuSample) *float64 { return g.UtilPct }},
+		{"GPU dedicated memory used in bytes", "llamaswap_gpu_memory_used_bytes", func(g probe.GpuSample) *float64 { return mb(g.VramUsedMB) }},
+		{"GPU dedicated memory total in bytes", "llamaswap_gpu_memory_total_bytes", func(g probe.GpuSample) *float64 { return mb(g.VramTotalMB) }},
+		{"GPU shared memory used in bytes (GTT or unified memory)", "llamaswap_gpu_shared_memory_used_bytes", func(g probe.GpuSample) *float64 { return mb(g.SharedUsedMB) }},
+		{"GPU shared memory total in bytes (GTT or unified memory)", "llamaswap_gpu_shared_memory_total_bytes", func(g probe.GpuSample) *float64 { return mb(g.SharedTotalMB) }},
+		{"GPU fan speed percent (0-100)", "llamaswap_gpu_fan_speed_percent", func(g probe.GpuSample) *float64 { return g.FanPct }},
+		{"GPU power draw in watts", "llamaswap_gpu_power_draw_watts", func(g probe.GpuSample) *float64 { return g.PowerW }},
 	}
 
 	for _, m := range metrics {
-		fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help)
-		fmt.Fprintf(w, "# TYPE %s gauge\n", m.name)
+		headerDone := false
 		for _, g := range gpus {
-			if g.UUID != "" {
-				fmt.Fprintf(w, "%s{id=\"%d\",name=\"%s\",uuid=\"%s\"} %g\n",
-					m.name, g.ID, sanitizeLabel(g.Name), sanitizeLabel(g.UUID), m.value(g))
-			} else {
-				fmt.Fprintf(w, "%s{id=\"%d\",name=\"%s\"} %g\n",
-					m.name, g.ID, sanitizeLabel(g.Name), m.value(g))
+			v := m.value(g)
+			if v == nil {
+				continue
 			}
+			if !headerDone {
+				fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help)
+				fmt.Fprintf(w, "# TYPE %s gauge\n", m.name)
+				headerDone = true
+			}
+			fmt.Fprintf(w, "%s{gpu=\"%s\",name=\"%s\"} %g\n", m.name, sanitizeLabel(g.Key), sanitizeLabel(g.Name), *v)
 		}
 	}
-}
-
-// latestPerGPU returns the most recent GpuStat for each GPU ID, sorted by ID.
-func latestPerGPU(stats []GpuStat) []GpuStat {
-	latest := make(map[int]GpuStat)
-	for _, g := range stats {
-		if prev, ok := latest[g.ID]; !ok || g.Timestamp.After(prev.Timestamp) {
-			latest[g.ID] = g
-		}
-	}
-	result := make([]GpuStat, 0, len(latest))
-	for _, g := range latest {
-		result = append(result, g)
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-	return result
 }
 
 // sanitizeLabel escapes characters that are invalid in Prometheus label values.

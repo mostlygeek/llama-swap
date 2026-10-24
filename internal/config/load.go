@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -51,6 +50,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			"X-Session-ID",
 			"X-Litellm-Session-Id",
 		}}},
+		Performance: DefaultPerformanceConfig(),
 	}
 	if err = node.Decode(&config); err != nil {
 		return Config{}, err
@@ -65,10 +65,6 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.HealthCheckTimeout = 15
 	}
 
-	// Apply defaults for performance config when section is missing
-	if config.Performance.Every == 0 {
-		config.Performance.Every = 5 * time.Second
-	}
 	if err = config.Performance.Validate(); err != nil {
 		return Config{}, fmt.Errorf("performance: %w", err)
 	}

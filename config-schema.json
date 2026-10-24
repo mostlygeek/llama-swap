@@ -280,13 +280,129 @@
                 "disabled": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Disable system performance monitoring."
+                    "description": "Turn off all performance monitoring. Nothing is collected, /metrics reports no performance gauges, and the Performance page is hidden."
                 },
-                "every": {
-                    "type": "string",
-                    "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
-                    "default": "15s",
-                    "description": "Delay between polling for new performance statistics. Minimum duration is 1s. Lower values use more RAM as stats are kept in memory."
+                "system": {
+                    "type": "object",
+                    "properties": {
+                        "disabled": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Turn off CPU, RAM, swap, load average and network stats."
+                        },
+                        "every": {
+                            "type": "string",
+                            "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
+                            "default": "5s",
+                            "description": "Delay between system readings. Minimum 5s."
+                        },
+                        "poll": {
+                            "type": "string",
+                            "enum": [
+                                "always",
+                                "active"
+                            ],
+                            "default": "always",
+                            "description": "always: read on every tick. active: read only while a model is loaded and the Performance page is open, /metrics is scraped, or an MCP tool asks."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "default": {},
+                    "description": "CPU, RAM, swap, load average and network stats."
+                },
+                "gpu": {
+                    "type": "object",
+                    "properties": {
+                        "disabled": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Turn off GPU stats but keep system stats."
+                        },
+                        "every": {
+                            "type": "string",
+                            "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
+                            "default": "5s",
+                            "description": "Delay between GPU readings. Minimum 5s."
+                        },
+                        "poll": {
+                            "type": "string",
+                            "enum": [
+                                "always",
+                                "active"
+                            ],
+                            "default": "active",
+                            "description": "always: read on every tick. active: read only while a model is loaded and the Performance page is open, /metrics is scraped, or an MCP tool asks. Idle GPUs are never woken."
+                        },
+                        "skipSuspended": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Linux: check the PCI runtime power state first and do not probe a suspended GPU."
+                        },
+                        "probes": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "auto",
+                                    "nvidia-smi",
+                                    "rocm-smi",
+                                    "lact",
+                                    "xpu-smi",
+                                    "sysfs",
+                                    "d3dkmt",
+                                    "mactop",
+                                    "ioreg"
+                                ]
+                            },
+                            "default": [
+                                "auto"
+                            ],
+                            "uniqueItems": true,
+                            "description": "GPU probes to run. auto picks probes from the detected hardware. A list runs those probes, and earlier probes win when two report the same GPU."
+                        },
+                        "exclude": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "default": [],
+                            "description": "Hide GPUs whose PCI bus ID or UUID equals an entry, or whose name contains one."
+                        },
+                        "settings": {
+                            "type": "object",
+                            "propertyNames": {
+                                "enum": [
+                                    "nvidia-smi",
+                                    "rocm-smi",
+                                    "lact",
+                                    "xpu-smi",
+                                    "sysfs",
+                                    "d3dkmt",
+                                    "mactop",
+                                    "ioreg"
+                                ]
+                            },
+                            "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Location of the probe's CLI (nvidia-smi, rocm-smi, xpu-smi, mactop, ioreg)."
+                                    },
+                                    "socket": {
+                                        "type": "string",
+                                        "description": "Daemon socket (lact)."
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "default": {},
+                            "description": "Per-probe settings keyed by probe name."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "default": {},
+                    "description": "GPU stats."
                 }
             },
             "additionalProperties": false,

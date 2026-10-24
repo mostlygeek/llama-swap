@@ -220,18 +220,17 @@ func main() {
 		proxyLog.Warnf("failed to set up process tree cleanup: %v", err)
 	}
 
-	// perfMon outlives config reloads; its config is updated in place.
-	var perfMon *perf.Monitor
-	if !cfg.Performance.Disabled {
-		perfMon, err = perf.New(cfg.Performance, proxyLog)
-		if err != nil {
-			slog.Error("failed to create performance monitor", "error", err)
-			os.Exit(1)
-		}
-		perfMon.Start()
-	} else {
+	// perfMon outlives config reloads; its config is updated in place, so a
+	// reload can also turn monitoring on or off.
+	perfMon, err := perf.New(cfg.Performance, proxyLog, hardwareSnapshot)
+	if err != nil {
+		slog.Error("failed to create performance monitor", "error", err)
+		os.Exit(1)
+	}
+	if cfg.Performance.Disabled {
 		proxyLog.Info("performance monitoring is disabled")
 	}
+	perfMon.Start()
 
 	buildInfo := server.BuildInfo{Version: version, Commit: commit, Date: date}
 
@@ -381,9 +380,7 @@ func main() {
 		activeMu.Unlock()
 
 		applyLogSettings(newCfg)
-		if perfMon != nil {
-			perfMon.UpdateConfig(newCfg.Performance)
-		}
+		perfMon.UpdateConfig(newCfg.Performance)
 
 		if err := old.Shutdown(shutdownTimeout); err != nil {
 			proxyLog.Warnf("error shutting down old server during reload: %v", err)
