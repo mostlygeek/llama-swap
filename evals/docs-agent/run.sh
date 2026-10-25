@@ -61,13 +61,16 @@ if [[ -z "$BASE_URL" ]]; then
   fi
 
   echo "==> building llama-swap"
+  # embed_src gives the agent its code__* tools; copying the source takes
+  # well under a second.
+  make src >/dev/null
   if [[ "$EMBED_UI" == "1" ]]; then
     make ui >/dev/null
-    go build -tags embed_ui -o build/llama-swap .
+    go build -tags embed_ui,embed_src -o build/llama-swap .
   else
     # No embed_ui: the eval never loads the UI, and skipping it keeps a
     # rebuild-per-iteration down to a few seconds.
-    go build -o build/llama-swap .
+    go build -tags embed_src -o build/llama-swap .
   fi
 
   echo "==> starting llama-swap on 127.0.0.1:$PORT with $FIXTURE_DIR merged in"

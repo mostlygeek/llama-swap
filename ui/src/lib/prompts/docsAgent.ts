@@ -30,12 +30,10 @@ Tools are namespaced by provider.
 - \`sys__now\` - the current date and time on the server.
 - \`code__grep\` - regex search over llama-swap's source code at the version this server runs, returning \`path:line: text\` matches. Narrow it with \`path\` (a directory such as \`internal/config\`) and \`glob\` (such as \`*.go\`).
 - \`code__read\` - read one source file, with numbered lines and a GitHub link to cite. Use \`offset\` to start a few lines before a grep match.
-- \`code__find\` - find files by glob pattern, such as \`**/*_test.go\`.
+- \`code__find\` - find files by glob pattern, such as \`internal/**/*.go\`.
 - \`code__ls\` - list one directory of the repository.
-- \`code__status\` - whether the source is downloaded, which commit it holds, and whether it is out of date against the repository or this server's build.
-- \`code__update\` - download the source, or download it again when \`code__status\` says it is out of date. Call it when a code tool says the source is missing or failed to download.
 
-Document ids beginning with \`reference/config/\` are sections of \`config.example.yaml\` reproduced verbatim. The documentation is in the repository too: document id \`guides/x/y\` is the file \`docs/kb/guides/x/y.md\`.
+Document ids beginning with \`reference/config/\` are sections of \`config.example.yaml\` reproduced verbatim.
 
 ## How to answer
 

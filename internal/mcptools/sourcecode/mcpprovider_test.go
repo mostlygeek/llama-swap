@@ -4,79 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
+	"testing/fstest"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func noGit() (string, error) { return "", exec.ErrNotFound }
-
-// upstream is a local git repository standing in for GitHub.
-type upstream struct {
-	t       *testing.T
-	dir     string
-	gitPath string
-}
-
-// newUpstream commits files and tags the commit with an annotated tag, the
-// kind llama-swap releases use.
-func newUpstream(t *testing.T, tag string, files map[string]string) *upstream {
-	t.Helper()
-	gitPath, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git is not installed")
-	}
-	u := &upstream{t: t, dir: writeTree(t, files), gitPath: gitPath}
-	u.git("init", "--quiet")
-	u.git("add", ".")
-	u.git("commit", "--quiet", "-m", "init")
-	u.git("tag", "--annotate", "-m", tag, tag)
-	return u
-}
-
-func (u *upstream) git(args ...string) string {
-	u.t.Helper()
-	cmd := exec.CommandContext(u.t.Context(), u.gitPath, args...)
-	cmd.Dir = u.dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
-	out, err := cmd.CombinedOutput()
-	require.NoError(u.t, err, string(out))
-	return strings.TrimSpace(string(out))
-}
-
-// advance commits a change to path and moves tag onto it, returning the new
-// commit.
-func (u *upstream) advance(tag, path, content string) string {
-	u.t.Helper()
-	require.NoError(u.t, os.WriteFile(filepath.Join(u.dir, filepath.FromSlash(path)), []byte(content), 0o644))
-	u.git("commit", "--quiet", "-am", "next")
-	u.git("tag", "--force", "--annotate", "-m", tag, tag)
-	return u.git("rev-parse", "HEAD")
-}
-
-// provider fetches from u. A plain path rather than a file:// URL, which has
-// no portable form for a Windows path; git warns that --depth is ignored
-// locally and clones.
-func (u *upstream) provider(ref string) *Provider {
-	return NewProvider(Options{RepoURL: u.dir, Ref: ref, CacheDir: u.t.TempDir()})
-}
-
-func newTestProvider(t *testing.T, repoURL, ref string) *Provider {
-	t.Helper()
-	p := NewProvider(Options{RepoURL: repoURL, Ref: ref, CacheDir: t.TempDir()})
-	p.fetcher.lookGit = noGit
-	return p
-}
 
 type callResult struct {
 	text    string
@@ -93,137 +28,41 @@ func call(t *testing.T, p *Provider, name, args string) callResult {
 	return callResult{res.Content, res.IsError, res.Truncated}
 }
 
-func TestSourceCode_GitShallowClone(t *testing.T) {
-	u := newUpstream(t, "v7", map[string]string{"internal/x.go": "package x\n\nconst Answer = 42\n"})
-	p := u.provider("v7")
+func TestSourceCode_NotEmbeddedTellsTheAgent(t *testing.T) {
+	p := NewProvider(Options{Ref: "v266"})
 
-	res := call(t, p, "grep", `{"pattern":"Answer"}`)
-	require.False(t, res.isError, res.text)
-	assert.Equal(t, "internal/x.go:3: const Answer = 42", res.text)
-
-	res = call(t, p, "read", `{"path":"internal/x.go"}`)
-	assert.Contains(t, res.text, "/blob/v7/internal/x.go#L1-L3")
-
-	res = call(t, p, "ls", `{}`)
-	assert.Equal(t, "internal/", res.text, "git's own files are not listed")
-}
-
-func TestSourceCode_CheckoutIsReusedUntilRefreshed(t *testing.T) {
-	u := newUpstream(t, "v1", map[string]string{"a.go": "one\n"})
-	f := u.provider("v1").fetcher
-
-	dir, err := f.checkout(context.Background(), false)
+	tools, err := p.Tools(context.Background())
 	require.NoError(t, err)
-	u.advance("v1", "a.go", "two\n")
+	assert.Len(t, tools, 4, "the tools are listed so a call can explain")
 
-	_, err = f.checkout(context.Background(), false)
-	require.NoError(t, err)
-	data, _ := os.ReadFile(filepath.Join(dir, "a.go"))
-	assert.Equal(t, "one\n", string(data), "a checkout on disk is reused")
-
-	_, err = f.checkout(context.Background(), true)
-	require.NoError(t, err)
-	data, _ = os.ReadFile(filepath.Join(dir, "a.go"))
-	assert.Equal(t, "two\n", string(data))
-
-	entries, err := os.ReadDir(f.cacheDir)
-	require.NoError(t, err)
-	require.Len(t, entries, 1, "the swap leaves neither the scratch clone nor the old checkout behind")
-	assert.Equal(t, "v1", entries[0].Name())
-}
-
-func TestSourceCode_StaleFetchesAreRemoved(t *testing.T) {
-	u := newUpstream(t, "v1", map[string]string{"a.go": "package a\n"})
-	f := u.provider("v1").fetcher
-	stale := filepath.Join(f.cacheDir, ".fetch-old")
-	fresh := filepath.Join(f.cacheDir, ".fetch-new")
-	require.NoError(t, os.MkdirAll(stale, 0o755))
-	require.NoError(t, os.MkdirAll(fresh, 0o755))
-	old := time.Now().Add(-2 * fetchTimeout)
-	require.NoError(t, os.Chtimes(stale, old, old))
-
-	_, err := f.checkout(context.Background(), false)
-	require.NoError(t, err)
-	assert.NoDirExists(t, stale)
-	assert.DirExists(t, fresh, "a clone that may still be running is left alone")
-}
-
-func TestSourceCode_NoGitTellsTheAgent(t *testing.T) {
-	p := newTestProvider(t, DefaultRepoURL, "v1")
-
-	for name, args := range map[string]string{"grep": `{"pattern":"x"}`, "update": `{}`} {
+	for name, args := range map[string]string{
+		"grep": `{"pattern":"x"}`, "read": `{"path":"a.go"}`, "find": `{"pattern":"*.go"}`, "ls": `{}`,
+	} {
 		res := call(t, p, name, args)
 		assert.True(t, res.isError, name)
-		assert.Contains(t, res.text, "git is not installed", name)
-		assert.Contains(t, res.text, "Tell the user to install git", name)
+		assert.Contains(t, res.text, "not embedded in this build", name)
+		assert.Contains(t, res.text, "embed_src", name)
 	}
-
-	res := call(t, p, "status", `{}`)
-	assert.False(t, res.isError)
-	assert.Contains(t, res.text, "git: not installed")
-	assert.Contains(t, res.text, "Tell the user to install git")
 }
 
-func TestSourceCode_CloneFailureIsAToolError(t *testing.T) {
-	gitPath, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git is not installed")
-	}
-	p := NewProvider(Options{RepoURL: filepath.Join(t.TempDir(), "missing"), Ref: "v1", CacheDir: t.TempDir()})
-	var attempts atomic.Int32
-	p.fetcher.lookGit = func() (string, error) { attempts.Add(1); return gitPath, nil }
-
-	res := call(t, p, "grep", `{"pattern":"x"}`)
+func TestSourceCode_EmptySourceIsNotEmbedded(t *testing.T) {
+	p := NewProvider(Options{Source: fstest.MapFS{}})
+	res := call(t, p, "ls", `{}`)
 	assert.True(t, res.isError)
-	assert.Contains(t, res.text, "not available")
-	assert.Contains(t, res.text, "git clone of")
-
-	// A failure is remembered for a while rather than retried on every call.
-	call(t, p, "ls", `{}`)
-	assert.Equal(t, int32(1), attempts.Load())
-
-	p.now = func() time.Time { return time.Now().Add(2 * retryAfter) }
-	call(t, p, "ls", `{}`)
-	assert.Equal(t, int32(2), attempts.Load())
-}
-
-func TestSourceCode_StillLoading(t *testing.T) {
-	release := make(chan struct{})
-	p := newTestProvider(t, DefaultRepoURL, "v1")
-	p.fetcher.lookGit = func() (string, error) { <-release; return noGit() }
-	// Let the background load finish before its cache directory is removed;
-	// Windows will not delete a directory another goroutine is writing into.
-	t.Cleanup(func() {
-		p.mu.Lock()
-		done := p.loading
-		p.mu.Unlock()
-		close(release)
-		if done != nil {
-			<-done
-		}
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	res, err := p.Call(ctx, "grep", map[string]json.RawMessage{"pattern": json.RawMessage(`"x"`)})
-	require.NoError(t, err)
-	assert.True(t, res.IsError)
-	assert.Contains(t, res.Content, "still downloading")
+	assert.Contains(t, res.text, "not embedded in this build")
 }
 
 func TestSourceCode_UnknownTool(t *testing.T) {
-	p := newTestProvider(t, "http://127.0.0.1:0", "v1")
+	p := NewProvider(Options{})
 	_, err := p.Call(context.Background(), "nope", nil)
 	assert.Error(t, err)
 }
 
-// readyProvider is a provider whose index is already loaded from files.
+// readyProvider is a provider serving files.
 func readyProvider(t *testing.T, files map[string]string) *Provider {
 	t.Helper()
-	idx, err := LoadIndex(writeTree(t, files))
-	require.NoError(t, err)
-	p := newTestProvider(t, DefaultRepoURL, "v266")
-	p.index = idx
+	p := NewProvider(Options{Source: mapFS(files), Ref: "v266"})
+	require.NotNil(t, p.index)
 	return p
 }
 
@@ -341,16 +180,14 @@ func TestSourceCode_FindAndLsOutput(t *testing.T) {
 }
 
 func TestSourceCode_ToolAnnotations(t *testing.T) {
-	p := newTestProvider(t, DefaultRepoURL, "v266")
+	p := readyProvider(t, map[string]string{"a.go": "package a\n"})
 	tools, err := p.Tools(context.Background())
 	require.NoError(t, err)
-	require.Len(t, tools, 6)
+	require.Len(t, tools, 4)
 	for _, tool := range tools {
-		// update replaces the local checkout; everything else only reads.
-		assert.Equal(t, tool.Name != "update", tool.Annotations.ReadOnlyHint, tool.Name)
-		if tool.Name != "status" {
-			assert.Contains(t, tool.Description, "v266", "%s names the version it works on", tool.Name)
-		}
+		assert.True(t, tool.Annotations.ReadOnlyHint, tool.Name)
+		assert.True(t, tool.Annotations.IdempotentHint, tool.Name)
+		assert.Contains(t, tool.Description, "v266", "%s names the version it works on", tool.Name)
 	}
 }
 

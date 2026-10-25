@@ -241,13 +241,11 @@ func main() {
 	// depend on cfg.
 	referenceDocs := docagent.NewWithSchema(docs.Files, docsConfigSchema)
 
-	// Shared the same way, so the source checkout behind the code__* MCP
-	// tools is fetched at most once per process, on first use.
+	// Shared the same way. The source behind the code__* MCP tools is
+	// embedded only in builds with the embed_src tag.
 	sourceCode := sourcecode.NewProvider(sourcecode.Options{
-		Ref:     sourcecode.RefForVersion(version),
-		Version: version,
-		Commit:  commit,
-		Logf:    proxyLog.Infof,
+		Source: sourcecode.Embedded,
+		Ref:    sourcecode.RefForVersion(version),
 	})
 
 	initialStorePath := configStorePath(cfg)

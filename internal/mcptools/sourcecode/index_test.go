@@ -1,50 +1,44 @@
 package sourcecode
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// writeTree creates files under a fresh directory and returns it.
-func writeTree(t *testing.T, files map[string]string) string {
-	t.Helper()
-	root := t.TempDir()
+// mapFS builds an in-memory source tree.
+func mapFS(files map[string]string) fstest.MapFS {
+	fsys := fstest.MapFS{}
 	for name, content := range files {
-		p := filepath.Join(root, filepath.FromSlash(name))
-		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
-		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+		fsys[name] = &fstest.MapFile{Data: []byte(content)}
 	}
-	return root
+	return fsys
 }
 
 func testIndex(t *testing.T) *Index {
 	t.Helper()
-	root := writeTree(t, map[string]string{
+	idx, err := LoadIndex(mapFS(map[string]string{
 		"internal/process/process.go": "package process\n\nfunc (p *Process) Stop() {\n\tif p.ttl > 0 { stop(); stop() }\n}\n",
 		"internal/config/config.go":   "package config\n\n// GlobalTTL is the default ttl.\nGlobalTTL int `yaml:\"globalTTL\"`\n",
 		"docs/kb/guides/ttl.md":       "# TTL\n\nSet `ttl` to unload.\r\nwindows line\r\n",
 		"ui/src/app.ts":               "export const ttl = 1;\n",
-		"node_modules/dep/index.js":   "ttl\n",
-		".git/config":                 "ttl\n",
-		"assets/logo.png":             "\x89PNG\x00\x00ttl",
-	})
-	require.NoError(t, os.WriteFile(filepath.Join(filepath.Dir(root), "escape.txt"), []byte("outside\n"), 0o644))
-	idx, err := LoadIndex(root)
+	}))
 	require.NoError(t, err)
 	return idx
 }
 
-func TestSourceCode_FindSkipsGitAndDependencies(t *testing.T) {
+func TestSourceCode_LoadIndexNeedsFiles(t *testing.T) {
+	_, err := LoadIndex(fstest.MapFS{})
+	assert.Error(t, err)
+}
+
+func TestSourceCode_Find(t *testing.T) {
 	idx := testIndex(t)
 	files, err := idx.Find("", "")
 	require.NoError(t, err)
 	assert.Equal(t, []string{
-		"assets/logo.png",
 		"docs/kb/guides/ttl.md",
 		"internal/config/config.go",
 		"internal/process/process.go",
@@ -67,7 +61,7 @@ func TestSourceCode_List(t *testing.T) {
 	idx := testIndex(t)
 	entries, err := idx.List("")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"assets/", "docs/", "internal/", "ui/"}, entries, ".git and node_modules are left out")
+	assert.Equal(t, []string{"docs/", "internal/", "ui/"}, entries)
 
 	entries, err = idx.List("internal/config")
 	require.NoError(t, err)
@@ -80,7 +74,7 @@ func TestSourceCode_List(t *testing.T) {
 
 	entries, err = idx.List("../")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"assets/", "docs/", "internal/", "ui/"}, entries, "a path above the root is clamped to it")
+	assert.Equal(t, []string{"docs/", "internal/", "ui/"}, entries, "a path above the root is clamped to it")
 }
 
 func TestSourceCode_SearchCountsEachLineOnce(t *testing.T) {
@@ -93,7 +87,7 @@ func TestSourceCode_SearchCountsEachLineOnce(t *testing.T) {
 	assert.Equal(t, 4, res.Matches[0].Line)
 	assert.Equal(t, 1, res.TotalMatches)
 	assert.Equal(t, 1, res.FilesMatched)
-	assert.Equal(t, 4, res.FilesSearched, "the binary file is not searched")
+	assert.Equal(t, 4, res.FilesSearched)
 }
 
 func TestSourceCode_SearchOptions(t *testing.T) {
@@ -186,7 +180,7 @@ func TestSourceCode_Read(t *testing.T) {
 }
 
 func TestSourceCode_Selector(t *testing.T) {
-	idx := &Index{root: writeTree(t, map[string]string{"internal/a/b.go": "", "ui/src/a.ts": ""})}
+	idx := &Index{fsys: mapFS(map[string]string{"internal/a/b.go": "", "ui/src/a.ts": ""})}
 	tests := []struct {
 		dir, glob, path string
 		want            bool
@@ -220,26 +214,4 @@ func TestSourceCode_RefForVersion(t *testing.T) {
 	assert.Equal(t, "main", RefForVersion("v266-3-gabc123"))
 	assert.Equal(t, "main", RefForVersion("0"))
 	assert.Equal(t, "main", RefForVersion("devel"))
-	assert.False(t, strings.ContainsAny(safeDirName("feature/x y"), "/ "))
-}
-
-func TestSourceCode_SymlinksCannotLeaveTheCheckout(t *testing.T) {
-	outside := writeTree(t, map[string]string{"secret.txt": "secret\n"})
-	root := writeTree(t, map[string]string{"a.go": "package a\n"})
-	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
-		t.Skipf("cannot create a symlink here: %v", err)
-	}
-	idx, err := LoadIndex(root)
-	require.NoError(t, err)
-
-	_, err = idx.Read("link/secret.txt", 1, 1)
-	assert.ErrorIs(t, err, errNoFile)
-	_, err = idx.List("link")
-	assert.Error(t, err)
-	_, err = idx.Search(SearchOptions{Pattern: "secret", Path: "link", MaxMatches: 1})
-	assert.Error(t, err)
-
-	res, err := idx.Search(SearchOptions{Pattern: "secret", MaxMatches: 1})
-	require.NoError(t, err)
-	assert.Zero(t, res.TotalMatches, "a whole-tree search does not follow the link")
 }

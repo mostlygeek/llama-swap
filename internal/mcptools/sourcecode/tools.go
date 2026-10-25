@@ -41,7 +41,7 @@ func (p *Provider) fileTools() []mcptools.Tool {
 				fmt.Sprintf("Output is truncated to %d matches or %s, whichever is hit first. Long lines are truncated to %d chars. ",
 					defaultGrepLimit, limits, maxLineChars) +
 				"Use it to check the documentation against the code: a config key's default, how a feature behaves, " +
-				"where an error message comes from. Documentation id 'guides/x/y' is the file docs/kb/guides/x/y.md.",
+				"where an error message comes from. It holds the Go and TypeScript source only, without tests.",
 			Annotations: codeAnnotations(),
 			Tags:        []string{"code", "search", "source"},
 			InputSchema: map[string]any{
@@ -57,7 +57,7 @@ func (p *Provider) fileTools() []mcptools.Tool {
 					},
 					"glob": map[string]any{
 						"type":        "string",
-						"description": "Filter files by glob pattern, for example '*.go', '*.{go,yaml}' or 'ui/src/**/*.ts'.",
+						"description": "Filter files by glob pattern, for example '*.go', '*.{ts,svelte}' or 'ui/src/**/*.ts'.",
 					},
 					"ignore_case": map[string]any{
 						"type":        "boolean",
@@ -128,7 +128,7 @@ func (p *Provider) fileTools() []mcptools.Tool {
 				"properties": map[string]any{
 					"pattern": map[string]any{
 						"type":        "string",
-						"description": "Glob pattern to match files, for example '*.go', '**/*_test.go' or 'docs/kb/**/*.md'.",
+						"description": "Glob pattern to match files, for example '*.go', 'internal/**/*.go' or 'ui/src/**/*.svelte'.",
 					},
 					"path": map[string]any{
 						"type":        "string",
@@ -274,7 +274,7 @@ func (p *Provider) read(idx *Index, args map[string]json.RawMessage) mcptools.Re
 		notices = append(notices, fmt.Sprintf("Line %d is longer than the %s limit and was cut", file.Offset, byteLimit()))
 	}
 	first, last := file.Offset, file.Offset+kept-1
-	link := fmt.Sprintf("%s/blob/%s/%s#L%d-L%d", strings.TrimSuffix(p.repoURL, ".git"), p.ref, file.Path, first, last)
+	link := fmt.Sprintf("%s/blob/%s/%s#L%d-L%d", DefaultRepoURL, p.ref, file.Path, first, last)
 	lines = append([]string{link}, lines[:kept]...)
 
 	// Pi's continuation notices.

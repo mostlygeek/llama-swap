@@ -4,8 +4,10 @@ builds:
   - env:
       - CGO_ENABLED=0
     # embed the UI built by `make ui` into ui_dist (see internal/server/embed.go)
+    # and the source copied by `make src` (see internal/mcptools/sourcecode/embed.go)
     tags:
       - embed_ui
+      - embed_src
     # match the version/commit/date vars defined in llama-swap.go:
     #   version = tag, commit = `git rev-parse --short HEAD`, date = RFC3339 UTC
     ldflags:

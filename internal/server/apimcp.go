@@ -117,9 +117,8 @@ const mcpInstructions = "Tools are namespaced by provider. The docs__* tools ans
 	"The sys__* tools report facts about the machine llama-swap is running on. " +
 	"The code__* tools search and read llama-swap's source code at the version this server runs, " +
 	"to check the documentation against the implementation: code__grep for a regex search, code__read " +
-	"to read a file, code__find to find files by glob, and code__ls to list a directory. code__status says " +
-	"whether the source is downloaded and current, and code__update fetches or refreshes it. Document id " +
-	"'guides/x/y' is the file docs/kb/guides/x/y.md in that source."
+	"to read a file, code__find to find files by glob, and code__ls to list a directory. The source is " +
+	"the Go and TypeScript files without tests, embedded in builds made with the embed_src build tag."
 
 func (s *Server) mcpDiscover() discoverResult {
 	// Computed rather than a literal so that unioning an upstream's
