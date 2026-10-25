@@ -130,46 +130,33 @@ is stopped while it is still building it.
 | --- | --- |
 | `code__grep` | regex search over the source, ripgrep style, returning `path:line: text` matches; narrow with a directory or file `path` such as `internal/config` and a `glob` such as `*.go` |
 | `code__read` | one file, lines numbered `L12:`, with a GitHub link to the same lines; `offset` and `limit` page through it |
-| `code__find` | file paths matching a glob such as `**/*_test.go` |
+| `code__find` | file paths matching a glob such as `internal/**/*.go` |
 | `code__ls` | one directory's entries, directories marked with a trailing `/` |
-| `code__status` | whether the source is downloaded, its commit, and whether it is out of date against the repository and against this build |
-| `code__update` | download the source, or download it again when it is out of date; `force` downloads even when it looks current |
 
 These let an agent check the documentation against the code that implements it.
-The documentation is in the source too: document id
-`guides/model-runtime/ttl-and-unloading` is the file
-`docs/kb/guides/model-runtime/ttl-and-unloading.md`.
 
-The source is a shallow git checkout of the release this binary was built from
-(`v266` for llama-swap v266; `main` for a development build). It is fetched from
-github.com by `code__update` or the first grep, read, find or ls call, not at
-startup, and kept under the user cache directory (`~/.cache/llama-swap/source` on
-Linux) so a restart reuses it. A checkout on disk is never refreshed on its own:
-`code__status` asks the repository which commit the ref is at now, and
-`code__update` downloads it again when that has moved. A release tag does not
-move, so this matters for `main`.
-
-The `code__*` tools need the `git` command line tool on the machine running
-llama-swap, on its `PATH`. That includes inside a container: install git in the
-image if you want these tools there.
+The source is the Go and TypeScript files, without tests, of the build itself,
+embedded in the binary. Release builds and the `make` build targets include it:
+`make src` copies the files into `internal/mcptools/sourcecode/_src` and the
+`embed_src` build tag embeds them. It adds about 1.7MB to the binary and takes no
+memory until a tool reads it. Nothing is downloaded, and git is not needed at
+run time. `code__read` links to the same lines on GitHub at the release tag
+(`v266` for llama-swap v266; `main` for a development build).
 
 What goes wrong:
 
-- **git is not installed.** Every `code__*` tool says so and tells the agent to
-  ask you to install git. `code__status` reports `git: not installed`.
-- **No network access.** The call returns `isError` saying the source is not
-  available, and retries at most once a minute; `code__update` retries at once.
-  The other tools keep working, including an existing checkout.
-- **`code__status` cannot reach the repository.** The checkout stays usable;
-  `code__update` with `force` skips the check and clones again.
-- **The first call says "still downloading".** The fetch took longer than 30
-  seconds. It carries on in the background; call again.
+- **"source code is not embedded in this build".** The binary was built
+  without `-tags embed_src`, for example with a plain `go build` or
+  `go install`. Run `make src` and build with `-tags embed_src`, or use a
+  release build.
+- **The build fails with `pattern _src: no matching files found`.** The
+  `embed_src` tag was set without running `make src` first.
+- **A local build shows old code.** `_src` is a copy made when `make src` ran.
+  The `make` build targets run it each time; a manual `go build` does not.
 
-Every tool except `code__update` is annotated `readOnlyHint`, so clients that ask
-before running tools can safely auto-approve them. `code__update` replaces the
-cached checkout on the server, and changes nothing else. `sys__now` and
-`code__status` are not `idempotentHint` — their answers are supposed to change
-between calls.
+Every tool is annotated `readOnlyHint`, so clients that ask before running
+tools can safely auto-approve them. `sys__now` is not `idempotentHint` — its
+answer is supposed to change between calls.
 
 A good first request is `docs__list_docs` — it is the map of everything available.
 

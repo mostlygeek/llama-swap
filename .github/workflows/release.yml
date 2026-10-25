@@ -53,6 +53,10 @@ jobs:
         run: |
           make ui
 
+      - name: Copy source for the code tools
+        run: |
+          make src
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 #7.2.1
         with:

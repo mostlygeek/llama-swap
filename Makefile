@@ -70,26 +70,36 @@ ui/node_modules:
 ui: ui/node_modules
 	cd ui && npm run build
 
+# copy the Go and TypeScript source, without tests, into
+# internal/mcptools/sourcecode/_src; the `embed_src` build tag embeds it for
+# the Help agent's code__* tools (see internal/mcptools/sourcecode/embed.go)
+SRC_DIR = internal/mcptools/sourcecode/_src
+src:
+	rm -rf $(SRC_DIR)
+	mkdir -p $(SRC_DIR)
+	git ls-files -z --cached --others --exclude-standard -- '*.go' 'ui/*.ts' 'ui/*.svelte' \
+		':(exclude)*_test.go' ':(exclude)*.test.ts' | tar -cf - --null -T - | tar -xf - -C $(SRC_DIR)
+
 # Build OSX binary
-mac: ui
+mac: ui src
 	@echo "Building Mac binary..."
-	GOOS=darwin GOARCH=arm64 go build -tags embed_ui -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
+	GOOS=darwin GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
 
 # Build Linux binary
 linux: linux-arm64 linux-amd64
 
-linux-amd64: ui
+linux-amd64: ui src
 	@echo "Building Linux AMD64 binary..."
-	GOOS=linux GOARCH=amd64 go build -tags embed_ui -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
+	GOOS=linux GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
-linux-arm64: ui
+linux-arm64: ui src
 	@echo "Building Linux ARM64 binary..."
-	GOOS=linux GOARCH=arm64 go build -tags embed_ui -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
+	GOOS=linux GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
 
 # Build Windows binary
-windows: ui
+windows: ui src
 	@echo "Building Windows binary..."
-	GOOS=windows GOARCH=amd64 go build -tags embed_ui -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
+	GOOS=windows GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
 
 # for testing with real external processes
 simple-responder:
@@ -147,5 +157,5 @@ eval-docs-agent:
 	./evals/docs-agent/run.sh $(EVAL_ARGS)
 
 # Phony targets
-.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
+.PHONY: all clean ui src mac windows simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
 .PHONY: linux linux-arm64 linux-amd64

@@ -1,14 +1,10 @@
 package sourcecode
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
-	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -17,16 +13,8 @@ import (
 	"sync/atomic"
 )
 
-// maxFileBytes skips files no one reads line by line: lockfiles and
-// generated bundles. Everything hand-written in the repository is far smaller.
-const maxFileBytes = 1 << 20
-
-// skipDirs are never searched: version control internals and installed
-// dependencies, which are not llama-swap's code.
-var skipDirs = map[string]bool{".git": true, "node_modules": true}
-
 type sourceFile struct {
-	path string // slash separated, relative to the checkout root
+	path string // slash separated, relative to the source root
 	text string
 	// starts holds the byte offset of each line's first character.
 	starts []int
@@ -49,85 +37,47 @@ func (f *sourceFile) lineAt(off int) int {
 	return sort.Search(len(f.starts), func(i int) bool { return f.starts[i] > off })
 }
 
-// Index searches a checkout on disk. It holds only the checkout's path: every
-// call reads the files again, which the kernel's page cache makes cheap, so
-// llama-swap never keeps its own copy of the source in memory.
+// Index searches a source tree. Every call reads the files again: they are
+// embedded in the binary, so reading one costs a copy, and llama-swap keeps
+// no second copy of the source in memory between calls.
 type Index struct {
-	root string
+	fsys fs.FS
 }
 
-// LoadIndex opens the checkout at root.
-func LoadIndex(root string) (*Index, error) {
-	idx := &Index{root: root}
+// LoadIndex opens the source tree in fsys.
+func LoadIndex(fsys fs.FS) (*Index, error) {
+	idx := &Index{fsys: fsys}
 	paths, err := idx.paths()
 	if err != nil {
 		return nil, err
 	}
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("no source files found in %s", root)
+		return nil, errors.New("no source files found")
 	}
 	return idx, nil
 }
 
-// paths lists the checkout's regular files in path order. Large and binary
-// files are only filtered out when load reads them.
+// paths lists the tree's regular files in path order.
 func (idx *Index) paths() ([]string, error) {
 	var out []string
-	err := filepath.WalkDir(idx.root, func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(idx.fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
+		if d.Type().IsRegular() {
+			out = append(out, p)
 		}
-		if !d.Type().IsRegular() {
-			return nil
-		}
-		rel, err := filepath.Rel(idx.root, p)
-		if err != nil {
-			return err
-		}
-		out = append(out, filepath.ToSlash(rel))
 		return nil
 	})
 	return out, err
 }
 
-// openRoot opens the checkout for one call. Every path from a tool call is
-// resolved through it, which keeps "..", absolute paths, Windows drive letters
-// and symlinks from reaching outside the checkout. It is opened per call, not
-// kept, so a refresh that swaps the directory is seen by the next call.
-func (idx *Index) openRoot() (*os.Root, error) {
-	return os.OpenRoot(idx.root)
-}
-
-// load reads one file. It reports false for anything that is not searched: a
-// missing path, a file over maxFileBytes, or binary content.
-func (idx *Index) load(root *os.Root, rel string) (*sourceFile, bool) {
-	for _, part := range strings.Split(rel, "/") {
-		if skipDirs[part] {
-			return nil, false
-		}
-	}
-	// Check and read the same open file, so the path is resolved only once.
-	fh, err := root.Open(filepath.FromSlash(rel))
+// load reads one file. It reports false for a path that is not a file. Paths
+// from a tool call go through cleanPath first, and fs.FS rejects any that
+// still try to leave the tree.
+func (idx *Index) load(rel string) (*sourceFile, bool) {
+	data, err := fs.ReadFile(idx.fsys, rel)
 	if err != nil {
-		return nil, false
-	}
-	defer fh.Close()
-	info, err := fh.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() > maxFileBytes {
-		return nil, false
-	}
-	data, err := io.ReadAll(io.LimitReader(fh, maxFileBytes+1))
-	if err != nil || len(data) > maxFileBytes {
-		return nil, false
-	}
-	// The same test git and ripgrep use for binary content.
-	if bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0 {
 		return nil, false
 	}
 
@@ -193,12 +143,6 @@ func (idx *Index) Search(opts SearchOptions) (SearchResult, error) {
 	if err != nil {
 		return SearchResult{}, err
 	}
-	root, err := idx.openRoot()
-	if err != nil {
-		return SearchResult{}, err
-	}
-	defer root.Close()
-
 	all, err := idx.paths()
 	if err != nil {
 		return SearchResult{}, err
@@ -219,7 +163,7 @@ func (idx *Index) Search(opts SearchOptions) (SearchResult, error) {
 	for range min(runtime.GOMAXPROCS(0), len(paths)) {
 		wg.Go(func() {
 			for i := int(next.Add(1) - 1); i < len(paths); i = int(next.Add(1) - 1) {
-				if f, ok := idx.load(root, paths[i]); ok {
+				if f, ok := idx.load(paths[i]); ok {
 					perFile[i] = f.search(re, opts.MaxMatches, opts.Context)
 					perFile[i].searched = true
 				}
@@ -306,26 +250,19 @@ func (idx *Index) Find(dir, glob string) ([]string, error) {
 // List returns one directory's entries sorted case-insensitively, with a
 // trailing "/" on directories.
 func (idx *Index) List(dir string) ([]string, error) {
-	root, err := idx.openRoot()
-	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
 	rel := cleanPath(dir)
 	if rel == "" {
 		rel = "."
 	}
-	entries, err := fs.ReadDir(root.FS(), rel)
+	entries, err := fs.ReadDir(idx.fsys, rel)
 	if err != nil {
 		return nil, fmt.Errorf("path not found: %s", dir)
 	}
 	var out []string
 	for _, e := range entries {
-		switch {
-		case e.IsDir() && skipDirs[e.Name()]:
-		case e.IsDir():
+		if e.IsDir() {
 			out = append(out, e.Name()+"/")
-		default:
+		} else {
 			out = append(out, e.Name())
 		}
 	}
@@ -346,12 +283,7 @@ var errNoFile = errors.New("no such file")
 // Read returns up to limit lines of a file starting at line offset, 1-based.
 // An offset past the end of the file is an error, as in Pi and Codex.
 func (idx *Index) Read(p string, offset, limit int) (FileLines, error) {
-	root, err := idx.openRoot()
-	if err != nil {
-		return FileLines{}, err
-	}
-	defer root.Close()
-	f, ok := idx.load(root, cleanPath(p))
+	f, ok := idx.load(cleanPath(p))
 	if !ok {
 		return FileLines{}, errNoFile
 	}
@@ -384,7 +316,7 @@ func (idx *Index) Suggest(p string, limit int) []string {
 	return out
 }
 
-// cleanPath turns a path from a tool call into one relative to the checkout
+// cleanPath turns a path from a tool call into one relative to the source
 // root, "" for the root itself. Windows separators are accepted, but the path
 // is resolved with "/" only, so `..\` is treated like "../".
 func cleanPath(p string) string {
@@ -400,13 +332,7 @@ func cleanPath(p string) string {
 func (idx *Index) selector(dir, glob string) (func(string) bool, error) {
 	dir = cleanPath(dir)
 	if dir != "" {
-		root, err := idx.openRoot()
-		if err != nil {
-			return nil, err
-		}
-		_, err = root.Stat(filepath.FromSlash(dir))
-		root.Close()
-		if err != nil {
+		if _, err := fs.Stat(idx.fsys, dir); err != nil {
 			return nil, fmt.Errorf("path not found: %s", dir)
 		}
 	}
