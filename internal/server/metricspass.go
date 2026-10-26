@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,17 @@ import (
 // scrapeTimeout bounds a single upstream metrics scrape. Metrics endpoints are
 // local and fast; a hung one must not stall the poller.
 const scrapeTimeout = 10 * time.Second
+
+// scrapeMaxBodyBytes caps the size of one upstream metrics body. A real
+// /metrics body is small (KB); 10 MiB is far above any legitimate body and far
+// below the memory a hostile stream would otherwise consume. A body larger than
+// this is rejected before it is cached.
+const scrapeMaxBodyBytes = 10 * 1024 * 1024
+
+// errScrapeBodyTooLarge is returned when an upstream metrics body exceeds
+// scrapeMaxBodyBytes, so the scrape is rejected and the previous snapshot is
+// kept.
+var errScrapeBodyTooLarge = errors.New("upstream metrics body exceeds the size cap")
 
 // modelMetricsSnapshot is the last successful upstream scrape for one model.
 // A failed scrape leaves the previous snapshot in place, so a flapping
@@ -80,23 +92,25 @@ func newMetricsPassMonitor(cfg config.Config, log *logmon.Monitor, loaded func(s
 			if resp.StatusCode != http.StatusOK {
 				return "", fmt.Errorf("upstream returned %s", resp.Status)
 			}
-			return readAll(resp.Body)
+			return readCapped(resp.Body, scrapeMaxBodyBytes)
 		},
 	}
 }
 
-// readAll reads r until it returns a non-nil error and returns the bytes
-// read so far. A complete read ends with io.EOF (or a 0-byte read followed by
-// io.EOF), which is not an error: the full body is returned with a nil error.
-// Any other error (a connection reset, an unexpected EOF, or the read timeout
-// after a partial body) means the body was cut off; it is returned so the
-// caller can reject the truncated body instead of treating it as a complete
-// scrape.
+// readCapped reads r until it returns a non-nil error, stops reading, and
+// returns an error once more than limit bytes would be read. A complete body
+// under the cap ends with io.EOF (or a 0-byte read followed by io.EOF), which
+// is not an error: the full body is returned with a nil error. A body that
+// would exceed the cap is cut off and errScrapeBodyTooLarge is returned so the
+// caller rejects the oversized body instead of buffering it. Any other read
+// error (a connection reset, an unexpected EOF, or the read timeout after a
+// partial body) is also returned.
 //
-// Inputs: r - the body to read (e.g. a *http.Response body).
-// Outputs: the bytes read so far, and the first non-EOF read error (nil on a
-// complete read).
-func readAll(r io.Reader) (string, error) {
+// Inputs: r - the body to read (e.g. a *http.Response body); limit - the
+// maximum number of bytes to accept (0 or below means no cap).
+// Outputs: the bytes read so far, and the first non-EOF read error or
+// errScrapeBodyTooLarge (nil on a complete read under the cap).
+func readCapped(r io.Reader, limit int) (string, error) {
 	var b strings.Builder
 	buf := make([]byte, 32*1024)
 	for {
@@ -107,6 +121,9 @@ func readAll(r io.Reader) (string, error) {
 				return b.String(), nil
 			}
 			return b.String(), err
+		}
+		if limit > 0 && b.Len() > limit {
+			return b.String(), errScrapeBodyTooLarge
 		}
 	}
 }

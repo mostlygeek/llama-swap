@@ -55,34 +55,85 @@ func (r *errReader) Read(p []byte) (int, error) {
 	return 0, r.finalErr
 }
 
-// TestReadAll_CompleteBody checks a body that ends with io.EOF returns the full
-// body and a nil error.
-func TestReadAll_CompleteBody(t *testing.T) {
+// TestReadCapped_CompleteBody checks a body that ends with io.EOF and is under
+// the cap returns the full body and a nil error.
+func TestReadCapped_CompleteBody(t *testing.T) {
 	r := &errReader{chunks: []string{"hello ", "world"}, finalErr: io.EOF}
-	got, err := readAll(r)
+	got, err := readCapped(r, 1024)
 	if err != nil {
 		t.Fatalf("complete read should be nil error, got %v", err)
 	}
 	if want := "hello world"; got != want {
-		t.Fatalf("readAll = %q, want %q", got, want)
+		t.Fatalf("readCapped = %q, want %q", got, want)
 	}
 }
 
-// TestReadAll_TruncatedBodyReturnsError checks a read that ends in a non-EOF
+// TestReadCapped_TruncatedBodyReturnsError checks a read that ends in a non-EOF
 // error (a cut-off body) returns that error instead of a nil one, so the
 // caller can reject the partial body.
-func TestReadAll_TruncatedBodyReturnsError(t *testing.T) {
+func TestReadCapped_TruncatedBodyReturnsError(t *testing.T) {
 	errReset := errors.New("connection reset")
 	r := &errReader{chunks: []string{"part"}, finalErr: errReset}
-	got, err := readAll(r)
+	got, err := readCapped(r, 1024)
 	if err == nil {
 		t.Fatal("truncated read must return the error, got nil")
 	}
 	if !errors.Is(err, errReset) {
-		t.Fatalf("readAll error = %v, want the reader error %v", err, errReset)
+		t.Fatalf("readCapped error = %v, want the reader error %v", err, errReset)
 	}
 	if want := "part"; got != want {
-		t.Fatalf("readAll = %q, want the partial body %q", got, want)
+		t.Fatalf("readCapped = %q, want the partial body %q", got, want)
+	}
+}
+
+// TestReadCapped_BodyOverLimit checks a body larger than the cap is rejected
+// with errScrapeBodyTooLarge before it is buffered in full, so a hostile
+// upstream cannot exhaust memory.
+func TestReadCapped_BodyOverLimit(t *testing.T) {
+	r := &errReader{chunks: []string{strings.Repeat("a", 4096)}, finalErr: io.EOF}
+	got, err := readCapped(r, 1024)
+	if !errors.Is(err, errScrapeBodyTooLarge) {
+		t.Fatalf("oversized body must return errScrapeBodyTooLarge, got %v", err)
+	}
+	if len(got) > 4096 {
+		t.Fatalf("should not buffer more than the first chunk before rejecting, got %d bytes", len(got))
+	}
+}
+
+// TestMetricsPassMonitor_OversizedUpstreamKeepsLastSnapshot checks an upstream
+// body that exceeds the cap is rejected and does not replace the previous good
+// snapshot.
+func TestMetricsPassMonitor_OversizedUpstreamKeepsLastSnapshot(t *testing.T) {
+	cfg := config.Config{
+		Models: map[string]config.ModelConfig{
+			"banana": {Proxy: "http://localhost:1", MetricsPass: config.MetricsPassModelConfig{Path: "/metrics"}},
+		},
+	}
+	logs := logmon.NewGroup(io.Discard, true, true, true)
+	m := newMetricsPassMonitor(cfg, logs.ProxyLogs, func(string) bool { return true })
+	// The real scrape closure uses scrapeMaxBodyBytes; shrink it is not
+	// possible, so we inject a scrape that mimics an oversized body by
+	// returning the size error directly.
+	var calls int
+	m.scrape = func(_ context.Context, _, _ string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "good_metric 1\n", nil
+		}
+		return "", errScrapeBodyTooLarge
+	}
+	mc := cfg.Models["banana"]
+
+	m.scrapeModel("banana", mc)
+	snap, ok := m.snapshot("banana")
+	if !ok || snap.raw != "good_metric 1\n" {
+		t.Fatalf("first scrape should cache the full body, got ok=%v raw=%q", ok, snap.raw)
+	}
+
+	m.scrapeModel("banana", mc)
+	snap, _ = m.snapshot("banana")
+	if snap.raw != "good_metric 1\n" {
+		t.Fatalf("oversized scrape must keep the previous snapshot, got raw=%q", snap.raw)
 	}
 }
 
