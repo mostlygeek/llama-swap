@@ -1,6 +1,6 @@
 //go:build windows
 
-package perf
+package probe
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"golang.org/x/sys/windows"
 )
 
@@ -296,234 +295,169 @@ func d3dkmtTempC(tempDeciC uint32) int {
 	return int(tempDeciC / 10)
 }
 
-type d3dkmtAdapterState struct {
-	luid       LUID
-	hAdapter   uint32
-	nbSegments uint32
-	nodeCount  uint32
-	maxFanRPM  uint32
-	prevNodeRT map[uint32]nodeRunningTimes
-	prevTime   time.Time
+// d3dkmtAdapterAddress returns the adapter's PCI address as a key, or "" for
+// adapters without one, such as the Microsoft Basic Render Driver.
+func d3dkmtAdapterAddress(hAdapter uint32) string {
+	var addr D3DKMT_ADAPTERADDRESS
+	req := D3DKMT_QUERYADAPTERINFO{
+		hAdapter:              hAdapter,
+		Type:                  KMTQAITYPE_ADAPTERADDRESS,
+		pPrivateDriverData:    uintptr(unsafe.Pointer(&addr)),
+		PrivateDriverDataSize: uint32(unsafe.Sizeof(addr)),
+	}
+	if err := ntstatusCall(procQueryAdapterInfo, unsafe.Pointer(&req)); err != nil {
+		return ""
+	}
+	// D3DKMT reports no PCI domain; Windows GPUs sit in domain 0.
+	return FormatPCI(0, addr.BusNumber, addr.DeviceNumber, addr.FunctionNumber)
 }
 
-// tryD3DKMT attempts to start GPU monitoring using D3DKMT and optional PDH
-// counters. It returns a channel of GpuStat snapshots or an error if no
-// usable adapters are found.
-func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
+// d3dkmt reads any WDDM GPU through the Windows kernel graphics interface,
+// with PDH counters for utilization when available.
+type d3dkmt struct {
+	mu      sync.Mutex
+	prev    map[LUID]map[uint32]nodeRunningTimes
+	prevAt  map[LUID]time.Time
+	pdh     *pdhGpuUtil
+	pdhDone bool
+}
+
+func newD3dkmt() *d3dkmt {
+	return &d3dkmt{prev: map[LUID]map[uint32]nodeRunningTimes{}, prevAt: map[LUID]time.Time{}}
+}
+
+func (p *d3dkmt) Name() string { return "d3dkmt" }
+
+// Close releases the PDH query.
+func (p *d3dkmt) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pdh != nil {
+		p.pdh.close()
+		p.pdh = nil
+	}
+	return nil
+}
+
+func (p *d3dkmt) Read(ctx context.Context) ([]GpuSample, error) {
 	if err := initD3DKMT(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("d3dkmt: %w: %w", ErrUnavailable, err)
 	}
-
-	adapterInfos, err := d3dkmEnumerateAdapters()
+	adapters, err := d3dkmEnumerateAdapters()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("d3dkmt: %w: %w", ErrUnavailable, err)
 	}
 
-	type adapterMeta struct {
-		luid       LUID
-		nbSegments uint32
-		nodeCount  uint32
-		maxFanRPM  uint32
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.pdhDone {
+		p.pdhDone = true
+		if pdh, err := initPdhGpuUtil(); err == nil {
+			p.pdh = pdh
+		}
+	}
+	var pdhUtil map[LUID]float64
+	if p.pdh != nil {
+		pdhUtil = p.pdh.collect()
 	}
 
-	var metaList []adapterMeta
+	samples := make([]GpuSample, 0, len(adapters))
+	for i, ai := range adapters {
+		if s, ok := p.readAdapter(i, ai.AdapterLuid, pdhUtil); ok {
+			samples = append(samples, s)
+		}
+	}
+	if len(samples) == 0 {
+		return nil, fmt.Errorf("d3dkmt: no usable adapters: %w", ErrUnavailable)
+	}
+	return samples, nil
+}
 
-	for i, ai := range adapterInfos {
-		hAdapter, err := d3dkmOpenAdapter(ai.AdapterLuid)
+func (p *d3dkmt) readAdapter(index int, luid LUID, pdhUtil map[LUID]float64) (GpuSample, bool) {
+	hAdapter, err := d3dkmOpenAdapter(luid)
+	if err != nil {
+		return GpuSample{}, false
+	}
+	defer d3dkmCloseAdapter(hAdapter)
+
+	nbSegments, nodeCount, err := d3dkmQueryAdapterStats(luid)
+	if err != nil {
+		return GpuSample{}, false
+	}
+
+	s := GpuSample{
+		Key:   d3dkmtAdapterAddress(hAdapter),
+		Name:  fmt.Sprintf("GPU %d", index),
+		State: GpuStateOK,
+	}
+	if s.Key == "" {
+		s.Key = fallbackKey("d3dkmt", index)
+	}
+
+	var maxFanRPM uint32
+	if caps, err := d3dkmGetAdapterPerfDataCaps(hAdapter); err == nil {
+		maxFanRPM = caps.MaxFanRPM
+	}
+	if perf, err := d3dkmGetAdapterPerfData(hAdapter); err == nil {
+		// Drivers that don't fill a field leave it at 0, so 0 means not
+		// reported (#1171: AMD leaves Power empty).
+		if perf.Temperature > 0 {
+			s.TempC = ptr(float64(d3dkmtTempC(perf.Temperature)))
+		}
+		if pct := d3dkmtFanPct(perf.FanRPM, maxFanRPM); maxFanRPM > 0 {
+			s.FanPct = ptr(pct)
+		}
+		if perf.Power > 0 {
+			s.PowerW = ptr(d3dkmtPowerW(perf.Power))
+		}
+	}
+
+	var usedMB, totalMB int
+	for seg := uint32(0); seg < nbSegments; seg++ {
+		limit, resident, err := d3dkmQuerySegmentStats(luid, seg)
 		if err != nil {
-			logger.Debugf("adapter %d: open failed: %s", i, err.Error())
 			continue
 		}
+		usedMB += int(resident / bytesPerMB)
+		totalMB += int(limit / bytesPerMB)
+	}
+	if totalMB > 0 {
+		s.VramUsedMB, s.VramTotalMB = ptr(usedMB), ptr(totalMB)
+	}
 
-		nbSegments, nodeCount, err := d3dkmQueryAdapterStats(ai.AdapterLuid)
+	if util, ok := pdhUtil[luid]; ok {
+		s.UtilPct = ptr(util)
+	} else if util, ok := p.nodeUtil(luid, nodeCount); ok {
+		s.UtilPct = ptr(util)
+	}
+	return s, true
+}
+
+// nodeUtil computes utilization of the busiest node from running time
+// deltas since the previous read. The first read only seeds the counters.
+func (p *d3dkmt) nodeUtil(luid LUID, nodeCount uint32) (float64, bool) {
+	now := time.Now()
+	prev := p.prev[luid]
+	elapsed100ns := now.Sub(p.prevAt[luid]).Nanoseconds() / 100
+	cur := make(map[uint32]nodeRunningTimes, nodeCount)
+
+	var util float64
+	seen := false
+	for node := uint32(0); node < nodeCount; node++ {
+		globalRT, systemRT, err := d3dkmQueryNodeStats(luid, node)
 		if err != nil {
-			logger.Debugf("adapter %d: query stats failed: %s", i, err.Error())
-			d3dkmCloseAdapter(hAdapter)
 			continue
 		}
-
-		caps, err := d3dkmGetAdapterPerfDataCaps(hAdapter)
-		if err != nil {
-			logger.Debugf("adapter %d: perf caps failed: %s", i, err.Error())
+		rt := nodeRunningTimes{Global: globalRT, System: systemRT}
+		cur[node] = rt
+		if before, ok := prev[node]; ok {
+			if u := d3dkmtNodeUtil(before, rt, elapsed100ns); u >= 0 {
+				util = max(util, u)
+				seen = true
+			}
 		}
-
-		d3dkmCloseAdapter(hAdapter)
-
-		var maxFanRPM uint32
-		if caps != nil {
-			maxFanRPM = caps.MaxFanRPM
-		}
-
-		metaList = append(metaList, adapterMeta{
-			luid:       ai.AdapterLuid,
-			nbSegments: nbSegments,
-			nodeCount:  nodeCount,
-			maxFanRPM:  maxFanRPM,
-		})
-		logger.Debugf("adapter %d: segments=%d nodes=%d fan_max=%d luid=%d:%d", i, nbSegments, nodeCount, maxFanRPM, ai.AdapterLuid.HighPart, ai.AdapterLuid.LowPart)
 	}
-
-	if len(metaList) == 0 {
-		return nil, fmt.Errorf("no usable D3DKMT adapters found")
-	}
-
-	pdhUtil, pdhErr := initPdhGpuUtil()
-	if pdhErr != nil {
-		logger.Debugf("PDH GPU utilization not available: %s", pdhErr.Error())
-	} else {
-		logger.Info("using PDH performance counters for GPU utilization")
-	}
-
-	ch := make(chan []GpuStat, 1)
-
-	go func() {
-		defer close(ch)
-		if pdhUtil != nil {
-			defer pdhUtil.close()
-		}
-
-		var adapters []d3dkmtAdapterState
-		for _, m := range metaList {
-			hAdapter, err := d3dkmOpenAdapter(m.luid)
-			if err != nil {
-				logger.Debugf("reopen adapter failed: %s", err.Error())
-				continue
-			}
-			adapters = append(adapters, d3dkmtAdapterState{
-				luid:       m.luid,
-				hAdapter:   hAdapter,
-				nbSegments: m.nbSegments,
-				nodeCount:  m.nodeCount,
-				maxFanRPM:  m.maxFanRPM,
-				prevNodeRT: make(map[uint32]nodeRunningTimes),
-			})
-		}
-
-		if len(adapters) == 0 {
-			return
-		}
-
-		defer func() {
-			for _, a := range adapters {
-				d3dkmCloseAdapter(a.hAdapter)
-			}
-		}()
-
-		for i := range adapters {
-			a := &adapters[i]
-			for node := uint32(0); node < a.nodeCount; node++ {
-				globalRT, systemRT, err := d3dkmQueryNodeStats(a.luid, node)
-				if err != nil {
-					continue
-				}
-				a.prevNodeRT[node] = nodeRunningTimes{Global: globalRT, System: systemRT}
-			}
-			a.prevTime = time.Now()
-		}
-
-		ticker := time.NewTicker(every)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				stats := make([]GpuStat, 0, len(adapters))
-				now := time.Now()
-
-				var pdhUtilMap map[LUID]float64
-				if pdhUtil != nil {
-					pdhUtilMap = pdhUtil.collect()
-				}
-
-				for i := range adapters {
-					a := &adapters[i]
-
-					perfData, err := d3dkmGetAdapterPerfData(a.hAdapter)
-					if err != nil {
-						logger.Debugf("adapter %d perfdata: %s", i, err.Error())
-						continue
-					}
-
-					var memUsedMB, memTotalMB int
-					for seg := uint32(0); seg < a.nbSegments; seg++ {
-						limit, resident, err := d3dkmQuerySegmentStats(a.luid, seg)
-						if err != nil {
-							continue
-						}
-						memUsedMB += int(resident / (1024 * 1024))
-						memTotalMB += int(limit / (1024 * 1024))
-					}
-
-					var gpuUtil float64
-					pdhGaveValue := false
-					if pdhUtilMap != nil {
-						if util, ok := pdhUtilMap[a.luid]; ok {
-							gpuUtil = util
-							pdhGaveValue = true
-						}
-					}
-
-					if !pdhGaveValue && a.nodeCount > 0 {
-						elapsedNs := now.Sub(a.prevTime).Nanoseconds()
-						elapsed100ns := elapsedNs / 100
-
-						for node := uint32(0); node < a.nodeCount; node++ {
-							globalRT, systemRT, err := d3dkmQueryNodeStats(a.luid, node)
-							if err != nil {
-								continue
-							}
-
-							if prevRT, ok := a.prevNodeRT[node]; ok {
-								if globalRT < prevRT.Global || systemRT < prevRT.System {
-									a.prevNodeRT[node] = nodeRunningTimes{Global: globalRT, System: systemRT}
-									continue
-								}
-								nodeUtil := d3dkmtNodeUtil(prevRT, nodeRunningTimes{Global: globalRT, System: systemRT}, elapsed100ns)
-								if nodeUtil > gpuUtil {
-									gpuUtil = nodeUtil
-								}
-							}
-							a.prevNodeRT[node] = nodeRunningTimes{Global: globalRT, System: systemRT}
-						}
-
-						a.prevTime = now
-					}
-
-					tempC := d3dkmtTempC(perfData.Temperature)
-
-					fanSpeedPct := d3dkmtFanPct(perfData.FanRPM, a.maxFanRPM)
-					powerDrawW := d3dkmtPowerW(perfData.Power)
-
-					var memUtilPct float64
-					if memTotalMB > 0 {
-						memUtilPct = float64(memUsedMB) / float64(memTotalMB) * 100.0
-					}
-
-					stats = append(stats, GpuStat{
-						Timestamp:   now,
-						ID:          i,
-						Name:        fmt.Sprintf("GPU %d", i),
-						TempC:       tempC,
-						GpuUtilPct:  gpuUtil,
-						MemUtilPct:  memUtilPct,
-						MemUsedMB:   memUsedMB,
-						MemTotalMB:  memTotalMB,
-						FanSpeedPct: fanSpeedPct,
-						PowerDrawW:  powerDrawW,
-					})
-				}
-
-				if len(stats) > 0 {
-					select {
-					case ch <- stats:
-					default:
-					}
-				}
-			}
-		}
-	}()
-
-	return ch, nil
+	p.prev[luid], p.prevAt[luid] = cur, now
+	return util, seen
 }

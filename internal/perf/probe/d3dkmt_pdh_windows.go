@@ -1,6 +1,6 @@
 //go:build windows
 
-package perf
+package probe
 
 import (
 	"fmt"

@@ -13,7 +13,6 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -342,49 +341,6 @@ func parseActivityQuery(r *http.Request) (store.ActivityQuery, error) {
 	return query, nil
 }
 
-// handleAPIPerformance serves the buffered system/GPU stats, optionally
-// filtered to samples after the ?after=<RFC3339> timestamp.
-func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
-	if s.perf == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]bool{"enabled": false})
-		return
-	}
-
-	sysStats, gpuStats := s.perf.Current()
-
-	if afterStr := r.URL.Query().Get("after"); afterStr != "" {
-		after, err := time.Parse(time.RFC3339, afterStr)
-		if err != nil {
-			swaputil.SendResponse(w, r, http.StatusBadRequest, "invalid 'after' timestamp, use RFC3339 format")
-			return
-		}
-		filteredSys := make([]perf.SysStat, 0, len(sysStats))
-		for _, st := range sysStats {
-			if st.Timestamp.After(after) {
-				filteredSys = append(filteredSys, st)
-			}
-		}
-		sysStats = filteredSys
-
-		filteredGpu := make([]perf.GpuStat, 0, len(gpuStats))
-		for _, g := range gpuStats {
-			if g.Timestamp.After(after) {
-				filteredGpu = append(filteredGpu, g)
-			}
-		}
-		gpuStats = filteredGpu
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"enabled":   true,
-		"sys_stats": sysStats,
-		"gpu_stats": gpuStats,
-	})
-}
-
 // handleAPIVersion serves the build metadata.
 func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -515,6 +471,7 @@ const (
 	msgTypeInFlight    messageType = "inflight"
 	msgTypeUIConfig    messageType = "uiConfig"
 	msgTypeProfile     messageType = "profileChanged"
+	msgTypePerformance messageType = "performance"
 )
 
 // sendDropReportInterval is how often an SSE handler reports messages that
@@ -606,7 +563,8 @@ func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request, name string, s
 }
 
 // handleAPIEvents streams server events (model status, activity, in-flight
-// requests, UI config, profile changes) to the client as Server-Sent Events.
+// requests, UI config, whether performance monitoring is on, profile changes)
+// to the client as Server-Sent Events.
 // Log data has its own stream, handleAPILogEvents.
 func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	s.serveSSE(w, r, "handleAPIEvents", func(send func(messageEnvelope)) func() {
@@ -638,6 +596,14 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 				send(messageEnvelope{Type: msgTypeUIConfig, Data: string(j)})
 			}
 		}
+		// performance tells the UI whether to show the Performance page; its
+		// data has its own stream, handleAPIPerformanceEvents
+		sendPerformance := func() {
+			enabled := s.perf != nil && s.perf.Enabled()
+			if j, err := json.Marshal(map[string]bool{"enabled": enabled}); err == nil {
+				send(messageEnvelope{Type: msgTypePerformance, Data: string(j)})
+			}
+		}
 		sendProfile := func() {
 			if j, err := json.Marshal(map[string]any{"active": nullableProfile(s.ActiveProfile())}); err == nil {
 				send(messageEnvelope{Type: msgTypeProfile, Data: string(j)})
@@ -660,6 +626,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 		// initial payload
 		sendModels()
 		sendUIConfig()
+		sendPerformance()
 		sendProfile()
 		sendInFlight(s.inflight.Current())
 

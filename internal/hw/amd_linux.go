@@ -29,6 +29,30 @@ func detectAMD(ctx context.Context) []detectedAccelerator {
 	return result
 }
 
+// apuCarveoutMaxBytes is the largest VRAM carveout still treated as an APU.
+// Discrete AMD GPUs ship with at least 2 GiB.
+const apuCarveoutMaxBytes = 1 << 30
+
+// markAMDAPUs reclassifies AMD GPUs that are APUs as unified memory. An APU
+// reports a small VRAM carveout and keeps its working set in GTT, system RAM
+// the GPU maps, so rocm-smi alone would call it a 512 MiB dedicated GPU.
+// The capacity becomes VRAM plus GTT.
+func markAMDAPUs(accelerators []detectedAccelerator, pciRoot string) {
+	for i := range accelerators {
+		a := &accelerators[i]
+		if stringValue(a.value.Vendor) != "AMD" || a.identity == "" {
+			continue
+		}
+		dir := filepath.Join(pciRoot, a.identity)
+		vram, err1 := strconv.ParseUint(readTrimmed(filepath.Join(dir, "mem_info_vram_total")), 10, 64)
+		gtt, err2 := strconv.ParseUint(readTrimmed(filepath.Join(dir, "mem_info_gtt_total")), 10, 64)
+		if err1 != nil || err2 != nil || vram == 0 || vram > apuCarveoutMaxBytes || gtt <= vram {
+			continue
+		}
+		a.value.Memory = AcceleratorMemory{Kind: "unified", CapacityBytes: uint64Ptr(vram + gtt)}
+	}
+}
+
 func detectROCm(ctx context.Context) ([]detectedAccelerator, error) {
 	if _, err := exec.LookPath("rocm-smi"); err != nil {
 		return nil, err
