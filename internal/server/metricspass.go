@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -79,17 +80,34 @@ func newMetricsPassMonitor(cfg config.Config, log *logmon.Monitor, loaded func(s
 			if resp.StatusCode != http.StatusOK {
 				return "", fmt.Errorf("upstream returned %s", resp.Status)
 			}
-			var b strings.Builder
-			buf := make([]byte, 32*1024)
-			for {
-				n, err := resp.Body.Read(buf)
-				b.Write(buf[:n])
-				if err != nil {
-					break
-				}
-			}
-			return b.String(), nil
+			return readAll(resp.Body)
 		},
+	}
+}
+
+// readAll reads r until it returns a non-nil error and returns the bytes
+// read so far. A complete read ends with io.EOF (or a 0-byte read followed by
+// io.EOF), which is not an error: the full body is returned with a nil error.
+// Any other error (a connection reset, an unexpected EOF, or the read timeout
+// after a partial body) means the body was cut off; it is returned so the
+// caller can reject the truncated body instead of treating it as a complete
+// scrape.
+//
+// Inputs: r - the body to read (e.g. a *http.Response body).
+// Outputs: the bytes read so far, and the first non-EOF read error (nil on a
+// complete read).
+func readAll(r io.Reader) (string, error) {
+	var b strings.Builder
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := r.Read(buf)
+		b.Write(buf[:n])
+		if err != nil {
+			if err == io.EOF {
+				return b.String(), nil
+			}
+			return b.String(), err
+		}
 	}
 }
 

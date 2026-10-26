@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,89 @@ func newTestMetricsPass(t *testing.T, cfg config.Config, loaded func(string) boo
 		return testUpstreamMetrics, nil
 	}
 	return m
+}
+
+// errReader is a minimal io.Reader for tests: it yields the given chunks one
+// at a time, then returns the given final error. A finalErr of io.EOF
+// simulates a complete read; any other error simulates a cut-off body.
+type errReader struct {
+	chunks   []string
+	finalErr error
+}
+
+// Read returns the next chunk, or the final error once the chunks are
+// exhausted.
+func (r *errReader) Read(p []byte) (int, error) {
+	if len(r.chunks) > 0 {
+		n := copy(p, r.chunks[0])
+		r.chunks = r.chunks[1:]
+		return n, nil
+	}
+	return 0, r.finalErr
+}
+
+// TestReadAll_CompleteBody checks a body that ends with io.EOF returns the full
+// body and a nil error.
+func TestReadAll_CompleteBody(t *testing.T) {
+	r := &errReader{chunks: []string{"hello ", "world"}, finalErr: io.EOF}
+	got, err := readAll(r)
+	if err != nil {
+		t.Fatalf("complete read should be nil error, got %v", err)
+	}
+	if want := "hello world"; got != want {
+		t.Fatalf("readAll = %q, want %q", got, want)
+	}
+}
+
+// TestReadAll_TruncatedBodyReturnsError checks a read that ends in a non-EOF
+// error (a cut-off body) returns that error instead of a nil one, so the
+// caller can reject the partial body.
+func TestReadAll_TruncatedBodyReturnsError(t *testing.T) {
+	errReset := errors.New("connection reset")
+	r := &errReader{chunks: []string{"part"}, finalErr: errReset}
+	got, err := readAll(r)
+	if err == nil {
+		t.Fatal("truncated read must return the error, got nil")
+	}
+	if !errors.Is(err, errReset) {
+		t.Fatalf("readAll error = %v, want the reader error %v", err, errReset)
+	}
+	if want := "part"; got != want {
+		t.Fatalf("readAll = %q, want the partial body %q", got, want)
+	}
+}
+
+// TestMetricsPassMonitor_FailedScrapeKeepsLastSnapshot checks a scrape that
+// fails after a partial body does not replace the previous good snapshot.
+func TestMetricsPassMonitor_FailedScrapeKeepsLastSnapshot(t *testing.T) {
+	cfg := config.Config{
+		Models: map[string]config.ModelConfig{
+			"banana": {Proxy: "http://localhost:1", MetricsPass: config.MetricsPassModelConfig{Path: "/metrics"}},
+		},
+	}
+	logs := logmon.NewGroup(io.Discard, true, true, true)
+	m := newMetricsPassMonitor(cfg, logs.ProxyLogs, func(string) bool { return true })
+	var calls int
+	m.scrape = func(_ context.Context, _, _ string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "good_metric 1\n", nil
+		}
+		return "good_met", errors.New("connection reset")
+	}
+	mc := cfg.Models["banana"]
+
+	m.scrapeModel("banana", mc)
+	snap, ok := m.snapshot("banana")
+	if !ok || snap.raw != "good_metric 1\n" {
+		t.Fatalf("first scrape should cache the full body, got ok=%v raw=%q", ok, snap.raw)
+	}
+
+	m.scrapeModel("banana", mc)
+	snap, _ = m.snapshot("banana")
+	if snap.raw != "good_metric 1\n" {
+		t.Fatalf("failed scrape must keep the previous snapshot, got raw=%q", snap.raw)
+	}
 }
 
 // TestMetricNamePrefix checks model IDs map to valid metric-name prefixes.
