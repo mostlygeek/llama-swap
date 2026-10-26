@@ -12,6 +12,11 @@ Usage: scripts/add-changelog.sh [harness] [version]
 Adds a release version to CHANGELOG.md. The harness is codex, claude,
 opencode or pi and defaults to pi. When version is omitted it is the
 highest v<number> tag plus one.
+
+Environment:
+  CHANGELOG_MODEL  Model passed to the harness. Defaults to the harness
+         specific model (gpt-6-sol for codex, claude-opus-5-5 for claude,
+         qwen-3.8-next for pi). Ignored by opencode.
 EOF
 }
 
@@ -56,7 +61,7 @@ run_codex() {
 
   codex exec \
     --approve-for-me \
-    --model gpt-6-sol \
+    --model "${CHANGELOG_MODEL:-gpt-6-sol}" \
     -c 'model_reasoning_effort="medium"' \
     "$prompt"
 }
@@ -65,7 +70,7 @@ run_claude() {
   local prompt="$1"
 
   claude --print \
-    --model claude-opus-5-5 \
+    --model "${CHANGELOG_MODEL:-claude-opus-5-5}" \
     --permission-mode acceptEdits \
     --allowedTools 'Read' 'Edit' 'Bash(git log:*)' 'Bash(git tag:*)' \
       'Bash(git show:*)' 'Bash(gh pr view:*)' \
@@ -82,7 +87,7 @@ run_pi() {
   local prompt="$1"
 
   pi --print \
-    --model qwen-3.8-next \
+    --model "${CHANGELOG_MODEL:-qwen-3.8-next}" \
     -- "$prompt" </dev/null
 }
 

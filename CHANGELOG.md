@@ -1,5 +1,31 @@
 # Changelog
 
+## v267 (Oct 25, 2026)
+
+This is huge release with @JaredHatfield contributing a new capacity based router!
+
+Rather than defining which models fit with other models, the capacity router
+allows declaring pools of resources and how much of each resource a model needs.
+The new router will automatically evict models to free up enough capacity to
+load the new model. For use cases that have a big combinations of models
+that can run concurrently, the new router can eliminate a lot of manual
+configuration work.
+
+The other big feature is the Help Agent in the UI can now search llama-swap's
+source code as well as its knowledge base. Every release of llama-swap includes
+the source code it was built from (tests excluded). This is handy for answering
+questions about how llama-swap actually works and a knowledge base article
+does not exist. One step closer to the singularity!
+
+If you want to try out the new router ask the Help Agent to generate a configuration
+example using your existing configuration. Did you know, it can do that!? :)
+
+
+- [PR #1242](https://github.com/mostlygeek/llama-swap/pull/1242) router: add capacity-based model eviction: adds a capacity router where user-defined pools bound which models can be resident together and `evict_cost` picks what to unload when a model no longer fits, replacing the need to hand-maintain every valid combination in the matrix on systems with lots of unified memory (#1004) by [@JaredHatfield](https://github.com/JaredHatfield)
+- [PR #1258](https://github.com/mostlygeek/llama-swap/pull/1258) docs/kb: add guides/tools for the cmd/ programs: adds knowledge base articles for wol-proxy, fake-model and vllm-wrapper (and moves the kubeswap guide under `guides/tools`) so the Help chat can answer questions about the tools in the llama-swap ecosystem, plus a convention for keeping each tool's README and article in sync by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1259](https://github.com/mostlygeek/llama-swap/pull/1259) internal/mcptools: add code search to Help agent: gives the Docs agent `code__grep`, `code__read`, `code__find` and `code__ls` so it can verify knowledge base articles against the code that implements them, adds `helpagent.disable` to hide Help and stop serving `/api/mcp`, and raises the agent loop's max iterations from 16 to 96 so the extra tool calls do not end the answer early by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1265](https://github.com/mostlygeek/llama-swap/pull/1265) internal/mcptools: embed source for code tools instead of git: embeds the Go and TypeScript source (without tests) in the binary via the new `embed_src` build tag and reads it through `fs.FS`, because the runtime `git` checkout made the code tools fail on installs without the git command line tool; `code__status` and `code__update` are removed by [@mostlygeek](https://github.com/mostlygeek)
+
 ## v266 (Oct 22, 2026)
 
 This release includes security dependency updates and requested quality of life changes from users:
