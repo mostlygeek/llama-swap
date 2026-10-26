@@ -91,6 +91,28 @@ func TestMetricsPassMonitor_RenderNamespaced(t *testing.T) {
 	}
 }
 
+// TestRenderNamespaced_CommentNotRewritten checks a plain comment line passes
+// through untouched. Before the fix the sample-name rewrite mangled it into an
+// invalid sample, which made Prometheus reject the whole response.
+func TestRenderNamespaced_CommentNotRewritten(t *testing.T) {
+	got := renderNamespaced("banana", "# generated metrics\n")
+	if want := "# generated metrics\n"; got != want {
+		t.Errorf("comment line = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "banana__") {
+		t.Errorf("comment must not be namespaced, got:\\n%s", got)
+	}
+}
+
+// TestRenderNamespaced_TabSample checks an unlabeled sample separated by a tab
+// gets the model prefix, and the tab and value survive the rewrite.
+func TestRenderNamespaced_TabSample(t *testing.T) {
+	got := renderNamespaced("banana", "tokens\t123\n")
+	if want := "banana_tokens\t123\n"; got != want {
+		t.Errorf("tab sample = %q, want %q", got, want)
+	}
+}
+
 // TestMetricsPassMonitor_RenderLoadedHidden checks the "loaded" visibility hides
 // a model that is not running.
 func TestMetricsPassMonitor_RenderLoadedHidden(t *testing.T) {
@@ -146,6 +168,28 @@ func TestMetricsPassMonitor_NeverScraped(t *testing.T) {
 	}
 }
 
+// TestMetricsPassMonitor_RenderTabSample checks an unlabeled sample from an
+// upstream scrape separated by a tab gets the model prefix in the rendered
+// output.
+func TestMetricsPassMonitor_RenderTabSample(t *testing.T) {
+	cfg := config.Config{
+		Models: map[string]config.ModelConfig{
+			"banana": {Proxy: "http://localhost:1", MetricsPass: config.MetricsPassModelConfig{Path: "/metrics"}},
+		},
+	}
+	m := newTestMetricsPass(t, cfg, func(string) bool { return true })
+	m.scrape = func(_ context.Context, _, _ string) (string, error) {
+		return "tokens\t123\n", nil
+	}
+	m.scrapeModel("banana", cfg.Models["banana"])
+
+	w := httptest.NewRecorder()
+	m.Render(w)
+	if !strings.Contains(w.Body.String(), "banana_tokens\t123") {
+		t.Errorf("expected tab-separated sample to be namespaced, got:\\n%s", w.Body.String())
+	}
+}
+
 // TestMetricsPassMonitor_NilReceiver checks a nil monitor renders nothing, so
 // /metrics works when no model opts in.
 func TestMetricsPassMonitor_NilReceiver(t *testing.T) {
@@ -154,6 +198,35 @@ func TestMetricsPassMonitor_NilReceiver(t *testing.T) {
 	m.Render(w)
 	if w.Body.Len() != 0 {
 		t.Fatalf("nil monitor should render nothing, got:\n%s", w.Body.String())
+	}
+}
+
+// TestMetricsPassMonitor_RenderCommentPassThrough checks a comment line from an
+// upstream scrape survives rendering untouched, so a combined /metrics response
+// stays valid for Prometheus.
+func TestMetricsPassMonitor_RenderCommentPassThrough(t *testing.T) {
+	cfg := config.Config{
+		Models: map[string]config.ModelConfig{
+			"banana": {Proxy: "http://localhost:1", MetricsPass: config.MetricsPassModelConfig{Path: "/metrics"}},
+		},
+	}
+	m := newTestMetricsPass(t, cfg, func(string) bool { return true })
+	m.scrape = func(_ context.Context, _, _ string) (string, error) {
+		return "# generated metrics\nllama_server_tokens 1\n", nil
+	}
+	m.scrapeModel("banana", cfg.Models["banana"])
+
+	w := httptest.NewRecorder()
+	m.Render(w)
+	body := w.Body.String()
+	if !strings.Contains(body, "# generated metrics\n") {
+		t.Errorf("expected comment to pass through, got:\\n%s", body)
+	}
+	if strings.Contains(body, "banana__") {
+		t.Errorf("comment was namespaced into an invalid sample:\\n%s", body)
+	}
+	if !strings.Contains(body, "banana_llama_server_tokens 1") {
+		t.Errorf("expected namespaced sample alongside the comment, got:\\n%s", body)
 	}
 }
 

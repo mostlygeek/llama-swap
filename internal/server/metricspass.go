@@ -226,8 +226,9 @@ func metricNamePrefix(modelID string) string {
 
 // renderNamespaced rewrites a Prometheus text-format body so every metric name
 // is prefixed with prefix. HELP and TYPE lines rewrite the metric name; sample
-// lines rewrite the name token (everything before the first " {" or end). Blank
-// lines are dropped.
+// lines rewrite the name token (everything before the first "{", space, or tab
+// or end). Plain "#" comment lines pass through untouched; blank lines are
+// dropped.
 func renderNamespaced(prefix, raw string) string {
 	var out strings.Builder
 	for _, line := range strings.Split(raw, "\n") {
@@ -242,6 +243,16 @@ func renderNamespaced(prefix, raw string) string {
 		}
 		if n, ok := directiveLine(line, "# TYPE ", prefix); ok {
 			out.WriteString(n)
+			out.WriteString("\n")
+			continue
+		}
+		// Any other "#" line is a comment, not a sample. The sample-name
+		// rewrite must not touch it: a comment like "# generated metrics"
+		// would become "prefix__ generated metrics", which Prometheus
+		// rejects as an invalid sample and drops the whole response,
+		// including llama-swap's own stats.
+		if strings.HasPrefix(line, "#") {
+			out.WriteString(line)
 			out.WriteString("\n")
 			continue
 		}
@@ -260,18 +271,25 @@ func renderNamespaced(prefix, raw string) string {
 
 // splitSampleName returns the index where a sample line's value begins (the
 // start of the rest after the name) and the name token. The name is everything
-// before the first "{" (labeled sample, e.g. name{a="b"} v) or the first space
-// (unlabeled sample, e.g. name v). It reports an empty name when the line has
-// no name token.
+// before the first "{" (labeled sample, e.g. name{a="b"} v), space, or tab
+// (unlabeled sample, e.g. name v or name	v). It reports an empty name when
+// the line has no name token.
 func splitSampleName(line string) (int, string) {
 	i := 0
-	for i < len(line) && line[i] != ' ' && line[i] != '{' {
+	for i < len(line) && !isNameDelimiter(line[i]) {
 		i++
 	}
 	if i == 0 || i == len(line) {
 		return -1, ""
 	}
 	return i, line[:i]
+}
+
+// isNameDelimiter reports whether c separates a sample name from the rest of
+// the line. Space and tab both separate unlabeled samples; "{" opens the
+// label set of a labeled sample.
+func isNameDelimiter(c byte) bool {
+	return c == ' ' || c == '	' || c == '{'
 }
 
 // directiveLine rewrites a "# HELP name text" or "# TYPE name type" line,
