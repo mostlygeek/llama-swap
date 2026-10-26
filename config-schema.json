@@ -293,6 +293,26 @@
             "default": {},
             "description": "Configuration for CPU, RAM and GPU monitoring statistics."
         },
+        "metricsPass": {
+            "type": "object",
+            "properties": {
+                "every": {
+                    "type": "string",
+                    "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
+                    "default": "15s",
+                    "description": "Delay between scraping a model's upstream metrics. Minimum duration is 1s. A model's metricsPass.every overrides this when set."
+                },
+                "visibility": {
+                    "type": "string",
+                    "enum": ["loaded", "always"],
+                    "default": "loaded",
+                    "description": "When a model's passed metrics are shown on /metrics. loaded (default) hides them once the model unloads; always keeps the last successful scrape."
+                }
+            },
+            "additionalProperties": false,
+            "default": {},
+            "description": "Pass a model's upstream Prometheus metrics through llama-swap's /metrics endpoint, namespaced with the model name as a metric-name prefix. Configuring per-model metricsPass.path is what enables it."
+        },
         "helpagent": {
             "type": "object",
             "properties": {
@@ -679,6 +699,24 @@
                         },
                         "additionalProperties": false,
                         "description": "Defines what the model accepts for input, output and other metadata. Used in v1/models to inform clients what the model can do. Fields left unset are filled in automatically from the upstream server unless disableAuto is true."
+                    },
+                    "metricsPass": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "pattern": "^/.*$",
+                                "description": "Upstream endpoint to scrape for this model's Prometheus metrics, such as /metrics. Empty disables passthrough for this model."
+                            },
+                            "every": {
+                                "type": "string",
+                                "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
+                                "description": "Override the global metricsPass.every for this model's scrape cadence. 0 uses the global value."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "default": {},
+                        "description": "Pass this model's upstream Prometheus metrics through llama-swap's /metrics, namespaced with the model name as a metric-name prefix."
                     }
                 }
             }

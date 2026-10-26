@@ -422,8 +422,11 @@ func (s *Server) startPreload() {
 	}()
 }
 
-// handleMetrics serves Prometheus-format performance metrics. Returns 503 when
-// performance monitoring is disabled.
+// handleMetrics serves Prometheus-format performance metrics plus, for each
+// model with metricsPass.path set, that model's upstream metrics namespaced by
+// model name. Returns 503 when performance monitoring is disabled. Reading this
+// endpoint does not advance any model's idle-unload TTL: the poller scrapes
+// the upstream directly, and this handler only reads the cached result.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if s.perf == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -431,6 +434,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.perf.MetricsHandler().ServeHTTP(w, r)
+	s.metricsPass.Render(w)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

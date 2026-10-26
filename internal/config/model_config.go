@@ -184,6 +184,11 @@ type ModelConfig struct {
 	// Capabilities defines what modalities and features the model supports.
 	Capabilities ModelCapConfig `yaml:"capabilities"`
 
+	// MetricsPass passes the model's upstream Prometheus metrics through
+	// llama-swap's /metrics, namespaced with the model name as a prefix.
+	// See the global MetricsPassConfig for cadence and visibility.
+	MetricsPass MetricsPassModelConfig `yaml:"metricsPass"`
+
 	// Copy of HealthCheckTimeout from global config
 	HealthCheckTimeout int `yaml:"healthCheckTimeout"`
 }

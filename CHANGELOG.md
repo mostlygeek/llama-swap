@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Metrics passthrough.** A model can now pass its upstream Prometheus metrics
+  (for example llama-server's own `/metrics`) through llama-swap's `/metrics`,
+  namespaced with the model name as a metric-name prefix. One scrape of
+  llama-swap then covers llama-swap's own stats plus every configured model.
+  Configured per model with `metricsPass.path` (and an optional
+  `metricsPass.every`), with global `metricsPass.every` and
+  `metricsPass.visibility` (`loaded` to hide on unload, or `always` to keep the
+  last scrape). Reading `/metrics` never advances a model's idle-unload TTL:
+  a background poller scrapes the model proxy directly and the endpoint only
+  reads the cached result. See `docs/kb/guides/operations/metrics-passthrough.md`.
+
 ## v268 (Oct 28, 2026)
 
 Many users run llama-swap on their gaming machines. The new Pause and Resume
