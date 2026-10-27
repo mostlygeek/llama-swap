@@ -93,7 +93,8 @@ $ curl -X POST http://localhost:8080/api/models/pause    # unload all, reject re
 $ curl -X POST http://localhost:8080/api/models/resume
 ```
 
-The Models page has a Pause / Resume button that does the same.
+The Models page has a Pause / Resume button that does the same, and a banner
+across the top of the web UI shows while inference is paused.
 
 While paused, every request for a local model (`/v1/...`, `/upstream/...`,
 `/comfyui/...`, `/audiocpp/...`) gets a `503` with the message

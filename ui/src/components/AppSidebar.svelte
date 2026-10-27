@@ -74,7 +74,8 @@
   </Sidebar.MenuSubItem>
 {/snippet}
 
-<Sidebar.Root collapsible="icon">
+<!-- Sits below the inference-paused banner; see --banner-h in App.svelte. -->
+<Sidebar.Root collapsible="icon" class="top-[var(--banner-h,0px)] h-[calc(100svh-var(--banner-h,0px))]">
   <Sidebar.Header>
     <div class="flex items-center gap-2 px-2 py-1.5">
       <div class="flex shrink-0 items-center justify-center">

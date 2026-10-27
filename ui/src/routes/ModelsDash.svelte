@@ -228,12 +228,6 @@
         </div>
       </div>
     </Card.Header>
-    {#if $inferencePaused}
-      <div role="status" class="bg-warning/10 flex items-center gap-2 px-4 py-2 text-sm">
-        <Pause class="text-warning size-4 shrink-0" />
-        Inference is paused. All inference requests are rejected until you resume.
-      </div>
-    {/if}
   </Card.Root>
 
   <div class="flex min-h-0 shrink-0 flex-col gap-4">
