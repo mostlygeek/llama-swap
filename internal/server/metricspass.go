@@ -179,10 +179,18 @@ func (m *metricsPassMonitor) scrapeLoop(id string, mc config.ModelConfig) {
 }
 
 // scrapeModel fetches one model's upstream metrics and caches it on success.
-// A failed scrape keeps the last good body and logs at debug. It uses the
-// monitor's context when the poller is running, and a fresh background context
-// otherwise, so a one-shot scrape works without Start().
+// It scrapes only a model that is currently ready: a stopped model's proxy
+// port may be owned by another model, so scraping it would read foreign
+// metrics. After a successful scrape it re-checks that the same model is
+// still ready; if it unloaded mid-scrape, the body is discarded and the
+// previous snapshot kept. A failed scrape keeps the last good body and logs at
+// debug. It uses the monitor's context when the poller is running, and a
+// fresh background context otherwise, so a one-shot scrape works without
+// Start().
 func (m *metricsPassMonitor) scrapeModel(id string, mc config.ModelConfig) {
+	if !m.modelLoaded(id) {
+		return
+	}
 	ctx := m.ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -190,6 +198,13 @@ func (m *metricsPassMonitor) scrapeModel(id string, mc config.ModelConfig) {
 	body, err := m.scrape(ctx, mc.Proxy, mc.MetricsPass.Path)
 	if err != nil {
 		m.log.Debugf("metricsPass: <%s> scrape failed: %v", id, err)
+		return
+	}
+	if !m.modelLoaded(id) {
+		// The model unloaded while we were scraping; its proxy port may
+		// now belong to another model. Discard the body so foreign
+		// metrics are not published under this model's prefix.
+		m.log.Debugf("metricsPass: <%s> unloaded during scrape; discarding body", id)
 		return
 	}
 	m.mu.Lock()

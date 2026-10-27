@@ -36,6 +36,20 @@ func newTestMetricsPass(t *testing.T, cfg config.Config, loaded func(string) boo
 	return m
 }
 
+// newTestMetricsPassMutable builds a monitor whose "loaded" state the test can
+// flip, so a scrape can be run while the model is ready and then again after
+// it unloads. It returns the monitor and a function that sets the ready state.
+func newTestMetricsPassMutable(t *testing.T, cfg config.Config) (*metricsPassMonitor, func(bool)) {
+	t.Helper()
+	logs := logmon.NewGroup(io.Discard, true, true, true)
+	var ready bool
+	m := newMetricsPassMonitor(cfg, logs.ProxyLogs, func(string) bool { return ready })
+	m.scrape = func(_ context.Context, _, _ string) (string, error) {
+		return testUpstreamMetrics, nil
+	}
+	return m, func(b bool) { ready = b }
+}
+
 // errReader is a minimal io.Reader for tests: it yields the given chunks one
 // at a time, then returns the given final error. A finalErr of io.EOF
 // simulates a complete read; any other error simulates a cut-off body.
@@ -276,13 +290,97 @@ func TestMetricsPassMonitor_RenderAlwaysKept(t *testing.T) {
 			"banana": {Proxy: "http://localhost:1", MetricsPass: config.MetricsPassModelConfig{Path: "/metrics"}},
 		},
 	}
-	m := newTestMetricsPass(t, cfg, func(string) bool { return false })
-	m.scrapeModel("banana", cfg.Models["banana"])
+	m, setReady := newTestMetricsPassMutable(t, cfg)
+	mc := cfg.Models["banana"]
+
+	setReady(true)
+	m.scrapeModel("banana", mc)
+	snap, ok := m.snapshot("banana")
+	if !ok || !strings.Contains(snap.raw, "llama_server_tokens_generated_total") {
+		t.Fatalf("scrape while ready should cache the body, got ok=%v", ok)
+	}
+
+	setReady(false)
+	m.scrapeModel("banana", mc)
+	snap, _ = m.snapshot("banana")
+	if !strings.Contains(snap.raw, "llama_server_tokens_generated_total") {
+		t.Fatalf("unloaded model should keep the last successful snapshot, got:\\n%s", snap.raw)
+	}
 
 	w := httptest.NewRecorder()
 	m.Render(w)
 	if !strings.Contains(w.Body.String(), "banana_llama_server_tokens_generated_total") {
-		t.Fatalf("always visibility should keep the last scrape, got:\n%s", w.Body.String())
+		t.Fatalf("always visibility should keep the last scrape, got:\\n%s", w.Body.String())
+	}
+}
+
+// TestMetricsPassMonitor_SkipsUnloadedModel checks a model that is not ready is
+// not scraped at all: no upstream call and no snapshot. This is the shared-port
+// safety: a stopped model's proxy port may be owned by another model.
+func TestMetricsPassMonitor_SkipsUnloadedModel(t *testing.T) {
+	cfg := config.Config{
+		Models: map[string]config.ModelConfig{
+			"banana": {Proxy: "http://localhost:1", MetricsPass: config.MetricsPassModelConfig{Path: "/metrics"}},
+		},
+	}
+	logs := logmon.NewGroup(io.Discard, true, true, true)
+	var scrapeCalls int
+	m := newMetricsPassMonitor(cfg, logs.ProxyLogs, func(string) bool { return false })
+	m.scrape = func(_ context.Context, _, _ string) (string, error) {
+		scrapeCalls++
+		return testUpstreamMetrics, nil
+	}
+	m.scrapeModel("banana", cfg.Models["banana"])
+
+	if scrapeCalls != 0 {
+		t.Fatalf("a not-ready model must not be scraped, got %d calls", scrapeCalls)
+	}
+	if _, ok := m.snapshot("banana"); ok {
+		t.Fatal("a not-ready model must not produce a snapshot")
+	}
+}
+
+// TestMetricsPassMonitor_DiscardsResultIfUnloadedDuringScrape checks that when a
+// model unloads while its body is being scraped, the (possibly foreign) body is
+// discarded and the previous snapshot kept, so another model's metrics are never
+// published under the wrong prefix.
+func TestMetricsPassMonitor_DiscardsResultIfUnloadedDuringScrape(t *testing.T) {
+	cfg := config.Config{
+		Models: map[string]config.ModelConfig{
+			"banana": {Proxy: "http://localhost:1", MetricsPass: config.MetricsPassModelConfig{Path: "/metrics"}},
+		},
+	}
+	logs := logmon.NewGroup(io.Discard, true, true, true)
+	var ready bool
+	var calls int
+	m := newMetricsPassMonitor(cfg, logs.ProxyLogs, func(string) bool { return ready })
+	// First scrape: model stays ready, returns the good body. Second scrape:
+	// the model unloads part-way through and the body belongs to whatever
+	// model now owns the port.
+	m.scrape = func(_ context.Context, _, _ string) (string, error) {
+		calls++
+		if calls == 1 {
+			return testUpstreamMetrics, nil
+		}
+		ready = false
+		return "other_model_metric 1\n", nil
+	}
+	mc := cfg.Models["banana"]
+
+	ready = true
+	m.scrapeModel("banana", mc)
+	snap, ok := m.snapshot("banana")
+	if !ok || !strings.Contains(snap.raw, "llama_server_tokens_generated_total") {
+		t.Fatalf("scrape while ready should cache the body, got ok=%v", ok)
+	}
+
+	m.scrapeModel("banana", mc)
+	snap, _ = m.snapshot("banana")
+	if strings.Contains(snap.raw, "other_model_metric") {
+		t.Fatalf("foreign body must not be cached, got:\\n%s", snap.raw)
+	}
+	if !strings.Contains(snap.raw, "llama_server_tokens_generated_total") {
+		t.Fatalf("previous snapshot must be kept, got:\\n%s", snap.raw)
 	}
 }
 
@@ -430,6 +528,9 @@ func TestServer_HandleMetrics_PassesUpstreamMetrics(t *testing.T) {
 	local.serveHTTP = func(http.ResponseWriter, *http.Request) {
 		routerCalls++
 	}
+	// Mark the model ready so the scrape runs; the loaded checker reads the
+	// router's running state.
+	local.running = map[string]process.ProcessState{"banana": process.StateReady}
 
 	logs := logmon.NewGroup(io.Discard, true, true, true)
 	pm, err := perf.New(config.PerformanceConfig{Every: 5 * time.Second}, logs.ProxyLogs)
