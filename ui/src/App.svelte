@@ -11,7 +11,7 @@
   import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { Check, ChevronDown, Pause } from "@lucide/svelte";
+  import { Check, ChevronDown, Loader2, Pause, Play } from "@lucide/svelte";
   import {
     activeProfile,
     checkPerformanceEnabled,
@@ -19,6 +19,7 @@
     helpAgentEnabled,
     inferencePaused,
     profiles,
+    resumeInference,
     setActiveProfile,
   } from "./stores/api";
   import { initScreenWidth, initSystemThemeListener, isDarkMode, themeName, appTitle, connectionState } from "./stores/theme";
@@ -89,6 +90,18 @@
   // --banner-h pushes the layout, including the fixed sidebar, down by its
   // height; it is 0px otherwise.
   let bannerHeight = $derived($inferencePaused ? "2.25rem" : "0px");
+  let resuming = $state(false);
+
+  async function handleResume(): Promise<void> {
+    resuming = true;
+    try {
+      await resumeInference();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      resuming = false;
+    }
+  }
 
   const noProfileValue = "__none__";
   let switchingProfile = $state(false);
@@ -170,6 +183,19 @@
       <span class="truncate">
         Inference is paused.<span class="hidden sm:inline">{" "}All inference requests are rejected until you resume.</span>
       </span>
+      <button
+        type="button"
+        class="ml-1 flex h-6 shrink-0 items-center gap-1 rounded-md border border-black/30 bg-white/80 px-2 text-xs font-medium text-black hover:bg-white disabled:opacity-60"
+        onclick={handleResume}
+        disabled={resuming}
+      >
+        {#if resuming}
+          <Loader2 class="size-3 animate-spin" />
+        {:else}
+          <Play class="size-3" />
+        {/if}
+        Resume
+      </button>
     </div>
   {/if}
   <Sidebar.Provider
