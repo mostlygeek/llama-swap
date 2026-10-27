@@ -495,6 +495,38 @@ func TestMetricsPassMonitor_ScrapeUsesDirectOutbound(t *testing.T) {
 	}
 }
 
+// TestMetricsPassMonitor_ScrapeJoinsProxyPath checks the scrape joins the
+// metrics path to a proxy that has a path prefix, so a model behind a
+// path-based proxy is fetched at <prefix>/metrics, not /metrics.
+func TestMetricsPassMonitor_ScrapeJoinsProxyPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/llama/metrics" {
+			t.Errorf("scrape path = %q, want /llama/metrics", r.URL.Path)
+		}
+		w.Write([]byte(testUpstreamMetrics))
+	}))
+	t.Cleanup(upstream.Close)
+
+	cfg := config.Config{
+		Models: map[string]config.ModelConfig{
+			"banana": {Proxy: upstream.URL + "/llama", MetricsPass: config.MetricsPassModelConfig{Path: "/metrics"}},
+		},
+	}
+	logs := logmon.NewGroup(io.Discard, true, true, true)
+	// The default scrape closure dials proxy+path directly; the loaded checker
+	// reports ready so the scrape runs.
+	m := newMetricsPassMonitor(cfg, logs.ProxyLogs, func(string) bool { return true })
+	m.scrapeModel("banana", cfg.Models["banana"])
+
+	snap, ok := m.snapshot("banana")
+	if !ok || !snap.ok {
+		t.Fatalf("expected a successful scrape, got ok=%v", ok)
+	}
+	if !strings.Contains(snap.raw, "llama_server_tokens_generated_total") {
+		t.Fatalf("scraped body missing expected metric:\n%s", snap.raw)
+	}
+}
+
 // TestAnyModelMetricsPass checks the poller gate: true only when a model has
 // metricsPass.path set.
 func TestAnyModelMetricsPass(t *testing.T) {

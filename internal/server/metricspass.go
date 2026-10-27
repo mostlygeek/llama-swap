@@ -79,7 +79,10 @@ func newMetricsPassMonitor(cfg config.Config, log *logmon.Monitor, loaded func(s
 			if err != nil {
 				return "", fmt.Errorf("parse proxy %q: %w", proxy, err)
 			}
-			base.Path = path
+			// Join rather than assign so a proxy with a path prefix
+			// (http://host/llama) keeps it: the metrics endpoint is the
+			// proxy's base path plus the metrics path (/llama/metrics).
+			base = base.JoinPath(path)
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, base.String(), nil)
 			if err != nil {
 				return "", err
