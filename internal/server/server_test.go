@@ -72,6 +72,7 @@ func (s *stubRouter) Unload(timeout time.Duration, models ...string) {
 	s.unloadTimeout = timeout
 	s.unloadModels = append([]string(nil), models...)
 }
+func (s *stubRouter) SetStartGate(func() error) {}
 func (s *stubRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
 	if s.loggers != nil {
 		if lg, ok := s.loggers[modelID]; ok {

@@ -255,6 +255,7 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 	if pause == nil {
 		pause = NewPauseState()
 	}
+	local.SetStartGate(pause.startGate)
 
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	s := &Server{

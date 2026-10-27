@@ -37,8 +37,8 @@ func assertPausedResponse(t *testing.T, w *httptest.ResponseRecorder) {
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d want 503; body=%q", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), errInferencePausedMessage) {
-		t.Errorf("body=%q want it to contain %q", w.Body.String(), errInferencePausedMessage)
+	if !strings.Contains(w.Body.String(), swaputil.ErrInferencePaused.Error()) {
+		t.Errorf("body=%q want it to contain %q", w.Body.String(), swaputil.ErrInferencePaused.Error())
 	}
 }
 
@@ -200,4 +200,40 @@ models:
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, chatRequest("m1"))
 	assertPausedResponse(t, w)
+}
+
+// TestServer_PauseGatesRouterStarts covers a request that passed serveLocal's
+// check just before a pause: it reaches the router after the unload, and the
+// router's start gate must keep the model from starting.
+func TestServer_PauseGatesRouterStarts(t *testing.T) {
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
+models:
+  m1:
+    cmd: echo ready
+    proxy: http://localhost:8080
+`))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	st, err := sqlite.New("")
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	defer st.Close()
+
+	s, err := New(cfg, logmon.NewGroup(io.Discard, true, true, true), nil, st, BuildInfo{}, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer s.Shutdown(time.Second)
+
+	pauseServer(t, s)
+
+	// Skip serveLocal, as a request already past its check would.
+	w := httptest.NewRecorder()
+	s.local.ServeHTTP(w, chatRequest("m1"))
+	assertPausedResponse(t, w)
+	if running := s.local.RunningModels(); len(running) != 0 {
+		t.Errorf("RunningModels()=%v want none while paused", running)
+	}
 }

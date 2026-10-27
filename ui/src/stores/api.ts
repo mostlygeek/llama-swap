@@ -59,6 +59,9 @@ export const versionInfo = writable<VersionInfo>({
 
 let apiEventSource: EventSource | null = null;
 let profileRevision = 0;
+// Bumped by every pause/resume request and pauseChanged event, so an HTTP
+// response that arrives after newer state cannot overwrite it.
+let pauseRevision = 0;
 let playgroundModelsRequest = 0;
 let playgroundModelsFetch: Promise<Model[]> | null = null;
 let playgroundModelsRefreshQueued = false;
@@ -77,6 +80,7 @@ export function enableAPIEvents(enabled: boolean): void {
     profiles.set([]);
     activeProfile.set(null);
     profileRevision++;
+    pauseRevision++;
     inferencePaused.set(false);
     return;
   }
@@ -103,6 +107,7 @@ export function enableAPIEvents(enabled: boolean): void {
       profiles.set([]);
       activeProfile.set(null);
       profileRevision++;
+      pauseRevision++;
       inferencePaused.set(false);
       retryCount = 0;
       connectionState.set("connected");
@@ -200,6 +205,7 @@ export function handleAPIEventMessage(data: string): void {
 
     case "pauseChanged": {
       const state = JSON.parse(message.data) as { paused: boolean };
+      pauseRevision++;
       inferencePaused.set(state.paused);
       break;
     }
@@ -425,12 +431,15 @@ export async function resumeInference(): Promise<void> {
 
 async function setInferencePaused(paused: boolean): Promise<void> {
   const action = paused ? "pause" : "resume";
+  const revision = ++pauseRevision;
   const response = await fetch(apiUrl(`/api/models/${action}`), { method: "POST" });
   if (!response.ok) {
     throw new Error(`Failed to ${action} inference: ${response.status}`);
   }
   const state = await response.json() as { paused: boolean };
-  inferencePaused.set(state.paused);
+  // A pause blocks until every model stops, so a resume can be sent and
+  // answered, and its event delivered, before the pause returns.
+  if (pauseRevision === revision) inferencePaused.set(state.paused);
 }
 
 export async function unloadSingleModel(model: string): Promise<void> {
