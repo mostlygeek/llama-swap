@@ -27,7 +27,7 @@
 #
 # CUDA variants. --cuda and --cuda13 are the same CUDA build against different
 # toolkits: CUDA 12 compiled for Pascal through Ada, and CUDA 13 compiled for
-# Ampere through Blackwell. CUDA 13 dropped Maxwell, Pascal and Volta from nvcc
+# Turing through Blackwell. CUDA 13 dropped Maxwell, Pascal and Volta from nvcc
 # entirely, so one image cannot cover both ranges. Only CUDA_VERSION and
 # CMAKE_CUDA_ARCHITECTURES differ between them, and the builder base's tag is
 # already keyed on both, so the two variants get their own base and artifacts
@@ -110,7 +110,7 @@ for arg in "$@"; do
             echo ""
             echo "Options:"
             echo "  --cuda      Build CUDA 12 image, Pascal through Ada (sm 60-89)"
-            echo "  --cuda13    Build CUDA 13 image, Ampere through Blackwell (sm 80-120)"
+            echo "  --cuda13    Build CUDA 13 image, Turing through Blackwell (sm 75-120)"
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
             echo "  --platform=PLATFORM  linux/amd64 or linux/arm64 (default: this host)"
@@ -138,7 +138,7 @@ for arg in "$@"; do
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
             echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
             echo "                       (default: 60;61;70;75;86;89 for --cuda,"
-            echo "                       80;86;89;90;100;120 for --cuda13 on amd64,"
+            echo "                       75;80;86;89;90;100;120 for --cuda13 on amd64,"
             echo "                       90;100;120;121 for --cuda13 on arm64)"
             echo "  CUDA_VERSION         CUDA toolkit/runtime version as an nvidia/cuda image tag"
             echo "                       (default: 12.9.1 for --cuda, 13.3.1 for --cuda13)"
@@ -191,13 +191,13 @@ fi
 #
 #   cuda    CUDA 12: Pascal (60/61) through Ada (89). 12.x still ships nvcc
 #           support for Maxwell, Pascal and Volta.
-#   cuda13  CUDA 13: Ampere (80/86) through Blackwell, by way of Ada (89) and
-#           Hopper (90). CUDA 13 removed everything below Turing from nvcc, and
-#           llama-swap still ships images for those cards, hence two CUDA
-#           variants rather than a version bump.
+#   cuda13  CUDA 13: Turing (75) through Blackwell, by way of Ampere (80/86),
+#           Ada (89) and Hopper (90). CUDA 13 removed everything below Turing
+#           from nvcc, and llama-swap still ships images for those cards, hence
+#           two CUDA variants rather than a version bump.
 #
 # The architecture lists differ by platform because the hardware does. On amd64
-# the range is Ampere through Blackwell on PCIe cards. On arm64 the only NVIDIA
+# the range is Turing through Blackwell on PCIe cards. On arm64 the only NVIDIA
 # parts that exist are Grace pairings, so Pascal through Ada are pointless and
 # 121 -- GB10, the Blackwell GPU in DGX Spark, and the whole reason for an arm64
 # image -- is essential. 90 is GH200, 100 is GB200, 120 covers a discrete
@@ -224,7 +224,7 @@ case "${VARIANT}:${ARCH}" in
         ;;
     cuda13:*)
         CUDA_VERSION="${CUDA_VERSION:-13.3.1}"
-        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-80;86;89;90;100;120}"
+        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-75;80;86;89;90;100;120}"
         ;;
     *)
         CUDA_VERSION="${CUDA_VERSION:-12.9.1}"

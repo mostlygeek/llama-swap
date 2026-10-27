@@ -20,7 +20,7 @@ From `docker/unified/`:
 ```bash
 ./build-image.sh --vulkan    # AMD and other Vulkan hardware (amd64)
 ./build-image.sh --cuda      # NVIDIA Pascal-Ada, CUDA 12 (amd64)
-./build-image.sh --cuda13    # NVIDIA Ampere-Blackwell, CUDA 13 (amd64, arm64)
+./build-image.sh --cuda13    # NVIDIA Turing-Blackwell, CUDA 13 (amd64, arm64)
 ```
 
 Pick the flavour your GPU needs; a CPU-only fleet runs any of them (Vulkan

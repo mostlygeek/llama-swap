@@ -33,7 +33,7 @@ Three images are built, and `--cuda`/`--cuda13`/`--vulkan` picks which:
 | flag | image | platforms | GPUs |
 |---|---|---|---|
 | `--cuda` | `llama-swap:unified-cuda` | amd64 | NVIDIA Pascal through Ada, on CUDA 12 |
-| `--cuda13` | `llama-swap:unified-cuda13` | amd64, arm64 | NVIDIA Ampere through Blackwell, on CUDA 13 |
+| `--cuda13` | `llama-swap:unified-cuda13` | amd64, arm64 | NVIDIA Turing through Blackwell, on CUDA 13 |
 | `--vulkan` | `llama-swap:unified-vulkan` | amd64 | AMD and other Vulkan hardware |
 
 `cuda` and `cuda13` are the same CUDA build: same Dockerfiles, same install
@@ -330,7 +330,7 @@ from `nvcc` altogether and those cards still need an image:
 | image | platform | CUDA | `CMAKE_CUDA_ARCHITECTURES` | covers |
 |---|---|---|---|---|
 | `unified-cuda` | amd64 | 12.9.1 | `60;61;70;75;86;89` | Pascal (P100, GTX 10xx, P40), Volta (V100), Turing, Ampere, Ada |
-| `unified-cuda13` | amd64 | 13.3.1 | `80;86;89;90;100;120` | Ampere (A100, RTX 30xx), Ada (RTX 40xx), Hopper (H100), Blackwell (100 on datacenter parts, 120 on GeForce RTX 50xx and RTX PRO) |
+| `unified-cuda13` | amd64 | 13.3.1 | `75;80;86;89;90;100;120` | Turing (RTX 20xx, GTX 16xx, Quadro T-series), Ampere (A100, RTX 30xx), Ada (RTX 40xx), Hopper (H100), Blackwell (100 on datacenter parts, 120 on GeForce RTX 50xx and RTX PRO) |
 | `unified-cuda13` | arm64 | 13.3.1 | `90;100;120;121` | GB10 (DGX Spark) at 121, GH200 at 90, GB200 at 100, and a discrete GeForce or RTX PRO card in an aarch64 host at 120 |
 
 Those are the compute capabilities compiled as SASS. For most entries CMake also
@@ -365,9 +365,10 @@ dropping `100` does not leave GB200 covered by `120`.
 PCIe part, so sm_121 cannot appear in an x86 host; it is listed on arm64, where
 it is the whole point.
 
-Pick `unified-cuda13` for an Ampere or newer card and `unified-cuda` for
-anything older. `unified-cuda13` is a multi-arch tag, so on a DGX Spark or any
-other aarch64 host `docker pull` resolves to the arm64 image without asking. What
+Pick `unified-cuda13` for a Turing (compute 7.5) or newer card and
+`unified-cuda` for anything older. `unified-cuda13` is a multi-arch tag, so on a
+DGX Spark or any other aarch64 host `docker pull` resolves to the arm64 image
+without asking. What
 an image is and what it was compiled for is recorded inside it:
 
 ```bash
