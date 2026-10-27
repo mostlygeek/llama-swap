@@ -25,6 +25,8 @@ export const models = writable<Model[]>([]);
 export const playgroundModels = writable<Model[]>([]);
 export const profiles = writable<Profile[]>([]);
 export const activeProfile = writable<string | null>(null);
+/** True while inference is paused: the server rejects requests for local models. */
+export const inferencePaused = writable<boolean>(false);
 
 // Model records used by Playground come from the OpenAI-compatible listing.
 export const profileModels = derived(
@@ -75,6 +77,7 @@ export function enableAPIEvents(enabled: boolean): void {
     profiles.set([]);
     activeProfile.set(null);
     profileRevision++;
+    inferencePaused.set(false);
     return;
   }
 
@@ -100,6 +103,7 @@ export function enableAPIEvents(enabled: boolean): void {
       profiles.set([]);
       activeProfile.set(null);
       profileRevision++;
+      inferencePaused.set(false);
       retryCount = 0;
       connectionState.set("connected");
       void fetchProfiles().catch((error) => console.error(error));
@@ -191,6 +195,12 @@ export function handleAPIEventMessage(data: string): void {
       const state = JSON.parse(message.data) as Pick<ProfileState, "active">;
       profileRevision++;
       activeProfile.set(state.active);
+      break;
+    }
+
+    case "pauseChanged": {
+      const state = JSON.parse(message.data) as { paused: boolean };
+      inferencePaused.set(state.paused);
       break;
     }
   }
@@ -402,6 +412,25 @@ export async function unloadAllModels(): Promise<void> {
     console.error("Failed to unload models:", error);
     throw error;
   }
+}
+
+/** Pauses inference and unloads every local model. */
+export async function pauseInference(): Promise<void> {
+  await setInferencePaused(true);
+}
+
+export async function resumeInference(): Promise<void> {
+  await setInferencePaused(false);
+}
+
+async function setInferencePaused(paused: boolean): Promise<void> {
+  const action = paused ? "pause" : "resume";
+  const response = await fetch(apiUrl(`/api/models/${action}`), { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`Failed to ${action} inference: ${response.status}`);
+  }
+  const state = await response.json() as { paused: boolean };
+  inferencePaused.set(state.paused);
 }
 
 export async function unloadSingleModel(model: string): Promise<void> {

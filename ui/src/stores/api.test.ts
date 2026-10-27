@@ -11,6 +11,7 @@ import {
   handleAPIEventMessage,
   hasListedModels,
   inFlightRequests,
+  inferencePaused,
   inflightRequestEntries,
   models,
   playgroundModels,
@@ -216,6 +217,20 @@ describe("api store event handling", () => {
       data: JSON.stringify({ active: "coding" }),
     }));
     expect(get(activeProfile)).toBe("coding");
+  });
+
+  it("applies pause change events", () => {
+    inferencePaused.set(false);
+    handleAPIEventMessage(JSON.stringify({
+      type: "pauseChanged",
+      data: JSON.stringify({ paused: true }),
+    }));
+    expect(get(inferencePaused)).toBe(true);
+    handleAPIEventMessage(JSON.stringify({
+      type: "pauseChanged",
+      data: JSON.stringify({ paused: false }),
+    }));
+    expect(get(inferencePaused)).toBe(false);
   });
 
   it("loads and switches profiles", async () => {
