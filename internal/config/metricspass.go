@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // metricsPassDefaultEvery is how often a model's upstream metrics are scraped
@@ -66,8 +68,50 @@ type MetricsPassModelConfig struct {
 	Path string `yaml:"path"`
 
 	// Every overrides the global metricsPass.every for this model.
-	// 0 uses the global cadence.
+	// 0 (or "0s") uses the global cadence.
 	Every time.Duration `yaml:"every"`
+}
+
+// rawMetricsPassModelConfig is the plain form used to decode the metricsPass
+// block. Every is decoded as any so the unmarshaler can accept both a duration
+// string ("15s") and the bare zero ("0", 0), which the loader documents as
+// "use the global cadence".
+type rawMetricsPassModelConfig struct {
+	Path  string `yaml:"path"`
+	Every any    `yaml:"every"`
+}
+
+// UnmarshalYAML decodes the metricsPass block. Every accepts a duration string
+// ("15s") or the bare zero (0); anything else is rejected.
+func (c *MetricsPassModelConfig) UnmarshalYAML(node *yaml.Node) error {
+	var raw rawMetricsPassModelConfig
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	c.Path = raw.Path
+	switch v := raw.Every.(type) {
+	case nil:
+		// no value set: inherit the global cadence
+	case string:
+		if v != "" && v != "0" {
+			d, err := time.ParseDuration(v)
+			if err != nil {
+				return fmt.Errorf("metricsPass.every: invalid duration %q", v)
+			}
+			c.Every = d
+		}
+	case int:
+		if v != 0 {
+			return fmt.Errorf("metricsPass.every: expected a duration or 0, got %d", v)
+		}
+	case float64:
+		if v != 0 {
+			return fmt.Errorf("metricsPass.every: expected a duration or 0, got %v", v)
+		}
+	default:
+		return fmt.Errorf("metricsPass.every: expected a duration or 0, got %T", raw.Every)
+	}
+	return nil
 }
 
 // Enabled reports whether the model's metrics passthrough is configured.

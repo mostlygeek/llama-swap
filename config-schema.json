@@ -704,13 +704,18 @@
                         "type": "object",
                         "properties": {
                             "path": {
-                                "type": "string",
-                                "pattern": "^/.*$",
+                                "anyOf": [
+                                    {"const": ""},
+                                    {"type": "string", "pattern": "^/.*$"}
+                                ],
                                 "description": "Upstream endpoint to scrape for this model's Prometheus metrics, such as /metrics. Empty disables passthrough for this model."
                             },
                             "every": {
-                                "type": "string",
-                                "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
+                                "anyOf": [
+                                    {"const": 0},
+                                    {"const": "0"},
+                                    {"type": "string", "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$"}
+                                ],
                                 "description": "Override the global metricsPass.every for this model's scrape cadence. 0 uses the global value."
                             }
                         },

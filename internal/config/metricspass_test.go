@@ -1,9 +1,14 @@
 package config
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/jsonschema-go/jsonschema"
+	"gopkg.in/yaml.v3"
 )
 
 // TestMetricsPassConfig_Defaults checks the global block's defaults are applied
@@ -110,5 +115,89 @@ models:
 `
 	if _, err := LoadConfigFromReader(strings.NewReader(cfg)); err == nil {
 		t.Fatal("expected an error for a too-short every")
+	}
+}
+
+// TestLoadConfig_MetricsPassEveryZeroInheritsGlobal checks that a per-model
+// every of 0 (or 0s) is accepted and falls back to the global cadence.
+func TestLoadConfig_MetricsPassEveryZeroInheritsGlobal(t *testing.T) {
+	for _, form := range []string{"0", "0s"} {
+		t.Run(form, func(t *testing.T) {
+			cfg := "metricsPass:\n  every: 15s\n" +
+				"models:\n  banana:\n    cmd: echo hi\n    proxy: http://localhost:1234\n" +
+				"    metricsPass:\n      path: /metrics\n      every: " + form + "\n"
+			c, err := LoadConfigFromReader(strings.NewReader(cfg))
+			if err != nil {
+				t.Fatalf("every: %q should be accepted: %v", form, err)
+			}
+			mc := c.Models["banana"]
+			if mc.MetricsPass.Every != 0 {
+				t.Errorf("Every = %v, want 0", mc.MetricsPass.Every)
+			}
+			if got := mc.MetricsPass.ScrapeEvery(c.MetricsPass.Every); got != 15*time.Second {
+				t.Errorf("ScrapeEvery = %v, want 15s (global)", got)
+			}
+		})
+	}
+}
+
+// TestConfig_MetricsPassSchema checks that the per-model metricsPass schema
+// agrees with the loader on the documented values: path "" (disable
+// passthrough) and every 0 (inherit the global cadence) are valid, while a
+// non-empty path without a leading slash is rejected.
+func TestConfig_MetricsPassSchema(t *testing.T) {
+	data, err := os.ReadFile("../../config-schema.json")
+	if err != nil {
+		t.Fatalf("read config-schema.json: %v", err)
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("unmarshal schema: %v", err)
+	}
+	resolved, err := schema.Resolve(&jsonschema.ResolveOptions{BaseURI: "https://github.com/mostlygeek/llama-swap/"})
+	if err != nil {
+		t.Fatalf("resolve schema: %v", err)
+	}
+
+	// modelWith builds a minimal config with one model whose block is the
+	// given per-model lines (indented for the models entry).
+	modelWith := func(block string) string {
+		return "startPort: 5800\nmodels:\n  banana:\n    cmd: echo hi\n    proxy: http://localhost:1234\n" + block
+	}
+
+	for _, tc := range []struct {
+		name  string
+		input string
+		valid bool
+	}{
+		{"disable and inherit", modelWith("    metricsPass:\n      path: ''\n      every: 0\n"), true},
+		{"path with cadence", modelWith("    metricsPass:\n      path: /metrics\n      every: 15s\n"), true},
+		{"path inherits cadence", modelWith("    metricsPass:\n      path: /metrics\n"), true},
+		{"path without slash", modelWith("    metricsPass:\n      path: metrics\n"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var instance any
+			if err := yaml.Unmarshal([]byte(tc.input), &instance); err != nil {
+				t.Fatalf("yaml unmarshal: %v", err)
+			}
+			b, err := json.Marshal(instance)
+			if err != nil {
+				t.Fatalf("json marshal: %v", err)
+			}
+			if err := json.Unmarshal(b, &instance); err != nil {
+				t.Fatalf("json unmarshal: %v", err)
+			}
+			err = resolved.Validate(instance)
+			if tc.valid {
+				if err != nil {
+					t.Fatalf("schema rejected a value the loader accepts:\n%v", err)
+				}
+				if _, err := LoadConfigFromReader(strings.NewReader(tc.input)); err != nil {
+					t.Fatalf("schema and loader must both accept the example: %v", err)
+				}
+			} else if err == nil {
+				t.Fatal("schema accepted an invalid metricsPass value")
+			}
+		})
 	}
 }
