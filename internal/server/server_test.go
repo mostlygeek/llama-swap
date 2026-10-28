@@ -37,6 +37,7 @@ type stubRouter struct {
 	unloadCalls   atomic.Int32
 	unloadModels  []string
 	unloadTimeout time.Duration
+	onUnload      func()
 	loggers       map[string]*logmon.Monitor
 }
 
@@ -71,6 +72,9 @@ func (s *stubRouter) Unload(timeout time.Duration, models ...string) {
 	s.unloadCalls.Add(1)
 	s.unloadTimeout = timeout
 	s.unloadModels = append([]string(nil), models...)
+	if s.onUnload != nil {
+		s.onUnload()
+	}
 }
 func (s *stubRouter) SetStartGate(func() error) {}
 func (s *stubRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {

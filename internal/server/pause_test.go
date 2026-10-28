@@ -237,3 +237,47 @@ models:
 		t.Errorf("RunningModels()=%v want none while paused", running)
 	}
 }
+
+// TestServer_ResumeWaitsForPauseUnload checks that a resume sent while a pause
+// is still unloading waits for the unload, so no model a request starts after
+// the resume is stopped by it.
+func TestServer_ResumeWaitsForPauseUnload(t *testing.T) {
+	unloading := make(chan struct{})
+	release := make(chan struct{})
+	local := newStubRouter([]string{"m1"}, "")
+	local.onUnload = func() {
+		close(unloading)
+		<-release
+	}
+	s := newTestServer(local, newStubRouter(nil, ""))
+
+	paused := make(chan struct{})
+	go func() {
+		defer close(paused)
+		s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/models/pause", nil))
+	}()
+	<-unloading
+
+	resumed := make(chan struct{})
+	go func() {
+		defer close(resumed)
+		s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/models/resume", nil))
+	}()
+	select {
+	case <-resumed:
+		t.Fatal("resume returned while the pause was still unloading")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	for _, done := range []chan struct{}{paused, resumed} {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("pause or resume did not return after the unload finished")
+		}
+	}
+	if s.pause.Paused() {
+		t.Error("Paused()=true want false after resume")
+	}
+}

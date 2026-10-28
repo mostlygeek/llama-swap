@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 	"sync/atomic"
 
 	"github.com/mostlygeek/llama-swap/internal/event"
@@ -15,6 +16,11 @@ import (
 // memory only: a restart always starts unpaused. A nil value is never paused.
 type PauseState struct {
 	paused atomic.Bool
+
+	// transition serializes pause and resume. A pause holds it until its
+	// unload finishes, so a resume cannot return while that unload is still
+	// stopping models a request made after the resume may need.
+	transition sync.Mutex
 }
 
 func NewPauseState() *PauseState {
@@ -59,14 +65,18 @@ func (s *Server) serveLocal(w http.ResponseWriter, r *http.Request) {
 // cancel, so no model can start once it returns. Requests already in progress
 // are stopped with their model. It returns once every model has stopped.
 func (s *Server) handleAPIPause(w http.ResponseWriter, r *http.Request) {
+	s.pause.transition.Lock()
+	defer s.pause.transition.Unlock()
 	s.setPaused(true)
 	s.local.Unload(0)
 	writePauseState(w, true)
 }
 
 // handleAPIResume lets inference requests through again. Models load on the
-// next request as usual.
+// next request as usual. It waits for a pause still unloading models.
 func (s *Server) handleAPIResume(w http.ResponseWriter, r *http.Request) {
+	s.pause.transition.Lock()
+	defer s.pause.transition.Unlock()
 	s.setPaused(false)
 	writePauseState(w, false)
 }
