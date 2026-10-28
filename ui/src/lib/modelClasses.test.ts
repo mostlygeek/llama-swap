@@ -63,6 +63,11 @@ describe("classifyModel", () => {
     ).toBe("image");
   });
 
+  it("classifies image output without the capability flag", () => {
+    // out: [image] with no input modalities derives no image_generation flag
+    expect(classifyModel(fixture(undefined, ["image"], []))).toBe("image");
+  });
+
   it("classifies video by output modality, which has no capability flag", () => {
     // live: video-MiniMax-H3 (text->video, no flags)
     expect(classifyModel(fixture(undefined, ["video"], ["text"]))).toBe("video");

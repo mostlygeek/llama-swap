@@ -44,6 +44,15 @@ type apiModel struct {
 	// LoadingMessage is the loading step the upstream last reported. Only set
 	// while the model is starting.
 	LoadingMessage string `json:"loadingMessage,omitempty"`
+	// Modalities mirrors the architecture block /v1/models reports, shaped to
+	// the UI's Model.modalities so the SSE feed and the OpenAI listing agree.
+	// Nil for peers and models without declared or discovered modalities.
+	Modalities *apiModalities `json:"modalities,omitempty"`
+}
+
+type apiModalities struct {
+	In  []string `json:"in"`
+	Out []string `json:"out"`
 }
 
 type apiProfile struct {
@@ -144,7 +153,17 @@ func (s *Server) modelStatus() []apiModel {
 		// shutdownCtx rather than a request: modelStatus is also called from
 		// event callbacks that have no request of their own.
 		caps := s.resolveCapabilities(s.shutdownCtx, id, mc)
-		_, capsMap, _, ctxLen := renderCapabilities(caps)
+		arch, capsMap, _, ctxLen := renderCapabilities(caps)
+		var modalities *apiModalities
+		if in, ok := arch["input_modalities"].([]string); ok {
+			modalities = &apiModalities{In: in}
+		}
+		if out, ok := arch["output_modalities"].([]string); ok {
+			if modalities == nil {
+				modalities = &apiModalities{}
+			}
+			modalities.Out = out
+		}
 		models = append(models, apiModel{
 			Id:              id,
 			Name:            mc.Name,
@@ -153,6 +172,7 @@ func (s *Server) modelStatus() []apiModel {
 			Unlisted:        mc.Unlisted,
 			Aliases:         mc.Aliases,
 			Capabilities:    capsMap,
+			Modalities:      modalities,
 			ContextLength:   ctxLen,
 			ReadySince:      readySince,
 			UptimeMs:        uptimeMs,

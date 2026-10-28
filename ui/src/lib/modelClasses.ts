@@ -43,7 +43,10 @@ export function classifyModel(model: Classifiable): ModelClass {
   // from /v1/models at runtime but is not declared on ModelCapabilities here.
   const caps = (model.capabilities ?? {}) as Record<string, boolean>;
   if (caps.reranker) return "rerank";
+  // A config can declare out: [image] with no input modalities, which derives
+  // no image_generation flag, so the output modality is checked too.
   if (caps.image_generation || caps.image_to_image) return "image";
+  if (model.modalities?.out?.includes("image")) return "image";
   if (model.modalities?.out?.includes("video")) return "video";
   if (caps.audio_speech || model.modalities?.out?.includes("audio")) return "audio";
   if (caps.embeddings) return "embed";

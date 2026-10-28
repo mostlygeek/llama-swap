@@ -934,6 +934,46 @@ func TestServer_ModelStatus_Capabilities(t *testing.T) {
 		if m.ContextLength != 0 {
 			t.Errorf("expected no context_length, got %d", m.ContextLength)
 		}
+		if m.Modalities != nil {
+			t.Errorf("expected no modalities, got %v", m.Modalities)
+		}
+	})
+
+	// The Models list groups video models by output modality, which has no
+	// capability flag: this payload is its only source for modalities.
+	t.Run("carries output modalities for video models", func(t *testing.T) {
+		s := newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{Out: []string{"video"}},
+		})
+		m := s.modelStatus()[0]
+		if m.Modalities == nil {
+			t.Fatal("expected modalities, got none")
+		}
+		if len(m.Modalities.Out) != 1 || m.Modalities.Out[0] != "video" {
+			t.Errorf("modalities.out = %v, want [video]", m.Modalities.Out)
+		}
+		if m.Modalities.In != nil {
+			t.Errorf("modalities.in = %v, want none", m.Modalities.In)
+		}
+		if len(m.Capabilities) != 0 {
+			t.Errorf("expected no capability flags, got %v", m.Capabilities)
+		}
+	})
+
+	t.Run("carries input modalities for vision models", func(t *testing.T) {
+		s := newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text", "image"}, Out: []string{"text"}},
+		})
+		m := s.modelStatus()[0]
+		if m.Modalities == nil {
+			t.Fatal("expected modalities, got none")
+		}
+		if len(m.Modalities.In) != 2 || m.Modalities.In[1] != "image" {
+			t.Errorf("modalities.in = %v, want [text image]", m.Modalities.In)
+		}
+		if len(m.Modalities.Out) != 1 || m.Modalities.Out[0] != "text" {
+			t.Errorf("modalities.out = %v, want [text]", m.Modalities.Out)
+		}
 	})
 }
 
