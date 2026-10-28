@@ -11,7 +11,6 @@ export interface ModelCapabilities {
   image_to_image?: boolean;
   function_calling?: boolean;
   reranker?: boolean;
-  embeddings?: boolean;
 }
 
 // Input/output modalities a model reports through the /v1/models

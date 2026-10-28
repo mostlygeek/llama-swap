@@ -39,12 +39,14 @@ type Classifiable = Pick<Model, "capabilities" | "modalities">;
  *   the explicit embeddings flag must win when set.
  */
 export function classifyModel(model: Classifiable): ModelClass {
-  const caps = model.capabilities;
-  if (caps?.reranker) return "rerank";
-  if (caps?.image_generation || caps?.image_to_image) return "image";
+  // Record cast, matching matchesCapabilities: the embeddings key arrives
+  // from /v1/models at runtime but is not declared on ModelCapabilities here.
+  const caps = (model.capabilities ?? {}) as Record<string, boolean>;
+  if (caps.reranker) return "rerank";
+  if (caps.image_generation || caps.image_to_image) return "image";
   if (model.modalities?.out?.includes("video")) return "video";
-  if (caps?.audio_speech || model.modalities?.out?.includes("audio")) return "audio";
-  if (caps?.embeddings) return "embed";
+  if (caps.audio_speech || model.modalities?.out?.includes("audio")) return "audio";
+  if (caps.embeddings) return "embed";
   return "chat";
 }
 
