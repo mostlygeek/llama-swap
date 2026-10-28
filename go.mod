@@ -169,3 +169,5 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
 )
+
+replace gvisor.dev/gvisor => gvisor.dev/gvisor v0.0.0-20260915211658-a6f909f08a72
