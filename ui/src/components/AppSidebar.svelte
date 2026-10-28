@@ -99,7 +99,7 @@
 {#snippet categoryGroupItem(classId: string, label: string, groupModels: Model[])}
   {@const open = !isGroupCollapsed(classId)}
   <Sidebar.MenuSubItem>
-    <Collapsible.Root open={open} onOpenChange={() => toggleGroup(classId)} class="gap-0">
+    <Collapsible.Root open={open} class="gap-0">
       <button
         type="button"
         class="flex h-7 w-full cursor-pointer min-w-0 items-center gap-2 rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
