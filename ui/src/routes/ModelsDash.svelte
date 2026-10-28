@@ -15,7 +15,7 @@
   import { loadingMessage, loadingPercent, statusDotColor } from "../stores/modelLoad";
   import { showUnlistedModels as showUnlisted, showCapabilityTags, groupByClass, collapsedSections } from "../stores/modelDisplay";
   import { listCapabilityBadges, capabilityBadgeClass } from "../lib/capabilities";
-  import { groupModelsByClass, modelClassLabels } from "../lib/modelClasses";
+  import { groupModelsByClass, modelClassLabels, sectionStatusDotColor } from "../lib/modelClasses";
   import type { Model } from "../lib/types";
   import ModelLoadButton from "../components/ModelLoadButton.svelte";
   import Tag from "../components/Tag.svelte";
@@ -73,18 +73,6 @@
 
   function isSectionCollapsed(sectionId: string): boolean {
     return $collapsedSections[sectionId] === true;
-  }
-
-  // Aggregate of the row status dots: green when any model in the section is
-  // ready, amber while one is starting or stopping, gray when none is active.
-  // Mirrors statusDotColor so a collapsed section reads like its rows.
-  function sectionStatusDotColor(sectionModels: Model[]): string {
-    let transitioning = false;
-    for (const model of sectionModels) {
-      if (model.state === "ready") return "bg-success";
-      if (model.state === "starting" || model.state === "stopping") transitioning = true;
-    }
-    return transitioning ? "bg-warning" : "bg-muted-foreground/40";
   }
 
   function toggleSection(sectionId: string): void {
