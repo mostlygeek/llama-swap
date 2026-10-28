@@ -515,6 +515,7 @@ const (
 	msgTypeInFlight    messageType = "inflight"
 	msgTypeUIConfig    messageType = "uiConfig"
 	msgTypeProfile     messageType = "profileChanged"
+	msgTypePause       messageType = "pauseChanged"
 )
 
 // sendDropReportInterval is how often an SSE handler reports messages that
@@ -606,8 +607,8 @@ func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request, name string, s
 }
 
 // handleAPIEvents streams server events (model status, activity, in-flight
-// requests, UI config, profile changes) to the client as Server-Sent Events.
-// Log data has its own stream, handleAPILogEvents.
+// requests, UI config, profile and pause changes) to the client as Server-Sent
+// Events. Log data has its own stream, handleAPILogEvents.
 func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	s.serveSSE(w, r, "handleAPIEvents", func(send func(messageEnvelope)) func() {
 		sendModels := func() {
@@ -644,6 +645,12 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		sendPause := func() {
+			if j, err := json.Marshal(map[string]bool{"paused": s.pause.Paused()}); err == nil {
+				send(messageEnvelope{Type: msgTypePause, Data: string(j)})
+			}
+		}
+
 		unsubscribe := []context.CancelFunc{
 			event.On(func(e swaputil.ProcessStateChangeEvent) { sendModels() }),
 			event.On(func(e swaputil.ProcessLoadingEvent) { sendModels() }),
@@ -655,12 +662,14 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			}),
 			event.On(func(e ActivityLogEvent) { sendActivity(e.Metrics.ID) }),
 			event.On(func(e swaputil.InFlightRequestsEvent) { sendInFlight(e) }),
+			event.On(func(e swaputil.InferencePausedEvent) { sendPause() }),
 		}
 
 		// initial payload
 		sendModels()
 		sendUIConfig()
 		sendProfile()
+		sendPause()
 		sendInFlight(s.inflight.Current())
 
 		return func() { cancelAll(unsubscribe) }

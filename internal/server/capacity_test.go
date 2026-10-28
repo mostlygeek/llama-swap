@@ -80,7 +80,7 @@ models:
 		model.Proxy = fmt.Sprintf("http://127.0.0.1:%d", port)
 		cfg.Models[id] = model
 	}
-	s, err := New(cfg, logmon.NewGroup(io.Discard, true, true, true), nil, st, BuildInfo{}, nil, nil, nil)
+	s, err := New(cfg, logmon.NewGroup(io.Discard, true, true, true), nil, st, BuildInfo{}, nil, nil, nil, nil)
 	require.NoError(t, err)
 	require.IsType(t, &router.Capacity{}, s.local)
 	// Shutdown before closing the shared test store, including on failure.
@@ -127,7 +127,7 @@ models:
 	// Reload uses a fresh server; no stale capacity or resident accounting.
 	cfg.Routing.Router.Settings.Capacity.Pools["ram"] = 10
 	cfg.Hooks.OnStartup.Preload = nil
-	s, err = New(cfg, logmon.NewGroup(io.Discard, true, true, true), nil, st, BuildInfo{}, nil, nil, nil)
+	s, err = New(cfg, logmon.NewGroup(io.Discard, true, true, true), nil, st, BuildInfo{}, nil, nil, nil, nil)
 	require.NoError(t, err)
 	defer s.Shutdown(3 * time.Second)
 	request("a")

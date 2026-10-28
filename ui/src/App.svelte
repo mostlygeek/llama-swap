@@ -11,13 +11,15 @@
   import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { Check, ChevronDown } from "@lucide/svelte";
+  import { Check, ChevronDown, Loader2, Pause, Play } from "@lucide/svelte";
   import {
     activeProfile,
     checkPerformanceEnabled,
     enableAPIEvents,
     helpAgentEnabled,
+    inferencePaused,
     profiles,
+    resumeInference,
     setActiveProfile,
   } from "./stores/api";
   import { initScreenWidth, initSystemThemeListener, isDarkMode, themeName, appTitle, connectionState } from "./stores/theme";
@@ -83,6 +85,23 @@
     }
     return routeTitles[$currentRoute] ?? "Activity";
   });
+
+  // While inference is paused a banner is fixed across the top of the window.
+  // --banner-h pushes the layout, including the fixed sidebar, down by its
+  // height; it is 0px otherwise.
+  let bannerHeight = $derived($inferencePaused ? "2.25rem" : "0px");
+  let resuming = $state(false);
+
+  async function handleResume(): Promise<void> {
+    resuming = true;
+    try {
+      await resumeInference();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      resuming = false;
+    }
+  }
 
   const noProfileValue = "__none__";
   let switchingProfile = $state(false);
@@ -155,14 +174,40 @@
 </script>
 
 <Tooltip.Provider>
+  {#if $inferencePaused}
+    <div
+      role="status"
+      class="bg-warning text-black fixed inset-x-0 top-0 z-30 flex h-9 items-center justify-center gap-2 px-4 text-sm font-medium"
+    >
+      <Pause class="size-4 shrink-0" />
+      <span class="truncate">
+        Inference is paused.<span class="hidden sm:inline">{" "}All inference requests are rejected until you resume.</span>
+      </span>
+      <button
+        type="button"
+        class="ml-1 flex h-6 shrink-0 items-center gap-1 rounded-md border border-black/30 bg-white/80 px-2 text-xs font-medium text-black hover:bg-white disabled:opacity-60"
+        onclick={handleResume}
+        disabled={resuming}
+      >
+        {#if resuming}
+          <Loader2 class="size-3 animate-spin" />
+        {:else}
+          <Play class="size-3" />
+        {/if}
+        Resume
+      </button>
+    </div>
+  {/if}
   <Sidebar.Provider
+    class="pt-(--banner-h)"
+    style="--banner-h: {bannerHeight};"
     open={$sidebarOpen}
     onOpenChange={(v) => sidebarOpen.set(v)}
     width={$sidebarWidth}
     onWidthChange={(w) => sidebarWidth.set(w)}
   >
     <AppSidebar />
-    <Sidebar.Inset class="h-screen min-w-0 overflow-hidden">
+    <Sidebar.Inset class="h-[calc(100vh-var(--banner-h))] min-w-0 overflow-hidden">
       <header
         class="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4"
       >

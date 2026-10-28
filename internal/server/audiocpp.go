@@ -49,5 +49,5 @@ func (s *Server) handleAudioCpp(w http.ResponseWriter, r *http.Request) {
 		ModelID:  config.AudioCppModelID,
 		Metadata: make(map[string]string),
 	}))
-	s.local.ServeHTTP(w, r)
+	s.serveLocal(w, r)
 }

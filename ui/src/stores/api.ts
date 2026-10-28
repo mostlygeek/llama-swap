@@ -25,6 +25,8 @@ export const models = writable<Model[]>([]);
 export const playgroundModels = writable<Model[]>([]);
 export const profiles = writable<Profile[]>([]);
 export const activeProfile = writable<string | null>(null);
+/** True while inference is paused: the server rejects requests for local models. */
+export const inferencePaused = writable<boolean>(false);
 
 // Model records used by Playground come from the OpenAI-compatible listing.
 export const profileModels = derived(
@@ -57,6 +59,9 @@ export const versionInfo = writable<VersionInfo>({
 
 let apiEventSource: EventSource | null = null;
 let profileRevision = 0;
+// Bumped by every pause/resume request and pauseChanged event, so an HTTP
+// response that arrives after newer state cannot overwrite it.
+let pauseRevision = 0;
 let playgroundModelsRequest = 0;
 let playgroundModelsFetch: Promise<Model[]> | null = null;
 let playgroundModelsRefreshQueued = false;
@@ -75,6 +80,8 @@ export function enableAPIEvents(enabled: boolean): void {
     profiles.set([]);
     activeProfile.set(null);
     profileRevision++;
+    pauseRevision++;
+    inferencePaused.set(false);
     return;
   }
 
@@ -100,6 +107,8 @@ export function enableAPIEvents(enabled: boolean): void {
       profiles.set([]);
       activeProfile.set(null);
       profileRevision++;
+      pauseRevision++;
+      inferencePaused.set(false);
       retryCount = 0;
       connectionState.set("connected");
       void fetchProfiles().catch((error) => console.error(error));
@@ -191,6 +200,13 @@ export function handleAPIEventMessage(data: string): void {
       const state = JSON.parse(message.data) as Pick<ProfileState, "active">;
       profileRevision++;
       activeProfile.set(state.active);
+      break;
+    }
+
+    case "pauseChanged": {
+      const state = JSON.parse(message.data) as { paused: boolean };
+      pauseRevision++;
+      inferencePaused.set(state.paused);
       break;
     }
   }
@@ -402,6 +418,28 @@ export async function unloadAllModels(): Promise<void> {
     console.error("Failed to unload models:", error);
     throw error;
   }
+}
+
+/** Pauses inference and unloads every local model. */
+export async function pauseInference(): Promise<void> {
+  await setInferencePaused(true);
+}
+
+export async function resumeInference(): Promise<void> {
+  await setInferencePaused(false);
+}
+
+async function setInferencePaused(paused: boolean): Promise<void> {
+  const action = paused ? "pause" : "resume";
+  const revision = ++pauseRevision;
+  const response = await fetch(apiUrl(`/api/models/${action}`), { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`Failed to ${action} inference: ${response.status}`);
+  }
+  const state = await response.json() as { paused: boolean };
+  // A pause blocks until every model stops, so a resume can be sent and
+  // answered, and its event delivered, before the pause returns.
+  if (pauseRevision === revision) inferencePaused.set(state.paused);
 }
 
 export async function unloadSingleModel(model: string): Promise<void> {

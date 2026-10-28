@@ -70,6 +70,10 @@ type Server struct {
 	profileMu     sync.RWMutex
 	activeProfile string
 
+	// pause rejects requests for local models while inference is paused. It
+	// is shared across the Server instances a hot config reload creates.
+	pause *PauseState
+
 	local router.LocalRouter
 	peer  router.Router
 
@@ -214,7 +218,10 @@ type BuildInfo struct {
 // code serves llama-swap's own source over MCP. It is built once by the caller
 // and shared across reloads, so its checkout is fetched once per process; nil
 // leaves the code__* tools out.
-func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs, code *sourcecode.Provider) (*Server, error) {
+//
+// pause is shared across reloads too, so a reload keeps inference paused; nil
+// starts a fresh, unpaused state.
+func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs, code *sourcecode.Provider, pause *PauseState) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
@@ -245,6 +252,11 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 		return nil, fmt.Errorf("store is required")
 	}
 
+	if pause == nil {
+		pause = NewPauseState()
+	}
+	local.SetStartGate(pause.startGate)
+
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	s := &Server{
 		cfg:           cfg,
@@ -257,6 +269,7 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 		hardware:      hardware,
 		reference:     refs,
 		activeProfile: cfg.Hooks.OnStartup.Profile,
+		pause:         pause,
 		local:         local,
 		peer:          peer,
 		shutdownCtx:   shutdownCtx,
@@ -305,7 +318,7 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case s.local.Handles(data.ModelID):
 		s.logs.ProxyLogs.Debugf("dispatch: using local process for model: %s", data.ModelID)
-		s.local.ServeHTTP(w, r)
+		s.serveLocal(w, r)
 	case s.peer.Handles(data.ModelID):
 		s.logs.ProxyLogs.Debugf("dispatch: using peer for model: %s", data.ModelID)
 		s.peer.ServeHTTP(w, r)
@@ -450,6 +463,8 @@ func (s *Server) routes() {
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))
 	mux.Handle("POST /api/models/unload/{model...}", apiChain.ThenFunc(s.handleAPIUnloadModel))
+	mux.Handle("POST /api/models/pause", apiChain.ThenFunc(s.handleAPIPause))
+	mux.Handle("POST /api/models/resume", apiChain.ThenFunc(s.handleAPIResume))
 	mux.Handle("GET /api/profiles", apiChain.ThenFunc(s.handleAPIProfiles))
 	mux.Handle("PUT /api/profiles/active", apiChain.ThenFunc(s.handleAPIActiveProfile))
 	mux.Handle("POST /api/inflight/{id}/cancel", apiChain.ThenFunc(s.handleAPICancelInflight))

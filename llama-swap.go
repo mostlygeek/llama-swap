@@ -248,6 +248,10 @@ func main() {
 		Ref:    sourcecode.RefForVersion(version),
 	})
 
+	// Shared the same way, so a config reload while inference is paused
+	// keeps it paused (issue #1268).
+	pauseState := server.NewPauseState()
+
 	initialStorePath := configStorePath(cfg)
 	initialStore, err := sqlite.New(initialStorePath)
 	if err != nil {
@@ -255,7 +259,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	initialSrv, err := server.New(cfg, logs, perfMon, initialStore, buildInfo, hardwareSnapshot, referenceDocs, sourceCode)
+	initialSrv, err := server.New(cfg, logs, perfMon, initialStore, buildInfo, hardwareSnapshot, referenceDocs, sourceCode, pauseState)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		initialStore.Close()
@@ -363,7 +367,7 @@ func main() {
 			}
 		}
 
-		newSrv, err := server.New(newCfg, logs, perfMon, newStore, buildInfo, hardwareSnapshot, referenceDocs, sourceCode)
+		newSrv, err := server.New(newCfg, logs, perfMon, newStore, buildInfo, hardwareSnapshot, referenceDocs, sourceCode, pauseState)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			if storeChanged {

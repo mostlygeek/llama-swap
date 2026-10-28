@@ -57,4 +57,9 @@ type LocalRouter interface {
 	// modelID must be a real (non-alias) config key. Returns false when the
 	// model is not known to this router.
 	ProcessLogger(modelID string) (*logmon.Monitor, bool)
+
+	// SetStartGate installs a check that runs before the router starts any
+	// process. While it returns an error no model starts, and the requests
+	// that needed one get that error.
+	SetStartGate(gate func() error)
 }

@@ -62,6 +62,11 @@ type baseRouter struct {
 
 	runDone chan struct{}
 
+	// startGate, when set, is called before every swap. A non-nil error
+	// refuses the swap: nothing is stopped or started and the swap's waiters
+	// get the error. See SetStartGate.
+	startGate atomic.Pointer[func() error]
+
 	// testProcessed, when non-nil, receives one event after each handlerReq
 	// or swapDone has been fully processed by run(). Tests use it to wait
 	// for run() to reach a deterministic state without sleeping. serveDone
@@ -176,12 +181,31 @@ func (b *baseRouter) ModelState(modelID string) (process.ProcessState, bool) {
 	return p.State(), true
 }
 
+// SetStartGate installs a check that runs before every swap; a nil gate
+// removes it. Swaps are the only way the router starts a process, so a gate
+// that returns an error keeps every model stopped. A swap whose gate check
+// passed before the gate started refusing is cancelled by the next Unload,
+// which joins active swaps before stopping processes.
+func (b *baseRouter) SetStartGate(gate func() error) {
+	if gate == nil {
+		b.startGate.Store(nil)
+		return
+	}
+	b.startGate.Store(&gate)
+}
+
 // StartSwap implements scheduler.Effects, launching the swap goroutine.
 func (b *baseRouter) StartSwap(modelID string, generation uint64, evict []string) func() {
 	ctx, cancel := context.WithCancel(b.shutdownCtx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		if gate := b.startGate.Load(); gate != nil {
+			if err := (*gate)(); err != nil {
+				b.reportSwapDone(ctx, modelID, generation, err)
+				return
+			}
+		}
 		b.doSwap(ctx, modelID, generation, evict)
 	}()
 	return func() {
@@ -280,6 +304,12 @@ func (b *baseRouter) doSwap(ctx context.Context, modelID string, generation uint
 		b.logger.Warnf("%s: starting %s failed: %v", b.name, modelID, err)
 	}
 
+	b.reportSwapDone(ctx, modelID, generation, err)
+}
+
+// reportSwapDone tells the run loop a swap finished, unless the swap was
+// cancelled first.
+func (b *baseRouter) reportSwapDone(ctx context.Context, modelID string, generation uint64, err error) {
 	select {
 	case b.swapDoneCh <- scheduler.SwapDone{ModelID: modelID, Generation: generation, Err: err}:
 	case <-ctx.Done():

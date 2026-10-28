@@ -48,6 +48,8 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
   - `POST /api/models/unload` - manually unload all running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
   - `POST /api/models/unload/:model_id` - unload a specific model
+  - `POST /api/models/pause` - unload all models and reject inference requests until resumed ([#1268](https://github.com/mostlygeek/llama-swap/issues/1268))
+  - `POST /api/models/resume` - accept inference requests again
   - `GET /api/profiles` - list configured profiles and the active selection
   - `PUT /api/profiles/active` - activate a profile or select none
   - `/logs` - remote log monitoring

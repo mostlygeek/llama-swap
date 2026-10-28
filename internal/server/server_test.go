@@ -37,6 +37,7 @@ type stubRouter struct {
 	unloadCalls   atomic.Int32
 	unloadModels  []string
 	unloadTimeout time.Duration
+	onUnload      func()
 	loggers       map[string]*logmon.Monitor
 }
 
@@ -71,7 +72,11 @@ func (s *stubRouter) Unload(timeout time.Duration, models ...string) {
 	s.unloadCalls.Add(1)
 	s.unloadTimeout = timeout
 	s.unloadModels = append([]string(nil), models...)
+	if s.onUnload != nil {
+		s.onUnload()
+	}
 }
+func (s *stubRouter) SetStartGate(func() error) {}
 func (s *stubRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
 	if s.loggers != nil {
 		if lg, ok := s.loggers[modelID]; ok {
@@ -107,6 +112,7 @@ func newTestServerWithConfig(cfg config.Config, local router.LocalRouter, peer r
 		peer:        peer,
 		shutdownCtx: ctx,
 		shutdownFn:  cancel,
+		pause:       NewPauseState(),
 	}
 	s.routes()
 	return s
@@ -183,7 +189,7 @@ func TestServer_New_GroupConfig(t *testing.T) {
 		t.Fatalf("sqlite.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, nil, st, BuildInfo{}, nil, nil, nil)
+	s, err := New(cfg, discard, nil, st, BuildInfo{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("New (group): %v", err)
 	}
@@ -213,7 +219,7 @@ func TestServer_New_MatrixConfig(t *testing.T) {
 		t.Fatalf("sqlite.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, nil, st, BuildInfo{}, nil, nil, nil)
+	s, err := New(cfg, discard, nil, st, BuildInfo{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("New (matrix): %v", err)
 	}
@@ -501,7 +507,7 @@ func TestServer_New_OnStartupProfile(t *testing.T) {
 		t.Fatalf("sqlite.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, nil, st, BuildInfo{}, nil, nil, nil)
+	s, err := New(cfg, discard, nil, st, BuildInfo{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("New (startup profile): %v", err)
 	}

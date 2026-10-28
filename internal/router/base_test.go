@@ -442,6 +442,49 @@ func TestBaseRouter_OnDemandStart(t *testing.T) {
 	}
 }
 
+func TestBaseRouter_StartGateRefusesSwap(t *testing.T) {
+	a := newFakeProcess("a")
+	a.autoReady = true
+
+	b := newTestBase(t, map[string]process.Process{"a": a}, &stubPlanner{})
+	b.SetStartGate(func() error { return swaputil.ErrInferencePaused })
+
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, newRequest("a"))
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d want 503; body=%q", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), swaputil.ErrInferencePaused.Error()) {
+		t.Errorf("body=%q want the gate's error", w.Body.String())
+	}
+	if got := a.runCalls.Load(); got != 0 {
+		t.Errorf("runCalls=%d want 0 while the gate refuses", got)
+	}
+	if got := a.serveCalls.Load(); got != 0 {
+		t.Errorf("serveCalls=%d want 0 while the gate refuses", got)
+	}
+}
+
+func TestBaseRouter_StartGateClearedAllowsSwap(t *testing.T) {
+	a := newFakeProcess("a")
+	a.autoReady = true
+
+	b := newTestBase(t, map[string]process.Process{"a": a}, &stubPlanner{})
+	b.SetStartGate(func() error { return swaputil.ErrInferencePaused })
+	b.SetStartGate(nil)
+
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, newRequest("a"))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if got := a.runCalls.Load(); got != 1 {
+		t.Errorf("runCalls=%d want 1", got)
+	}
+}
+
 func TestBaseRouter_IgnoreWebsocketsRejectsModelUnlessReady(t *testing.T) {
 	for _, state := range []process.ProcessState{process.StateStopped, process.StateStarting} {
 		t.Run(string(state), func(t *testing.T) {

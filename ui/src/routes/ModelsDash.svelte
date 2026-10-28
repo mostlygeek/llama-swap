@@ -5,8 +5,11 @@
   import {
     activeProfile,
     fetchPlaygroundModels,
+    inferencePaused,
     models,
+    pauseInference,
     profiles,
+    resumeInference,
     selectorModels,
     unloadAllModels,
   } from "../stores/api";
@@ -20,10 +23,11 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Switch from "$lib/components/ui/switch/index.js";
   import * as Label from "$lib/components/ui/label/index.js";
-  import { PowerOff, Loader2, ExternalLink, SquareStack } from "@lucide/svelte";
+  import { PowerOff, Loader2, ExternalLink, SquareStack, Pause, Play } from "@lucide/svelte";
   import { modelServerPath } from "../lib/modelUtils";
 
   let unloadingAll = $state(false);
+  let togglingPause = $state(false);
 
   onMount(() => {
     void fetchPlaygroundModels();
@@ -54,6 +58,21 @@
       console.error(e);
     } finally {
       unloadingAll = false;
+    }
+  }
+
+  async function handleTogglePause(): Promise<void> {
+    togglingPause = true;
+    try {
+      if ($inferencePaused) {
+        await resumeInference();
+      } else {
+        await pauseInference();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      togglingPause = false;
     }
   }
 </script>
@@ -175,6 +194,24 @@
           {readyCount} ready
         </span>
         <div class="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={handleTogglePause}
+            disabled={togglingPause}
+            title={$inferencePaused
+              ? "Accept inference requests again"
+              : "Unload all models and reject inference requests until resumed"}
+          >
+            {#if togglingPause}
+              <Loader2 class="size-3.5 animate-spin" />
+            {:else if $inferencePaused}
+              <Play class="size-3.5" />
+            {:else}
+              <Pause class="size-3.5" />
+            {/if}
+            {$inferencePaused ? "Resume" : "Pause"}
+          </Button>
           <Button
             variant="outline"
             size="sm"
