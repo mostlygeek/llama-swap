@@ -113,7 +113,7 @@ models:
       embeddings: true
       context: 8192
   gte-reranker:
-    cmd: llama-server -m gte-reranker-F16.gguf --embedding --pooling rerank --port ${PORT}
+    cmd: llama-server -m gte-reranker-F16.gguf --embedding --pooling rank --port ${PORT}
     capabilities:
       reranker: true
       context: 8192
