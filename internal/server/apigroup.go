@@ -51,8 +51,8 @@ type apiModel struct {
 }
 
 type apiModalities struct {
-	In  []string `json:"in"`
-	Out []string `json:"out"`
+	In  []string `json:"in,omitempty"`
+	Out []string `json:"out,omitempty"`
 }
 
 type apiProfile struct {
