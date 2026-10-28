@@ -769,6 +769,18 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 	})
 
+	t.Run("embeddings", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{Embeddings: true},
+		}))
+		if m.Capabilities == nil || m.Capabilities["embeddings"] != true {
+			t.Error("expected embeddings: true")
+		}
+		if m.Architecture != nil {
+			t.Error("should not have architecture")
+		}
+	})
+
 	t.Run("context", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
 			Capabilities: config.ModelCapConfig{Context: 32768},
