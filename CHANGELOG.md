@@ -1,5 +1,19 @@
 # Changelog
 
+## v268 (Oct 28, 2026)
+
+Many users run llama-swap on their gaming machines. The new Pause and Resume
+functionality unloads and pauses all inference, freeing up system resources for
+fun! Well llama-swap is fun too but you gotta be weird like me to prefer it
+over gaming.
+
+Also a small change to the CUDA 13 container to support Turing architectures,
+where the actual cut off is.
+
+- [PR #1272](https://github.com/mostlygeek/llama-swap/pull/1272) docker/unified: add compute capability 75 to cuda13 amd64 build: adds sm 75 to the default `CMAKE_CUDA_ARCHITECTURES` for the amd64 `unified-cuda13` image, because it only compiled for sm 80 and up so Turing GPUs (Quadro T1000, RTX 20xx, GTX 16xx), which CUDA 13 still supports, failed at runtime with "no kernel image is available for execution on the device"; arm64 is unchanged (#1239) by [@mostlygeek](https://github.com/mostlygeek)
+- [6c855da](https://github.com/mostlygeek/llama-swap/commit/6c855da82bf7adb235bdf2e4abe9278aea703973) README: add turing architecture notes: lists Turing GPUs (RTX 20xx, GTX 16xx, Quadro T-series) as supported by the `unified-cuda13` image by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1273](https://github.com/mostlygeek/llama-swap/pull/1273) server: add pause/resume inference: adds `/api/models/pause` and `/api/models/resume` endpoints and UI controls that unload all local models and reject new requests until resumed, so system resources can be freed while llama-swap keeps running (#1268) by [@mostlygeek](https://github.com/mostlygeek)
+
 ## v267 (Oct 25, 2026)
 
 This is huge release with @JaredHatfield contributing a new capacity based router!
