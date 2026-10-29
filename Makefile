@@ -31,8 +31,8 @@ native: ui src
 	@echo "Building $(APP_NAME) for $(GOOS)-$(GOARCH)..."
 	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-$(GOOS)-$(GOARCH)$(EXE)
 
-# Build binaries for every platform published on the release page
-# (the GOOS/GOARCH matrix in .goreleaser.yaml) plus the test responder
+# Build binaries for every platform this Makefile supports (see the per OS
+# groups below) plus the test responder
 all: mac linux windows freebsd simple-responder
 
 # Clean build directory
@@ -99,14 +99,11 @@ src:
 		':(exclude)*_test.go' ':(exclude)*.test.ts' | tar -cf - --null -T - | tar -xf - -C $(SRC_DIR)
 
 # One target per GOOS/GOARCH pair. CGO is off so these cross compile on any
-# host, same as the release builds in .goreleaser.yaml.
+# host, same as the release builds in .goreleaser.yaml. Intel Mac binaries are
+# not built here; GoReleaser publishes them.
 darwin-arm64: ui src
 	@echo "Building Darwin ARM64 binary..."
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
-
-darwin-amd64: ui src
-	@echo "Building Darwin AMD64 binary..."
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-darwin-amd64
 
 linux-amd64: ui src
 	@echo "Building Linux AMD64 binary..."
@@ -124,8 +121,8 @@ freebsd-amd64: ui src
 	@echo "Building FreeBSD AMD64 binary..."
 	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-freebsd-amd64
 
-# Per OS groups: every architecture llama-swap ships for that OS
-mac: darwin-arm64 darwin-amd64
+# Per OS groups: the architectures built from this Makefile
+mac: darwin-arm64
 linux: linux-arm64 linux-amd64
 windows: windows-amd64
 freebsd: freebsd-amd64
@@ -186,4 +183,4 @@ eval-docs-agent:
 # Phony targets
 .PHONY: all native clean ui src simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
 .PHONY: mac linux windows freebsd
-.PHONY: darwin-arm64 darwin-amd64 linux-arm64 linux-amd64 windows-amd64 freebsd-amd64
+.PHONY: darwin-arm64 linux-arm64 linux-amd64 windows-amd64 freebsd-amd64
