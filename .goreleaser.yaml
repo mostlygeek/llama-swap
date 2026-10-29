@@ -27,6 +27,9 @@ builds:
         goarch: arm64
       - goos: windows
         goarch: arm64
+      # macOS is Apple Silicon only, Intel Macs are not supported
+      - goos: darwin
+        goarch: amd64
 
 archives:
   - id: default
