@@ -49,7 +49,7 @@
   let message = $derived(loadingMessage(model));
 </script>
 
-<div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
+<div class="flex min-h-full flex-col gap-3 p-0 sm:gap-4 sm:p-2">
   {#if !model}
     <Card.Root class="shrink-0 p-6">
       <p class="text-muted-foreground">Model “{modelId}” not found.</p>

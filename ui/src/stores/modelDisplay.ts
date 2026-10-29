@@ -14,9 +14,9 @@ export const groupByClass = persistentStore<boolean>(
 );
 
 // Sections the user collapsed on the Models list, keyed by stable section id
-// (class name, "local", "peers"). Missing/false means expanded; sections
-// default open. Persisted so a collapsed Chat section stays collapsed across
-// route changes and reloads.
+// (class name, "local", "peers", "profiles", "selectors"). Missing/false
+// means expanded; sections default open. Persisted so a collapsed Chat
+// section stays collapsed across route changes and reloads.
 export const collapsedSections = persistentStore<Record<string, boolean>>(
   "models-dash-collapsed-sections",
   {},

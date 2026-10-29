@@ -266,7 +266,7 @@
         {/if}
       </header>
 
-      <main class="min-h-0 flex-1 overflow-auto p-4">
+      <main class="min-h-0 flex-1 overflow-auto p-2 sm:p-4">
         <div class="h-full" class:hidden={$currentRoute !== "/playground"}>
           {#if PlaygroundComponent}
             <PlaygroundComponent />
