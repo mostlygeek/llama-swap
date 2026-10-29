@@ -22,7 +22,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { PowerOff, Loader2, ExternalLink, SquareStack, Pause, Play, ChevronDown, SlidersHorizontal } from "@lucide/svelte";
+  import { PowerOff, Loader2, ExternalLink, Boxes, Pause, Play, ChevronDown, SlidersHorizontal } from "@lucide/svelte";
   import { modelServerPath } from "../lib/modelUtils";
 
   let unloadingAll = $state(false);
@@ -254,9 +254,9 @@
 <div class="flex min-h-full flex-col gap-3 p-0 sm:gap-4 sm:p-2">
   <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
     <Card.Header class="shrink-0 gap-2 border-b px-3 py-2.5 sm:px-4 sm:py-3">
-      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <div class="flex min-w-0 items-center gap-2">
-          <SquareStack class="size-5 shrink-0" />
+          <Boxes class="size-5 shrink-0" />
           <Card.Title class="text-lg">Models</Card.Title>
           <span class="text-muted-foreground truncate text-sm">
             ({visibleModels.length} of {$models.length})
