@@ -75,6 +75,17 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, fmt.Errorf("performance: %w", err)
 	}
 
+	// Apply defaults for metricsPass when the section is missing.
+	if config.MetricsPass.Every == 0 {
+		config.MetricsPass.Every = metricsPassDefaultEvery
+	}
+	if config.MetricsPass.Visibility == "" {
+		config.MetricsPass.Visibility = MetricsPassVisibilityLoaded
+	}
+	if err = config.MetricsPass.Validate(); err != nil {
+		return Config{}, fmt.Errorf("metricsPass: %w", err)
+	}
+
 	if config.StartPort < 1 {
 		return Config{}, fmt.Errorf("startPort must be greater than 1")
 	}
@@ -167,6 +178,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 		if err := modelConfig.Capabilities.Validate(); err != nil {
 			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
+		}
+		if err := validateMetricsPass(modelId, modelConfig.MetricsPass); err != nil {
+			return Config{}, err
 		}
 		if err := validateModelCapacity(modelConfig); err != nil {
 			return Config{}, fmt.Errorf("model %s: %w", modelId, err)

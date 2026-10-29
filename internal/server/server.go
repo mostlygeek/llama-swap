@@ -22,6 +22,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
 	"github.com/mostlygeek/llama-swap/internal/mcptools/sourcecode"
 	"github.com/mostlygeek/llama-swap/internal/perf"
+	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -60,6 +61,11 @@ type Server struct {
 	// discovery. The event dispatcher is process-wide, so a hot config reload
 	// would otherwise leave the retired Server probing alongside the new one.
 	capcompatCancel context.CancelFunc
+
+	// metricsPass scrapes each configured model's upstream metrics on a
+	// background poll and serves them on /metrics. It is nil when no model has
+	// metricsPass.path set, so nothing polls.
+	metricsPass *metricsPassMonitor
 
 	// tools is the MCP tool surface served at /api/mcp. Providers are
 	// aggregated here rather than enumerated in the handler, so a future
@@ -278,6 +284,18 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 	s.capcompat = capcompat.New(st.Cache(), logs.ProxyLogs)
 	s.capcompatCancel = event.On(s.onProcessStateChange)
 
+	// Start the metrics passthrough poller only when at least one model has
+	// metricsPass.path set, so an unset feature polls nothing. The loaded
+	// checker reads the local router's state, so a model is "loaded" only
+	// while its process is StateReady.
+	if anyModelMetricsPass(cfg.Models) {
+		s.metricsPass = newMetricsPassMonitor(cfg, logs.ProxyLogs, func(modelID string) bool {
+			st, ok := local.RunningStatus()[modelID]
+			return ok && st.State == process.StateReady
+		})
+		s.metricsPass.Start()
+	}
+
 	// SysProvider is constructed here because this is where perf and hardware
 	// are in scope; wiring those in later is a change to internal/mcptools.
 	providers := []mcptools.Provider{
@@ -297,6 +315,18 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 	s.routes()
 	s.startPreload()
 	return s, nil
+}
+
+// anyModelMetricsPass reports whether any configured model has
+// metricsPass.path set. It is the gate for starting the poller: with no model
+// opted in, nothing should poll.
+func anyModelMetricsPass(models map[string]config.ModelConfig) bool {
+	for _, mc := range models {
+		if mc.MetricsPass.Enabled() {
+			return true
+		}
+	}
+	return false
 }
 
 // localPeerHandler dispatches a model-routed request to the local or peer
@@ -634,6 +664,9 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 	s.shutdownFn()
 	if s.capcompatCancel != nil {
 		s.capcompatCancel()
+	}
+	if s.metricsPass != nil {
+		s.metricsPass.Stop()
 	}
 
 	var wg sync.WaitGroup

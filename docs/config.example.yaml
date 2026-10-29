@@ -91,6 +91,20 @@ performance:
   # - minimum duration 5s
   every: 15s
 
+# metricsPass: pass a model's upstream Prometheus metrics through llama-swap's
+# /metrics endpoint, namespaced with the model name as a metric-name prefix.
+# Configuring a model's metricsPass.path is what enables passthrough.
+metricsPass:
+  # every: delay between scraping a model's upstream metrics
+  # - default: 15s
+  # - minimum duration 1s
+  every: 15s
+
+  # visibility: when a model's passed metrics are shown on /metrics
+  # - default: loaded (hidden once the model unloads)
+  # - always: keep the last successful scrape even after the model unloads
+  visibility: loaded
+
 # helpagent: the UI's Help page, a chat that answers questions about llama-swap
 # from its documentation, configuration and source code
 helpagent:
@@ -652,6 +666,24 @@ models:
     # - on Windows, calls taskkill to stop the process
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
+
+    # metricsPass: pass this model's upstream Prometheus metrics through
+    # llama-swap's /metrics, namespaced with the model name as a prefix.
+    # - optional; passthrough is enabled only when path is set
+    #
+    # path: upstream endpoint to scrape for this model's metrics
+    # - optional, default: "" (disabled)
+    # - must start with "/", such as /metrics
+    #
+    # every: override the global metricsPass.every for this model's scrape
+    # - optional, default: 0 (use the global cadence)
+    #
+    # With this set, the model's own /metrics are served on
+    # llama-swap's /metrics as docker_llama_<metric>, so a single scrape of
+    # llama-swap covers llama-swap's own stats plus every configured model.
+    metricsPass:
+      path: /metrics
+      every: 30s
 
 # hooks: a dictionary of event triggers and actions
 # - optional, default: empty dictionary
