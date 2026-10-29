@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { Snippet } from "svelte";
   import { link } from "svelte-spa-router";
   import {
     activeProfile,
@@ -14,16 +13,16 @@
     unloadAllModels,
   } from "../stores/api";
   import { loadingMessage, loadingPercent, statusDotColor } from "../stores/modelLoad";
-  import { showUnlistedModels as showUnlisted, showCapabilityTags } from "../stores/modelDisplay";
+  import { showUnlistedModels as showUnlisted, showCapabilityTags, groupByClass, collapsedSections } from "../stores/modelDisplay";
   import { listCapabilityBadges, capabilityBadgeClass } from "../lib/capabilities";
+  import { groupModelsByClass, modelClassLabels } from "../lib/modelClasses";
   import type { Model } from "../lib/types";
   import ModelLoadButton from "../components/ModelLoadButton.svelte";
   import Tag from "../components/Tag.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Switch from "$lib/components/ui/switch/index.js";
-  import * as Label from "$lib/components/ui/label/index.js";
-  import { PowerOff, Loader2, ExternalLink, SquareStack, Pause, Play } from "@lucide/svelte";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { PowerOff, Loader2, ExternalLink, Boxes, Pause, Play, ChevronDown, SlidersHorizontal } from "@lucide/svelte";
   import { modelServerPath } from "../lib/modelUtils";
 
   let unloadingAll = $state(false);
@@ -37,6 +36,16 @@
     $showUnlisted ? $models : $models.filter((m) => !m.unlisted)
   );
   let localModels = $derived(visibleModels.filter((model) => !model.peerID));
+  // Sections in MODEL_CLASS_ORDER with only the non-empty ones rendered, so a
+  // fleet without video models never sees an empty Video card.
+  let localClassGroups = $derived(
+    groupModelsByClass(localModels).filter((group) => group.models.length > 0)
+  );
+  // Unified view: one list, same locale-aware order the sections use, so
+  // switching modes does not reshuffle models that stay visible.
+  let sortedLocalModels = $derived(
+    [...localModels].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+  );
   let peerModels = $derived(visibleModels.filter((model) => model.peerID));
   let selectedProfile = $derived(
     $profiles.find((profile) => profile.id === $activeProfile)
@@ -61,6 +70,34 @@
     }
   }
 
+  function isSectionCollapsed(sectionId: string): boolean {
+    return $collapsedSections[sectionId] === true;
+  }
+
+  // Aggregate of the row status dots: green when any model in the section is
+  // ready, amber while one is starting or stopping, gray when none is active.
+  // Mirrors statusDotColor so a collapsed section reads like its rows.
+  function sectionStatusDotColor(sectionModels: Model[]): string {
+    let transitioning = false;
+    for (const model of sectionModels) {
+      if (model.state === "ready") return "bg-success";
+      if (model.state === "starting" || model.state === "stopping") transitioning = true;
+    }
+    return transitioning ? "bg-warning" : "bg-muted-foreground/40";
+  }
+
+  function toggleSection(sectionId: string): void {
+    collapsedSections.update((sections) => {
+      const next = { ...sections };
+      if (next[sectionId]) {
+        delete next[sectionId];
+      } else {
+        next[sectionId] = true;
+      }
+      return next;
+    });
+  }
+
   async function handleTogglePause(): Promise<void> {
     togglingPause = true;
     try {
@@ -80,7 +117,7 @@
 {#snippet modelRow(model: Model)}
   {@const percent = loadingPercent(model)}
   {@const message = loadingMessage(model)}
-  <div class="hover:bg-muted/50 relative flex items-center gap-3 px-4 py-2.5">
+  <div class="hover:bg-muted/50 relative flex items-center gap-3 px-3 py-2.5 sm:px-4">
     {#if !model.peerID}
       <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(model)}`}></span>
     {/if}
@@ -138,22 +175,34 @@
   </div>
 {/snippet}
 
-{#snippet modelSection(title: string, sectionModels: Model[], headerExtra?: Snippet)}
+{#snippet modelSection(sectionId: string, title: string, sectionModels: Model[])}
+  {@const collapsed = isSectionCollapsed(sectionId)}
+  {@const readyCount = sectionModels.filter((m) => m.state === "ready").length}
   <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-    <Card.Header class="shrink-0 border-b px-4 py-2.5">
-      <div class="flex items-center gap-2">
+    <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
+      <button
+        type="button"
+        class="flex w-full cursor-pointer items-center gap-2"
+        onclick={() => toggleSection(sectionId)}
+        aria-expanded={!collapsed}
+      >
+        <span
+          class={`size-2.5 shrink-0 rounded-full ${sectionStatusDotColor(sectionModels)}`}
+          role="img"
+          aria-label={`${readyCount} of ${sectionModels.length} ready`}
+        ></span>
         <Card.Title class="text-sm">{title}</Card.Title>
         <span class="text-muted-foreground text-xs">{sectionModels.length}</span>
-        {#if headerExtra}
-          <div class="ml-auto flex items-center gap-2">
-            {@render headerExtra()}
-          </div>
-        {/if}
-      </div>
+        <ChevronDown
+          class={`text-muted-foreground ml-auto size-4 shrink-0 transition-transform ${collapsed ? "-rotate-90" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
     </Card.Header>
-    <Card.Content class="p-0">
+    {#if !collapsed}
+      <Card.Content class="p-0">
       {#if sectionModels.length === 0}
-        <div class="text-muted-foreground px-4 py-6 text-center text-sm">
+        <div class="text-muted-foreground px-3 py-6 sm:px-4 text-center text-sm">
           No {title.toLowerCase()} available
         </div>
       {:else}
@@ -164,39 +213,63 @@
         </div>
       {/if}
     </Card.Content>
+    {/if}
   </Card.Root>
 {/snippet}
 
-{#snippet unlistedToggle()}
-  <Label.Root for="show-unlisted-toggle" class="text-sm">
-    Show unlisted models
-  </Label.Root>
-  <Switch.Root
-    id="show-unlisted-toggle"
-    checked={$showUnlisted}
-    onCheckedChange={(v) => showUnlisted.set(v)}
-  />
-  <span class="text-muted-foreground text-xs">
-    {$models.filter((m) => m.unlisted).length} unlisted
-  </span>
+{#snippet displayOptions()}
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger
+      class="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex size-7 items-center justify-center rounded-lg"
+      title="Display options"
+      aria-label="Display options"
+    >
+      <SlidersHorizontal class="size-4" />
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end" class="min-w-[14rem]">
+      <DropdownMenu.Label class="text-xs font-medium uppercase tracking-wider">
+        Display Options
+      </DropdownMenu.Label>
+      <DropdownMenu.CheckboxItem
+        checked={$groupByClass}
+        onCheckedChange={(v) => groupByClass.set(!!v)}
+        closeOnSelect={false}
+      >
+        <span class="flex-1">Categories</span>
+      </DropdownMenu.CheckboxItem>
+      <DropdownMenu.CheckboxItem
+        checked={$showUnlisted}
+        onCheckedChange={(v) => showUnlisted.set(!!v)}
+        closeOnSelect={false}
+      >
+        <span class="flex-1">Show unlisted models</span>
+        <span class="text-muted-foreground text-xs">
+          ({$models.filter((m) => m.unlisted).length})
+        </span>
+      </DropdownMenu.CheckboxItem>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 {/snippet}
 
-<div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
+<div class="flex min-h-full flex-col gap-3 p-0 sm:gap-4 sm:p-2">
   <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-    <Card.Header class="shrink-0 gap-2 border-b px-4 py-3">
-      <div class="flex items-center gap-2">
-        <SquareStack class="size-5" />
-        <Card.Title class="text-lg">Models</Card.Title>
-        <span class="text-muted-foreground text-sm">
-          ({visibleModels.length} of {$models.length})
-        </span>
-        <span class="text-muted-foreground text-xs uppercase tracking-wide">
-          {readyCount} ready
-        </span>
-        <div class="ml-auto flex items-center gap-2">
+    <Card.Header class="shrink-0 gap-2 border-b px-3 py-2.5 sm:px-4 sm:py-3">
+      <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div class="flex min-w-0 items-center gap-2">
+          <Boxes class="size-5 shrink-0" />
+          <Card.Title class="text-lg">Models</Card.Title>
+          <span class="text-muted-foreground truncate text-sm">
+            ({visibleModels.length} of {$models.length})
+          </span>
+          <span class="text-muted-foreground text-xs uppercase tracking-wide">
+            {readyCount} ready
+          </span>
+        </div>
+        <div class="flex items-center gap-2 sm:ml-auto">
           <Button
             variant="outline"
             size="sm"
+            class="flex-1 sm:flex-none"
             onclick={handleTogglePause}
             disabled={togglingPause}
             title={$inferencePaused
@@ -215,6 +288,7 @@
           <Button
             variant="outline"
             size="sm"
+            class="flex-1 sm:flex-none"
             onclick={handleUnloadAll}
             disabled={!anyReady || unloadingAll}
           >
@@ -225,32 +299,45 @@
             {/if}
             Unload All
           </Button>
+          {@render displayOptions()}
         </div>
       </div>
     </Card.Header>
   </Card.Root>
 
-  <div class="flex min-h-0 shrink-0 flex-col gap-4">
+  <div class="flex min-h-0 shrink-0 flex-col gap-3 sm:gap-4">
     {#if $profiles.length > 0}
       <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-        <Card.Header class="shrink-0 border-b px-4 py-2.5">
-          <div class="flex items-center gap-2">
-            <Card.Title class="text-sm">Profiles</Card.Title>
-            {#if selectedProfile}
-              <Tag>{$activeProfile}</Tag>
-              <Tag class="bg-success/15 text-success">Active</Tag>
-            {/if}
-            <span class="text-muted-foreground ml-auto text-xs">
-              {profileMappings.length} {profileMappings.length === 1 ? "mapping" : "mappings"}
+        <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
+          <button
+            type="button"
+            class="flex w-full cursor-pointer flex-col gap-1"
+            onclick={() => toggleSection("profiles")}
+            aria-expanded={!isSectionCollapsed("profiles")}
+          >
+            <span class="flex items-center gap-2">
+              <Card.Title class="text-sm">Profiles</Card.Title>
+              {#if selectedProfile}
+                <Tag>{$activeProfile}</Tag>
+                <Tag class="bg-success/15 text-success">Active</Tag>
+              {/if}
+              <span class="text-muted-foreground ml-auto text-xs">
+                {profileMappings.length} {profileMappings.length === 1 ? "mapping" : "mappings"}
+              </span>
+              <ChevronDown
+                class={`text-muted-foreground size-4 shrink-0 transition-transform ${isSectionCollapsed("profiles") ? "-rotate-90" : ""}`}
+                aria-hidden="true"
+              />
             </span>
-          </div>
-          {#if selectedProfile?.description}
-            <p class="text-muted-foreground text-xs">{selectedProfile.description}</p>
-          {/if}
+            {#if selectedProfile?.description}
+              <span class="text-muted-foreground text-left text-xs">{selectedProfile.description}</span>
+            {/if}
+          </button>
         </Card.Header>
+        {#if !isSectionCollapsed("profiles")}
         <Card.Content class="p-0">
           {#if !selectedProfile}
-            <div class="text-muted-foreground px-4 py-6 text-center text-sm">
+            <div class="text-muted-foreground px-3 py-6 sm:px-4 text-center text-sm">
               No active profile
             </div>
           {:else}
@@ -261,7 +348,7 @@
                     $models.find((m) => m.aliases?.includes(target))
                   : undefined}
                 <div
-                  class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5 has-[>button]:py-1.5"
+                  class="hover:bg-muted/50 flex items-center gap-3 px-3 py-2.5 sm:px-4 has-[>button]:py-1.5"
                 >
                   {#if targetModel && !targetModel.peerID}
                     <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(targetModel)}`} role="img" aria-label={`Model ${targetModel.state}`}></span>
@@ -289,23 +376,34 @@
             </div>
           {/if}
         </Card.Content>
+        {/if}
       </Card.Root>
     {/if}
 
     {#if $selectorModels.length > 0}
       <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-        <Card.Header class="shrink-0 border-b px-4 py-2.5">
-          <div class="flex items-center gap-2">
+        <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
+          <button
+            type="button"
+            class="flex w-full cursor-pointer items-center gap-2"
+            onclick={() => toggleSection("selectors")}
+            aria-expanded={!isSectionCollapsed("selectors")}
+          >
             <Card.Title class="text-sm">Selectors</Card.Title>
             <span class="text-muted-foreground ml-auto text-xs">
               {$selectorModels.length} {$selectorModels.length === 1 ? "selector" : "selectors"}
             </span>
-          </div>
+            <ChevronDown
+              class={`text-muted-foreground size-4 shrink-0 transition-transform ${isSectionCollapsed("selectors") ? "-rotate-90" : ""}`}
+              aria-hidden="true"
+            />
+          </button>
         </Card.Header>
+        {#if !isSectionCollapsed("selectors")}
         <Card.Content class="p-0">
           <div class="divide-y">
             {#each $selectorModels as selector (selector.id)}
-              <div class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5">
+              <div class="hover:bg-muted/50 flex items-center gap-3 px-3 py-2.5 sm:px-4">
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-sm font-medium">
                     {selector.name ? `${selector.id} - ${selector.name}` : selector.id}
@@ -335,10 +433,25 @@
             {/each}
           </div>
         </Card.Content>
+        {/if}
       </Card.Root>
     {/if}
 
-    {@render modelSection("Local models", localModels, unlistedToggle)}
-    {@render modelSection("Peer models", peerModels)}
+    {#if $groupByClass}
+      {#if localClassGroups.length === 0}
+        {@render modelSection("local", "Local models", localModels)}
+      {:else}
+        {#each localClassGroups as group (group.class)}
+          {@render modelSection(
+            group.class,
+            modelClassLabels[group.class],
+            group.models
+          )}
+        {/each}
+      {/if}
+    {:else}
+      {@render modelSection("local", "Local models", sortedLocalModels)}
+    {/if}
+    {@render modelSection("peers", "Peer models", peerModels)}
   </div>
 </div>

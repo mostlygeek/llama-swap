@@ -10,6 +10,7 @@ export const capabilityLabels: Record<string, string> = {
   image_to_image: "Img→Img",
   function_calling: "Function Calling",
   reranker: "Reranker",
+  embeddings: "Embeddings",
 };
 
 export interface CapabilityBadge {
@@ -44,6 +45,7 @@ export const capabilityBadgeClass: Record<string, string> = {
   image_to_image: "bg-orange-500/15 text-orange-700 dark:text-orange-300",
   function_calling: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   reranker: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
+  embeddings: "bg-teal-500/15 text-teal-700 dark:text-teal-300",
   context: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
 };
 
