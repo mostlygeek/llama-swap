@@ -309,20 +309,32 @@
     {#if $profiles.length > 0}
       <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
         <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
-          <div class="flex items-center gap-2">
-            <Card.Title class="text-sm">Profiles</Card.Title>
-            {#if selectedProfile}
-              <Tag>{$activeProfile}</Tag>
-              <Tag class="bg-success/15 text-success">Active</Tag>
-            {/if}
-            <span class="text-muted-foreground ml-auto text-xs">
-              {profileMappings.length} {profileMappings.length === 1 ? "mapping" : "mappings"}
+          <button
+            type="button"
+            class="flex w-full cursor-pointer flex-col gap-1"
+            onclick={() => toggleSection("profiles")}
+            aria-expanded={!isSectionCollapsed("profiles")}
+          >
+            <span class="flex items-center gap-2">
+              <Card.Title class="text-sm">Profiles</Card.Title>
+              {#if selectedProfile}
+                <Tag>{$activeProfile}</Tag>
+                <Tag class="bg-success/15 text-success">Active</Tag>
+              {/if}
+              <span class="text-muted-foreground ml-auto text-xs">
+                {profileMappings.length} {profileMappings.length === 1 ? "mapping" : "mappings"}
+              </span>
+              <ChevronDown
+                class={`text-muted-foreground size-4 shrink-0 transition-transform ${isSectionCollapsed("profiles") ? "-rotate-90" : ""}`}
+                aria-hidden="true"
+              />
             </span>
-          </div>
-          {#if selectedProfile?.description}
-            <p class="text-muted-foreground text-xs">{selectedProfile.description}</p>
-          {/if}
+            {#if selectedProfile?.description}
+              <span class="text-muted-foreground text-left text-xs">{selectedProfile.description}</span>
+            {/if}
+          </button>
         </Card.Header>
+        {#if !isSectionCollapsed("profiles")}
         <Card.Content class="p-0">
           {#if !selectedProfile}
             <div class="text-muted-foreground px-3 py-6 sm:px-4 text-center text-sm">
@@ -364,19 +376,30 @@
             </div>
           {/if}
         </Card.Content>
+        {/if}
       </Card.Root>
     {/if}
 
     {#if $selectorModels.length > 0}
       <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
         <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
-          <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="flex w-full cursor-pointer items-center gap-2"
+            onclick={() => toggleSection("selectors")}
+            aria-expanded={!isSectionCollapsed("selectors")}
+          >
             <Card.Title class="text-sm">Selectors</Card.Title>
             <span class="text-muted-foreground ml-auto text-xs">
               {$selectorModels.length} {$selectorModels.length === 1 ? "selector" : "selectors"}
             </span>
-          </div>
+            <ChevronDown
+              class={`text-muted-foreground size-4 shrink-0 transition-transform ${isSectionCollapsed("selectors") ? "-rotate-90" : ""}`}
+              aria-hidden="true"
+            />
+          </button>
         </Card.Header>
+        {#if !isSectionCollapsed("selectors")}
         <Card.Content class="p-0">
           <div class="divide-y">
             {#each $selectorModels as selector (selector.id)}
@@ -410,6 +433,7 @@
             {/each}
           </div>
         </Card.Content>
+        {/if}
       </Card.Root>
     {/if}
 
