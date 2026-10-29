@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { Snippet } from "svelte";
   import { link } from "svelte-spa-router";
   import {
     activeProfile,
@@ -14,8 +13,9 @@
     unloadAllModels,
   } from "../stores/api";
   import { loadingMessage, loadingPercent, statusDotColor } from "../stores/modelLoad";
-  import { showUnlistedModels as showUnlisted, showCapabilityTags } from "../stores/modelDisplay";
+  import { showUnlistedModels as showUnlisted, showCapabilityTags, groupByClass, collapsedSections } from "../stores/modelDisplay";
   import { listCapabilityBadges, capabilityBadgeClass } from "../lib/capabilities";
+  import { groupModelsByClass, modelClassLabels } from "../lib/modelClasses";
   import type { Model } from "../lib/types";
   import ModelLoadButton from "../components/ModelLoadButton.svelte";
   import Tag from "../components/Tag.svelte";
@@ -23,7 +23,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Switch from "$lib/components/ui/switch/index.js";
   import * as Label from "$lib/components/ui/label/index.js";
-  import { PowerOff, Loader2, ExternalLink, SquareStack, Pause, Play } from "@lucide/svelte";
+  import { PowerOff, Loader2, ExternalLink, SquareStack, Pause, Play, ChevronDown } from "@lucide/svelte";
   import { modelServerPath } from "../lib/modelUtils";
 
   let unloadingAll = $state(false);
@@ -37,6 +37,16 @@
     $showUnlisted ? $models : $models.filter((m) => !m.unlisted)
   );
   let localModels = $derived(visibleModels.filter((model) => !model.peerID));
+  // Sections in MODEL_CLASS_ORDER with only the non-empty ones rendered, so a
+  // fleet without video models never sees an empty Video card.
+  let localClassGroups = $derived(
+    groupModelsByClass(localModels).filter((group) => group.models.length > 0)
+  );
+  // Unified view: one list, same locale-aware order the sections use, so
+  // switching modes does not reshuffle models that stay visible.
+  let sortedLocalModels = $derived(
+    [...localModels].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+  );
   let peerModels = $derived(visibleModels.filter((model) => model.peerID));
   let selectedProfile = $derived(
     $profiles.find((profile) => profile.id === $activeProfile)
@@ -59,6 +69,34 @@
     } finally {
       unloadingAll = false;
     }
+  }
+
+  function isSectionCollapsed(sectionId: string): boolean {
+    return $collapsedSections[sectionId] === true;
+  }
+
+  // Aggregate of the row status dots: green when any model in the section is
+  // ready, amber while one is starting or stopping, gray when none is active.
+  // Mirrors statusDotColor so a collapsed section reads like its rows.
+  function sectionStatusDotColor(sectionModels: Model[]): string {
+    let transitioning = false;
+    for (const model of sectionModels) {
+      if (model.state === "ready") return "bg-success";
+      if (model.state === "starting" || model.state === "stopping") transitioning = true;
+    }
+    return transitioning ? "bg-warning" : "bg-muted-foreground/40";
+  }
+
+  function toggleSection(sectionId: string): void {
+    collapsedSections.update((sections) => {
+      const next = { ...sections };
+      if (next[sectionId]) {
+        delete next[sectionId];
+      } else {
+        next[sectionId] = true;
+      }
+      return next;
+    });
   }
 
   async function handleTogglePause(): Promise<void> {
@@ -138,20 +176,32 @@
   </div>
 {/snippet}
 
-{#snippet modelSection(title: string, sectionModels: Model[], headerExtra?: Snippet)}
+{#snippet modelSection(sectionId: string, title: string, sectionModels: Model[])}
+  {@const collapsed = isSectionCollapsed(sectionId)}
+  {@const readyCount = sectionModels.filter((m) => m.state === "ready").length}
   <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
     <Card.Header class="shrink-0 border-b px-4 py-2.5">
-      <div class="flex items-center gap-2">
+      <button
+        type="button"
+        class="flex w-full cursor-pointer items-center gap-2"
+        onclick={() => toggleSection(sectionId)}
+        aria-expanded={!collapsed}
+      >
+        <span
+          class={`size-2.5 shrink-0 rounded-full ${sectionStatusDotColor(sectionModels)}`}
+          role="img"
+          aria-label={`${readyCount} of ${sectionModels.length} ready`}
+        ></span>
         <Card.Title class="text-sm">{title}</Card.Title>
         <span class="text-muted-foreground text-xs">{sectionModels.length}</span>
-        {#if headerExtra}
-          <div class="ml-auto flex items-center gap-2">
-            {@render headerExtra()}
-          </div>
-        {/if}
-      </div>
+        <ChevronDown
+          class={`text-muted-foreground ml-auto size-4 shrink-0 transition-transform ${collapsed ? "-rotate-90" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
     </Card.Header>
-    <Card.Content class="p-0">
+    {#if !collapsed}
+      <Card.Content class="p-0">
       {#if sectionModels.length === 0}
         <div class="text-muted-foreground px-4 py-6 text-center text-sm">
           No {title.toLowerCase()} available
@@ -164,7 +214,19 @@
         </div>
       {/if}
     </Card.Content>
+    {/if}
   </Card.Root>
+{/snippet}
+
+{#snippet categoriesToggle()}
+  <Label.Root for="group-by-class-toggle" class="text-sm">
+    Categories
+  </Label.Root>
+  <Switch.Root
+    id="group-by-class-toggle"
+    checked={$groupByClass}
+    onCheckedChange={(v) => groupByClass.set(v)}
+  />
 {/snippet}
 
 {#snippet unlistedToggle()}
@@ -193,7 +255,9 @@
         <span class="text-muted-foreground text-xs uppercase tracking-wide">
           {readyCount} ready
         </span>
-        <div class="ml-auto flex items-center gap-2">
+        <div class="ml-auto flex flex-wrap items-center gap-2">
+          {@render categoriesToggle()}
+          {@render unlistedToggle()}
           <Button
             variant="outline"
             size="sm"
@@ -338,7 +402,21 @@
       </Card.Root>
     {/if}
 
-    {@render modelSection("Local models", localModels, unlistedToggle)}
-    {@render modelSection("Peer models", peerModels)}
+    {#if $groupByClass}
+      {#if localClassGroups.length === 0}
+        {@render modelSection("local", "Local models", localModels)}
+      {:else}
+        {#each localClassGroups as group (group.class)}
+          {@render modelSection(
+            group.class,
+            modelClassLabels[group.class],
+            group.models
+          )}
+        {/each}
+      {/if}
+    {:else}
+      {@render modelSection("local", "Local models", sortedLocalModels)}
+    {/if}
+    {@render modelSection("peers", "Peer models", peerModels)}
   </div>
 </div>
