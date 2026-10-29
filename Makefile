@@ -99,8 +99,8 @@ src:
 		':(exclude)*_test.go' ':(exclude)*.test.ts' | tar -cf - --null -T - | tar -xf - -C $(SRC_DIR)
 
 # One target per GOOS/GOARCH pair. CGO is off so these cross compile on any
-# host, same as the release builds in .goreleaser.yaml. macOS is Apple Silicon
-# only; Intel Macs are not supported.
+# host, same as the release builds in .goreleaser.yaml. Intel Mac binaries are
+# not built here; GoReleaser publishes them.
 darwin-arm64: ui src
 	@echo "Building Darwin ARM64 binary..."
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64

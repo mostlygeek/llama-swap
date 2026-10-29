@@ -284,7 +284,7 @@ C:\> winget upgrade llama-swap
 
 ### Pre-built Binaries
 
-Binaries are available on the [release](https://github.com/mostlygeek/llama-swap/releases) page for Linux, macOS (Apple Silicon), Windows and FreeBSD.
+Binaries are available on the [release](https://github.com/mostlygeek/llama-swap/releases) page for Linux, Mac, Windows and FreeBSD.
 
 ### Building from source
 
@@ -294,7 +294,7 @@ Binaries are available on the [release](https://github.com/mostlygeek/llama-swap
    - `make all` builds macOS (arm64), Linux (arm64 + amd64), Windows (amd64) and FreeBSD (amd64) plus the test responder
    - `make mac`, `make linux`, `make windows` or `make freebsd` builds one OS, `make darwin-arm64`, `make linux-amd64`, `make windows-amd64`, ... builds one architecture
    - cross compile a single binary with `make GOOS=linux GOARCH=arm64 native`
-   - macOS is Apple Silicon only, Intel Macs are not supported
+   - Intel Mac binaries are not built here, get them from the release page
 1. look in the `build/` subdirectory for the llama-swap binary
 
 ## Configuration
