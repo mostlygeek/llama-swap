@@ -55,6 +55,8 @@ type ModelEntry struct {
 	MaxModelLen int `json:"max_model_len"`
 	// ContextLength is the same number under the name Halogen also publishes.
 	ContextLength int `json:"context_length"`
+	// MaxContext is the name yamz publishes.
+	MaxContext int `json:"max_context"`
 	// Root and Parent are vLLM's adapter lineage. A LoRA adapter has a
 	// non-empty Parent naming the base model it is served on top of.
 	Root   string `json:"root"`
@@ -79,8 +81,8 @@ type ModelEntry struct {
 // when it reports none.
 //
 // Servers spell it differently, so the names are tried in order of how
-// specific they are: max_model_len, then context_length, then meta.n_ctx.
-// meta.n_ctx_train is deliberately excluded. It is what the model was trained
+// specific they are: max_model_len, then context_length, then max_context,
+// then meta.n_ctx. meta.n_ctx_train is deliberately excluded. It is what the model was trained
 // for, not what the server loaded, and advertising it would promise a window
 // the server will refuse to fill.
 func (e ModelEntry) ContextTokens() int {
@@ -89,6 +91,8 @@ func (e ModelEntry) ContextTokens() int {
 		return e.MaxModelLen
 	case e.ContextLength > 0:
 		return e.ContextLength
+	case e.MaxContext > 0:
+		return e.MaxContext
 	default:
 		return e.Meta.NCtx
 	}

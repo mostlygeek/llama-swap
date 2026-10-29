@@ -52,6 +52,9 @@ import (
 // gufo/v1_models.json is a verbatim capture from a running Gufo instance
 // (AMD Strix Halo gfx1151).
 //
+// yamz/v1_models.json is the /v1/models response of a yamz (kyojin) server, as
+// supplied by a user.
+//
 // v1_models_capture_clef.json and props_capture_clef.json are one capture from
 // a single llama-server (b11429) serving the Clef-Flash decision model. The
 // listing is verbatim; the /props file keeps only modalities,
@@ -347,6 +350,22 @@ func TestCapcompat_DetectGufo(t *testing.T) {
 	require.NoError(t, info.Capabilities.Validate())
 }
 
+func TestCapcompat_DetectYamz(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "yamz", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "qwen-3.8-next-kyojin")
+	require.NoError(t, err)
+
+	assert.Equal(t, "default", info.Upstream)
+	assert.Equal(t, 262144, info.Capabilities.Context)
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools, "yamz exposes nothing about tool support in /v1/models")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
 func TestCapcompat_DetectHalogen(t *testing.T) {
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "halogen", "v1_models.json"),
@@ -429,6 +448,8 @@ func TestCapcompat_ModelEntryContextTokens(t *testing.T) {
 	}{
 		{"max_model_len wins", ModelEntry{MaxModelLen: 1, ContextLength: 2}, 1},
 		{"context_length next", ModelEntry{ContextLength: 2}, 2},
+		{"max_context after context_length", ModelEntry{MaxContext: 4, ContextLength: 2}, 2},
+		{"max_context next", ModelEntry{MaxContext: 4}, 4},
 		{"meta n_ctx last", func() ModelEntry {
 			var e ModelEntry
 			e.Meta.NCtx = 3
