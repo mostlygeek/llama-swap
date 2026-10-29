@@ -656,6 +656,11 @@
                                 "default": false,
                                 "description": "Whether the model supports the /v1/rerank endpoint."
                             },
+                            "embeddings": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Whether the model serves the /v1/embeddings endpoint. Not auto-discovered; set it for embedding models so clients can tell them from chat models."
+                            },
                             "context": {
                                 "type": "integer",
                                 "minimum": 0,
