@@ -21,9 +21,8 @@
   import Tag from "../components/Tag.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Switch from "$lib/components/ui/switch/index.js";
-  import * as Label from "$lib/components/ui/label/index.js";
-  import { PowerOff, Loader2, ExternalLink, SquareStack, Pause, Play, ChevronDown } from "@lucide/svelte";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { PowerOff, Loader2, ExternalLink, SquareStack, Pause, Play, ChevronDown, SlidersHorizontal } from "@lucide/svelte";
   import { modelServerPath } from "../lib/modelUtils";
 
   let unloadingAll = $state(false);
@@ -218,29 +217,38 @@
   </Card.Root>
 {/snippet}
 
-{#snippet categoriesToggle()}
-  <Label.Root for="group-by-class-toggle" class="text-sm">
-    Categories
-  </Label.Root>
-  <Switch.Root
-    id="group-by-class-toggle"
-    checked={$groupByClass}
-    onCheckedChange={(v) => groupByClass.set(v)}
-  />
-{/snippet}
-
-{#snippet unlistedToggle()}
-  <Label.Root for="show-unlisted-toggle" class="text-sm">
-    Show unlisted models
-  </Label.Root>
-  <Switch.Root
-    id="show-unlisted-toggle"
-    checked={$showUnlisted}
-    onCheckedChange={(v) => showUnlisted.set(v)}
-  />
-  <span class="text-muted-foreground text-xs">
-    {$models.filter((m) => m.unlisted).length} unlisted
-  </span>
+{#snippet displayOptions()}
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger
+      class="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex size-7 items-center justify-center rounded-lg"
+      title="Display options"
+      aria-label="Display options"
+    >
+      <SlidersHorizontal class="size-4" />
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end" class="min-w-[14rem]">
+      <DropdownMenu.Label class="text-xs font-medium uppercase tracking-wider">
+        Display Options
+      </DropdownMenu.Label>
+      <DropdownMenu.CheckboxItem
+        checked={$groupByClass}
+        onCheckedChange={(v) => groupByClass.set(!!v)}
+        closeOnSelect={false}
+      >
+        <span class="flex-1">Categories</span>
+      </DropdownMenu.CheckboxItem>
+      <DropdownMenu.CheckboxItem
+        checked={$showUnlisted}
+        onCheckedChange={(v) => showUnlisted.set(!!v)}
+        closeOnSelect={false}
+      >
+        <span class="flex-1">Show unlisted models</span>
+        <span class="text-muted-foreground text-xs">
+          ({$models.filter((m) => m.unlisted).length})
+        </span>
+      </DropdownMenu.CheckboxItem>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 {/snippet}
 
 <div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
@@ -255,9 +263,7 @@
         <span class="text-muted-foreground text-xs uppercase tracking-wide">
           {readyCount} ready
         </span>
-        <div class="ml-auto flex flex-wrap items-center gap-2">
-          {@render categoriesToggle()}
-          {@render unlistedToggle()}
+        <div class="ml-auto flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -289,6 +295,7 @@
             {/if}
             Unload All
           </Button>
+          {@render displayOptions()}
         </div>
       </div>
     </Card.Header>
