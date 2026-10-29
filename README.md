@@ -290,7 +290,11 @@ Binaries are available on the [release](https://github.com/mostlygeek/llama-swap
 
 1. Building requires Go and Node.js (for UI).
 1. `git clone https://github.com/mostlygeek/llama-swap.git`
-1. `make clean` then `make` to build a binary for your current platform (`make all` builds every supported platform)
+1. `make clean` then `make` to build a binary for the platform you are building on
+   - `make all` builds macOS (arm64), Linux (arm64 + amd64) and the test responder
+   - `make mac`, `make linux` or `make windows` builds one platform (Windows is amd64 only)
+   - cross compile with `make GOOS=linux GOARCH=arm64 native`
+   - FreeBSD has no make target, its binaries come from GoReleaser (`goreleaser release`)
 1. look in the `build/` subdirectory for the llama-swap binary
 
 ## Configuration
