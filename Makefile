@@ -14,7 +14,24 @@ endif
 # Capture the current build date in RFC3339 format
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Default target: Builds binaries for both OSX and Linux
+# Target platform for the `native`, `wol-proxy` and `kubeswap` targets.
+# Override on the command line to cross compile: make GOOS=linux GOARCH=arm64
+GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
+GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
+ifeq ($(GOOS),windows)
+EXE = .exe
+else
+EXE =
+endif
+
+LDFLAGS = -X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}
+
+# Default target: build llama-swap for the platform running make
+native: ui src
+	@echo "Building $(APP_NAME) for $(GOOS)-$(GOARCH)..."
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-$(GOOS)-$(GOARCH)$(EXE)
+
+# Build binaries for all supported platforms
 all: mac linux simple-responder
 
 # Clean build directory
@@ -83,23 +100,23 @@ src:
 # Build OSX binary
 mac: ui src
 	@echo "Building Mac binary..."
-	GOOS=darwin GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
+	GOOS=darwin GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
 
 # Build Linux binary
 linux: linux-arm64 linux-amd64
 
 linux-amd64: ui src
 	@echo "Building Linux AMD64 binary..."
-	GOOS=linux GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
+	GOOS=linux GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
 linux-arm64: ui src
 	@echo "Building Linux ARM64 binary..."
-	GOOS=linux GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
+	GOOS=linux GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
 
 # Build Windows binary
 windows: ui src
 	@echo "Building Windows binary..."
-	GOOS=windows GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
+	GOOS=windows GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
 
 # for testing with real external processes
 simple-responder:
@@ -134,8 +151,6 @@ release:
 	echo "tagging new version: $$new_tag"; \
 	git tag "$$new_tag"
 
-GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
-GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
 wol-proxy: $(BUILD_DIR)
 	@echo "Building wol-proxy"
 	go build -o $(BUILD_DIR)/wol-proxy-$(GOOS)-$(GOARCH)-$(shell date +%Y-%m-%d) cmd/wol-proxy/wol-proxy.go
@@ -157,5 +172,5 @@ eval-docs-agent:
 	./evals/docs-agent/run.sh $(EVAL_ARGS)
 
 # Phony targets
-.PHONY: all clean ui src mac windows simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
+.PHONY: all native clean ui src mac windows simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
 .PHONY: linux linux-arm64 linux-amd64
