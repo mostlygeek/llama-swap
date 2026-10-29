@@ -31,8 +31,9 @@ native: ui src
 	@echo "Building $(APP_NAME) for $(GOOS)-$(GOARCH)..."
 	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-$(GOOS)-$(GOARCH)$(EXE)
 
-# Build binaries for all supported platforms
-all: mac linux simple-responder
+# Build binaries for every platform published on the release page
+# (the GOOS/GOARCH matrix in .goreleaser.yaml) plus the test responder
+all: mac linux windows freebsd simple-responder
 
 # Clean build directory
 clean:
@@ -97,26 +98,37 @@ src:
 	git ls-files -z --cached --others --exclude-standard -- '*.go' 'ui/*.ts' 'ui/*.svelte' \
 		':(exclude)*_test.go' ':(exclude)*.test.ts' | tar -cf - --null -T - | tar -xf - -C $(SRC_DIR)
 
-# Build OSX binary
-mac: ui src
-	@echo "Building Mac binary..."
-	GOOS=darwin GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
+# One target per GOOS/GOARCH pair. CGO is off so these cross compile on any
+# host, same as the release builds in .goreleaser.yaml.
+darwin-arm64: ui src
+	@echo "Building Darwin ARM64 binary..."
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
 
-# Build Linux binary
-linux: linux-arm64 linux-amd64
+darwin-amd64: ui src
+	@echo "Building Darwin AMD64 binary..."
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-darwin-amd64
 
 linux-amd64: ui src
 	@echo "Building Linux AMD64 binary..."
-	GOOS=linux GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
 linux-arm64: ui src
 	@echo "Building Linux ARM64 binary..."
-	GOOS=linux GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
 
-# Build Windows binary
-windows: ui src
-	@echo "Building Windows binary..."
-	GOOS=windows GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
+windows-amd64: ui src
+	@echo "Building Windows AMD64 binary..."
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
+
+freebsd-amd64: ui src
+	@echo "Building FreeBSD AMD64 binary..."
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-freebsd-amd64
+
+# Per OS groups: every architecture llama-swap ships for that OS
+mac: darwin-arm64 darwin-amd64
+linux: linux-arm64 linux-amd64
+windows: windows-amd64
+freebsd: freebsd-amd64
 
 # for testing with real external processes
 simple-responder:
@@ -172,5 +184,6 @@ eval-docs-agent:
 	./evals/docs-agent/run.sh $(EVAL_ARGS)
 
 # Phony targets
-.PHONY: all native clean ui src mac windows simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
-.PHONY: linux linux-arm64 linux-amd64
+.PHONY: all native clean ui src simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
+.PHONY: mac linux windows freebsd
+.PHONY: darwin-arm64 darwin-amd64 linux-arm64 linux-amd64 windows-amd64 freebsd-amd64
