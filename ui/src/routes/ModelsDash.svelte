@@ -117,7 +117,7 @@
 {#snippet modelRow(model: Model)}
   {@const percent = loadingPercent(model)}
   {@const message = loadingMessage(model)}
-  <div class="hover:bg-muted/50 relative flex items-center gap-3 px-4 py-2.5">
+  <div class="hover:bg-muted/50 relative flex items-center gap-3 px-3 py-2.5 sm:px-4">
     {#if !model.peerID}
       <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(model)}`}></span>
     {/if}
@@ -179,7 +179,7 @@
   {@const collapsed = isSectionCollapsed(sectionId)}
   {@const readyCount = sectionModels.filter((m) => m.state === "ready").length}
   <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-    <Card.Header class="shrink-0 border-b px-4 py-2.5">
+    <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
       <button
         type="button"
         class="flex w-full cursor-pointer items-center gap-2"
@@ -202,7 +202,7 @@
     {#if !collapsed}
       <Card.Content class="p-0">
       {#if sectionModels.length === 0}
-        <div class="text-muted-foreground px-4 py-6 text-center text-sm">
+        <div class="text-muted-foreground px-3 py-6 sm:px-4 text-center text-sm">
           No {title.toLowerCase()} available
         </div>
       {:else}
@@ -251,9 +251,9 @@
   </DropdownMenu.Root>
 {/snippet}
 
-<div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
+<div class="flex min-h-full flex-col gap-3 p-0 sm:gap-4 sm:p-2">
   <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-    <Card.Header class="shrink-0 gap-2 border-b px-4 py-3">
+    <Card.Header class="shrink-0 gap-2 border-b px-3 py-2.5 sm:px-4 sm:py-3">
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div class="flex min-w-0 items-center gap-2">
           <SquareStack class="size-5 shrink-0" />
@@ -305,10 +305,10 @@
     </Card.Header>
   </Card.Root>
 
-  <div class="flex min-h-0 shrink-0 flex-col gap-4">
+  <div class="flex min-h-0 shrink-0 flex-col gap-3 sm:gap-4">
     {#if $profiles.length > 0}
       <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-        <Card.Header class="shrink-0 border-b px-4 py-2.5">
+        <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
           <div class="flex items-center gap-2">
             <Card.Title class="text-sm">Profiles</Card.Title>
             {#if selectedProfile}
@@ -325,7 +325,7 @@
         </Card.Header>
         <Card.Content class="p-0">
           {#if !selectedProfile}
-            <div class="text-muted-foreground px-4 py-6 text-center text-sm">
+            <div class="text-muted-foreground px-3 py-6 sm:px-4 text-center text-sm">
               No active profile
             </div>
           {:else}
@@ -336,7 +336,7 @@
                     $models.find((m) => m.aliases?.includes(target))
                   : undefined}
                 <div
-                  class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5 has-[>button]:py-1.5"
+                  class="hover:bg-muted/50 flex items-center gap-3 px-3 py-2.5 sm:px-4 has-[>button]:py-1.5"
                 >
                   {#if targetModel && !targetModel.peerID}
                     <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(targetModel)}`} role="img" aria-label={`Model ${targetModel.state}`}></span>
@@ -369,7 +369,7 @@
 
     {#if $selectorModels.length > 0}
       <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-        <Card.Header class="shrink-0 border-b px-4 py-2.5">
+        <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
           <div class="flex items-center gap-2">
             <Card.Title class="text-sm">Selectors</Card.Title>
             <span class="text-muted-foreground ml-auto text-xs">
@@ -380,7 +380,7 @@
         <Card.Content class="p-0">
           <div class="divide-y">
             {#each $selectorModels as selector (selector.id)}
-              <div class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5">
+              <div class="hover:bg-muted/50 flex items-center gap-3 px-3 py-2.5 sm:px-4">
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-sm font-medium">
                     {selector.name ? `${selector.id} - ${selector.name}` : selector.id}
