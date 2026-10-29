@@ -254,19 +254,22 @@
 <div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
   <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
     <Card.Header class="shrink-0 gap-2 border-b px-4 py-3">
-      <div class="flex items-center gap-2">
-        <SquareStack class="size-5" />
-        <Card.Title class="text-lg">Models</Card.Title>
-        <span class="text-muted-foreground text-sm">
-          ({visibleModels.length} of {$models.length})
-        </span>
-        <span class="text-muted-foreground text-xs uppercase tracking-wide">
-          {readyCount} ready
-        </span>
-        <div class="ml-auto flex items-center gap-2">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div class="flex min-w-0 items-center gap-2">
+          <SquareStack class="size-5 shrink-0" />
+          <Card.Title class="text-lg">Models</Card.Title>
+          <span class="text-muted-foreground truncate text-sm">
+            ({visibleModels.length} of {$models.length})
+          </span>
+          <span class="text-muted-foreground text-xs uppercase tracking-wide">
+            {readyCount} ready
+          </span>
+        </div>
+        <div class="flex items-center gap-2 sm:ml-auto">
           <Button
             variant="outline"
             size="sm"
+            class="flex-1 sm:flex-none"
             onclick={handleTogglePause}
             disabled={togglingPause}
             title={$inferencePaused
@@ -285,6 +288,7 @@
           <Button
             variant="outline"
             size="sm"
+            class="flex-1 sm:flex-none"
             onclick={handleUnloadAll}
             disabled={!anyReady || unloadingAll}
           >
