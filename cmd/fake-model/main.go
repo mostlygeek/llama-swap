@@ -327,22 +327,30 @@ func chatHandler(ready <-chan struct{}, prof *profile) http.HandlerFunc {
 			}
 
 			word := loremWords[i%len(loremWords)]
-			chunk := newChunk("fake-model")
 			if i < prof.outputTokens-1 {
-				chunk.Choices = []chunkChoice{{Index: 0, Delta: chunkDelta{Content: word + " "}}}
-			} else {
-				// Final chunk: carry finish_reason plus the usage and timings
-				// blocks so the buffered stream exposes the same metrics as the
-				// non-streaming path.
-				chunk.Choices = []chunkChoice{{Index: 0, Delta: chunkDelta{Content: word}, FinishReason: &stop}}
-				chunk.Usage = prof.usageBlock()
-				chunk.Timings = prof.timingsBlock()
+				word += " "
 			}
+			chunk := newChunk("fake-model")
+			chunk.Choices = []chunkChoice{{Index: 0, Delta: chunkDelta{Content: word}}}
 			if err := writeChunk(w, *chunk); err != nil {
 				return
 			}
 			flusher.Flush()
 		}
+
+		// Final chunk: an empty delta carrying finish_reason plus the usage and
+		// timings blocks, so a buffered stream exposes the same metrics as the
+		// non-streaming path. It is sent after the loop (and not attached to the
+		// last content chunk) so it is still emitted when -tokens 0 streams no
+		// content at all.
+		final := newChunk("fake-model")
+		final.Choices = []chunkChoice{{Index: 0, FinishReason: &stop}}
+		final.Usage = prof.usageBlock()
+		final.Timings = prof.timingsBlock()
+		if err := writeChunk(w, *final); err != nil {
+			return
+		}
+		flusher.Flush()
 
 		fmt.Fprintf(w, "data: [DONE]\n\n")
 		flusher.Flush()
