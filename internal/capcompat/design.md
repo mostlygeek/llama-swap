@@ -56,7 +56,7 @@ field, which every supported server sets to a stable name of its own:
 | --- | --- | --- |
 | `llamacpp` | llama-server, and forks keeping its API | `/v1/models`, `/props` |
 | `halogen` | halogen-flash-server | `/v1/models`, `/health` |
-| *(any other)* | default (vLLM, Gufo, SGLang, etc.) | `/v1/models` |
+| *(any other)* | default (vLLM, Gufo, yamz, SGLang, etc.) | `/v1/models` |
 
 The owner is taken from the first entry that sets one rather than strictly
 `data[0]`, so a listing whose first entry omits it still resolves. Matching
@@ -128,7 +128,7 @@ accepts:
 
 Context is read through `ModelEntry.ContextTokens`, shared by the
 listing-only probers. It tries `max_model_len`, then `context_length`, then
-`meta.n_ctx`, and never `meta.n_ctx_train`: that is what the model was
+`max_context` (yamz), then `meta.n_ctx`, and never `meta.n_ctx_train`: that is what the model was
 trained for, not what the server loaded.
 
 Fixture provenance under `testdata/`:

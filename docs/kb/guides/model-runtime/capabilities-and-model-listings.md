@@ -65,7 +65,9 @@ says.
 
 vLLM is the thin one. Nothing it serves says whether it was started with
 `--enable-auto-tool-choice`, or whether the model takes images, so set those
-by hand on vLLM models.
+by hand on vLLM models. Other servers whose `/v1/models` lists a context
+length, such as Gufo and yamz (`max_context`), are read the same way: context
+length only.
 
 llama-swap picks the right reader from the `owned_by` field in the server's
 own `/v1/models`: `llamacpp`, `vllm` or `halogen`. To check what a server

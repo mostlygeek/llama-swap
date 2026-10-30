@@ -30,10 +30,15 @@ var loremWords = strings.Fields(
 )
 
 var (
-	flagListen = flag.String("listen", "localhost:9898", "listen address")
-	flagTokens = flag.Int("tokens", 1000, "number of tokens to return")
-	flagTPS    = flag.Float64("tps", 75, "tokens per second")
-	flagLoad   = flag.String("load", "0s", "simulated load duration (e.g. 2s, 500ms)")
+	flagListen       = flag.String("listen", "localhost:9898", "listen address")
+	flagTokens       = flag.Int("tokens", 1000, "number of completion (output) tokens to return")
+	flagTPS          = flag.Float64("tps", 75, "completion (output) tokens per second")
+	flagPromptTokens = flag.Int("prompt-tokens", 100, "number of prompt (input) tokens to report")
+	flagCacheTokens  = flag.Int("cache-tokens", 0, "number of cached (cache-read) prompt tokens to report")
+	flagPrefillTPS   = flag.Float64("prefill-tps", 2000, "simulated prompt (prefill) tokens per second")
+	flagDraft        = flag.Int("draft-tokens", 0, "speculative decoding: draft tokens (0 omits the Drafted columns)")
+	flagDraftAcc     = flag.Int("draft-accepted", 0, "speculative decoding: accepted draft tokens")
+	flagLoad         = flag.String("load", "0s", "simulated load duration (e.g. 2s, 500ms)")
 )
 
 type chunkDelta struct {
@@ -47,12 +52,17 @@ type chunkChoice struct {
 	FinishReason *string    `json:"finish_reason"`
 }
 
+// chatChunk is one server-sent event. Usage and Timings are optional and only
+// appear on the final chunk; llama-swap reads them to populate its activity
+// metrics, and OpenAI clients ignore the extra fields.
 type chatChunk struct {
-	ID      string        `json:"id"`
-	Object  string        `json:"object"`
-	Created int64         `json:"created"`
-	Model   string        `json:"model"`
-	Choices []chunkChoice `json:"choices"`
+	ID      string         `json:"id"`
+	Object  string         `json:"object"`
+	Created int64          `json:"created"`
+	Model   string         `json:"model"`
+	Choices []chunkChoice  `json:"choices"`
+	Usage   map[string]any `json:"usage,omitempty"`
+	Timings map[string]any `json:"timings,omitempty"`
 }
 
 type completionMessage struct {
@@ -66,19 +76,14 @@ type completionChoice struct {
 	FinishReason string            `json:"finish_reason"`
 }
 
-type completionUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
 type chatCompletion struct {
 	ID      string             `json:"id"`
 	Object  string             `json:"object"`
 	Created int64              `json:"created"`
 	Model   string             `json:"model"`
 	Choices []completionChoice `json:"choices"`
-	Usage   completionUsage    `json:"usage"`
+	Usage   map[string]any     `json:"usage"`
+	Timings map[string]any     `json:"timings"`
 }
 
 func loremText(n int) string {
@@ -89,26 +94,94 @@ func loremText(n int) string {
 	return strings.Join(words, " ")
 }
 
-func sendChunk(w http.ResponseWriter, content string, finishReason *string) error {
-	chunk := chatChunk{
-		ID:      "chatcmpl-fake",
-		Object:  "chat.completion.chunk",
-		Created: time.Now().Unix(),
-		Model:   "fake-model",
-		Choices: []chunkChoice{
-			{
-				Index:        0,
-				Delta:        chunkDelta{Content: content},
-				FinishReason: finishReason,
-			},
-		},
+// profile is the resolved set of usage and timing values reported on every
+// reply. It is computed once in main and shared by both the streaming and
+// non-streaming handlers.
+type profile struct {
+	promptTokens  int
+	outputTokens  int
+	cacheTokens   int
+	prefillTPS    float64
+	decodeTPS     float64
+	draftTokens   int
+	draftAccepted int
+
+	// Derived, consistent values so the reported rates, durations and token
+	// counts all agree (as a real backend's would).
+	prefillMs    float64
+	decodeMs     float64
+	promptPerSec float64
+	decodePerSec float64
+}
+
+func (p *profile) resolve() {
+	p.prefillMs, p.promptPerSec = 0, 0
+	if p.promptTokens > 0 && p.prefillTPS > 0 {
+		p.prefillMs = float64(p.promptTokens) / p.prefillTPS * 1000
+		p.promptPerSec = p.prefillTPS
 	}
+	p.decodeMs, p.decodePerSec = 0, 0
+	if p.outputTokens > 0 && p.decodeTPS > 0 {
+		p.decodeMs = float64(p.outputTokens) / p.decodeTPS * 1000
+		p.decodePerSec = p.decodeTPS
+	}
+}
+
+// usageBlock is the OpenAI-style usage object: prompt/completion/total tokens
+// plus the cached read count. It is what the client of the completion reads,
+// and it is the fallback llama-swap uses when a timings block is absent.
+func (p *profile) usageBlock() map[string]any {
+	u := map[string]any{
+		"prompt_tokens":     p.promptTokens,
+		"completion_tokens": p.outputTokens,
+		"total_tokens":      p.promptTokens + p.outputTokens,
+	}
+	if p.cacheTokens > 0 {
+		u["prompt_tokens_details"] = map[string]any{"cached_tokens": p.cacheTokens}
+	}
+	return u
+}
+
+// timingsBlock is a llama-server-style timings object. llama-swap treats it as
+// the authoritative source: it overrides prompt/complete counts and supplies the
+// prefill and decode rates, the prefill+decode durations, the cached count, and
+// the speculative-decoding (drafted / draft-accepted) columns.
+func (p *profile) timingsBlock() map[string]any {
+	t := map[string]any{
+		"prompt_n":             p.promptTokens,
+		"predicted_n":          p.outputTokens,
+		"cache_n":              p.cacheTokens,
+		"prompt_per_second":    p.promptPerSec,
+		"predicted_per_second": p.decodePerSec,
+		"prompt_ms":            p.prefillMs,
+		"predicted_ms":         p.decodeMs,
+	}
+	if p.draftTokens > 0 {
+		t["draft_n"] = p.draftTokens
+		t["draft_n_accepted"] = p.draftAccepted
+	}
+	return t
+}
+
+// writeChunk marshals a chunk as a single server-sent event.
+func writeChunk(w http.ResponseWriter, chunk chatChunk) error {
 	data, err := json.Marshal(chunk)
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(w, "data: %s\n\n", data)
 	return err
+}
+
+// newChunk builds a base chunk, reusing the stable id/object/created/model so
+// every event in one reply looks like it came from the same completion.
+func newChunk(model string) *chatChunk {
+	return &chatChunk{
+		ID:      "chatcmpl-fake",
+		Object:  "chat.completion.chunk",
+		Created: time.Now().Unix(),
+		Model:   model,
+	}
 }
 
 // startLoading runs the countdown log and closes ready when loadDur elapses.
@@ -152,7 +225,21 @@ func healthHandler(ready <-chan struct{}) http.HandlerFunc {
 	}
 }
 
-func chatHandler(ready <-chan struct{}) http.HandlerFunc {
+// sleepFor simulates a real backend stage (prefill or decode) for dur, returning
+// early if the client disconnects.
+func sleepFor(ctx context.Context, dur time.Duration) bool {
+	if dur <= 0 {
+		return true
+	}
+	select {
+	case <-time.After(dur):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func chatHandler(ready <-chan struct{}, prof *profile) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -174,20 +261,16 @@ func chatHandler(ready <-chan struct{}) http.HandlerFunc {
 			return
 		}
 
-		tokens := *flagTokens
-		tps := *flagTPS
-		if tps <= 0 {
-			tps = 1
-		}
-
+		// Simulated total time = prefill + decode, so the observed duration lines
+		// up with the prompt_ms + predicted_ms the timings block reports.
 		if !streaming {
-			delay := time.Duration(float64(tokens) / tps * float64(time.Second))
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
+			if !sleepFor(ctx, time.Duration(prof.prefillMs*float64(time.Millisecond))) {
 				return
 			}
-			text := loremText(tokens)
+			if !sleepFor(ctx, time.Duration(prof.decodeMs*float64(time.Millisecond))) {
+				return
+			}
+			text := loremText(prof.outputTokens)
 			resp := chatCompletion{
 				ID:      "chatcmpl-fake",
 				Object:  "chat.completion",
@@ -200,11 +283,8 @@ func chatHandler(ready <-chan struct{}) http.HandlerFunc {
 						FinishReason: "stop",
 					},
 				},
-				Usage: completionUsage{
-					PromptTokens:     0,
-					CompletionTokens: tokens,
-					TotalTokens:      tokens,
-				},
+				Usage:   prof.usageBlock(),
+				Timings: prof.timingsBlock(),
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)
@@ -222,26 +302,24 @@ func chatHandler(ready <-chan struct{}) http.HandlerFunc {
 		}
 
 		// Send role delta first
-		first := chatChunk{
-			ID:      "chatcmpl-fake",
-			Object:  "chat.completion.chunk",
-			Created: time.Now().Unix(),
-			Model:   "fake-model",
-			Choices: []chunkChoice{
-				{Index: 0, Delta: chunkDelta{Role: "assistant"}},
-			},
+		first := newChunk("fake-model")
+		first.Choices = []chunkChoice{{Index: 0, Delta: chunkDelta{Role: "assistant"}}}
+		if err := writeChunk(w, *first); err != nil {
+			return
 		}
-		if data, err := json.Marshal(first); err == nil {
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+		flusher.Flush()
+
+		// Prefill (time-to-first-token) delay, mirroring a real backend.
+		if !sleepFor(ctx, time.Duration(prof.prefillMs*float64(time.Millisecond))) {
+			return
 		}
 
-		interval := time.Duration(float64(time.Second) / tps)
+		interval := time.Duration(float64(time.Second) / prof.decodeTPS)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		stop := "stop"
-		for i := 0; i < tokens; i++ {
+		for i := 0; i < prof.outputTokens; i++ {
 			select {
 			case <-ctx.Done():
 				return
@@ -249,17 +327,30 @@ func chatHandler(ready <-chan struct{}) http.HandlerFunc {
 			}
 
 			word := loremWords[i%len(loremWords)]
-			if i < tokens-1 {
-				if err := sendChunk(w, word+" ", nil); err != nil {
-					return
-				}
-			} else {
-				if err := sendChunk(w, word, &stop); err != nil {
-					return
-				}
+			if i < prof.outputTokens-1 {
+				word += " "
+			}
+			chunk := newChunk("fake-model")
+			chunk.Choices = []chunkChoice{{Index: 0, Delta: chunkDelta{Content: word}}}
+			if err := writeChunk(w, *chunk); err != nil {
+				return
 			}
 			flusher.Flush()
 		}
+
+		// Final chunk: an empty delta carrying finish_reason plus the usage and
+		// timings blocks, so a buffered stream exposes the same metrics as the
+		// non-streaming path. It is sent after the loop (and not attached to the
+		// last content chunk) so it is still emitted when -tokens 0 streams no
+		// content at all.
+		final := newChunk("fake-model")
+		final.Choices = []chunkChoice{{Index: 0, FinishReason: &stop}}
+		final.Usage = prof.usageBlock()
+		final.Timings = prof.timingsBlock()
+		if err := writeChunk(w, *final); err != nil {
+			return
+		}
+		flusher.Flush()
 
 		fmt.Fprintf(w, "data: [DONE]\n\n")
 		flusher.Flush()
@@ -274,11 +365,25 @@ func main() {
 		log.Fatalf("invalid -load value %q: %v", *flagLoad, err)
 	}
 
+	prof := &profile{
+		promptTokens:  *flagPromptTokens,
+		outputTokens:  *flagTokens,
+		cacheTokens:   *flagCacheTokens,
+		prefillTPS:    *flagPrefillTPS,
+		decodeTPS:     *flagTPS,
+		draftTokens:   *flagDraft,
+		draftAccepted: *flagDraftAcc,
+	}
+	if prof.decodeTPS <= 0 {
+		prof.decodeTPS = 1
+	}
+	prof.resolve()
+
 	ready := startLoading(loadDur)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler(ready))
-	mux.HandleFunc("/v1/chat/completions", chatHandler(ready))
+	mux.HandleFunc("/v1/chat/completions", chatHandler(ready, prof))
 
 	srv := &http.Server{
 		Addr:    *flagListen,
@@ -286,8 +391,9 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("listening on %s (tokens=%d tps=%.1f load=%s)",
-			*flagListen, *flagTokens, *flagTPS, loadDur)
+		log.Printf("listening on %s (prompt=%d completion=%d cached=%d prefill=%.0f t/s decode=%.1f t/s draft=%d/%d load=%s)",
+			*flagListen, prof.promptTokens, prof.outputTokens, prof.cacheTokens,
+			prof.prefillTPS, prof.decodeTPS, prof.draftTokens, prof.draftAccepted, loadDur)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}
