@@ -55,6 +55,31 @@
   --success: oklch(0.6 0.118 184.704);
   --warning: oklch(0.769 0.17 70.08);
   --info: oklch(0.552 0.016 285.938);
+
+  /* markdown link color, tuned for light backgrounds (see .prose a) */
+  --link: #0e7490;
+
+  /* highlight.js token palette (light defaults, hand-ported from
+     highlight.js/styles/github.css with the accent tokens darkened for AA on
+     the lightest theme --muted). Override per theme in the [data-theme] blocks.
+     Code blocks keep painting the theme's --muted: no background declarations. */
+  --hljs-foreground: #24292e;
+  --hljs-keyword: #b52736;
+  --hljs-title: #6f42c1;
+  --hljs-attr: #005cc5;
+  --hljs-literal: #005cc5;
+  --hljs-meta: #005cc5;
+  --hljs-number: #005cc5;
+  --hljs-operator: #005cc5;
+  --hljs-variable: #005cc5;
+  --hljs-string: #032f62;
+  --hljs-built_in: #9a4209;
+  --hljs-symbol: #9a4209;
+  --hljs-comment: #58606b;
+  --hljs-tag: #166534;
+  --hljs-bullet: #735c0f;
+  --hljs-addition: #166534;
+  --hljs-deletion: #b52736;
 }
 
 .dark {
@@ -98,6 +123,30 @@
   --success: oklch(0.696 0.17 162.48);
   --warning: oklch(0.769 0.17 70.08);
   --info: oklch(0.705 0.015 286.067);
+
+  /* markdown links: keep the dark accent as the link color */
+  --link: var(--primary);
+
+  /* highlight.js token palette (dark, hand-ported from
+     highlight.js/styles/github-dark.css; comment lightened for AA on the themed
+     --muted code backgrounds) */
+  --hljs-foreground: #c9d1d9;
+  --hljs-keyword: #ff7b72;
+  --hljs-title: #d2a8ff;
+  --hljs-attr: #79c0ff;
+  --hljs-literal: #79c0ff;
+  --hljs-meta: #79c0ff;
+  --hljs-number: #79c0ff;
+  --hljs-operator: #79c0ff;
+  --hljs-variable: #79c0ff;
+  --hljs-string: #a5d6ff;
+  --hljs-built_in: #ffa657;
+  --hljs-symbol: #ffa657;
+  --hljs-comment: #a1aab4;
+  --hljs-tag: #7ee787;
+  --hljs-bullet: #f2cc60;
+  --hljs-addition: #aff5b4;
+  --hljs-deletion: #ffdcd7;
 }
 
 /* ---------------------------------------------------------------------------
@@ -105,7 +154,9 @@
    ([data-theme="x"].dark). They re-tint the shadcn palette so background,
    text, headings, links/highlights (primary/accent), borders and sidebar all
    follow the scheme. To add a theme: register it in stores/theme.ts and add a
-   matching pair of blocks below.
+   matching pair of blocks below. Every block defines --link (readable on that
+   block's background); the --hljs-* token colors inherit from :root/.dark
+   unless a theme's --muted code background needs an override.
    --------------------------------------------------------------------------- */
 
 /* Ocean — blue */
@@ -130,6 +181,7 @@
   --border: oklch(0.9 0.02 240);
   --input: oklch(0.9 0.02 240);
   --ring: #3b82f6;
+  --link: #2563eb;
 
   --sidebar: oklch(0.97 0.015 240);
   --sidebar-foreground: oklch(0.21 0.04 256);
@@ -162,6 +214,7 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: #60a5fa;
+  --link: var(--primary);
 
   --sidebar: oklch(0.24 0.035 256);
   --sidebar-foreground: oklch(0.97 0.01 240);
@@ -195,6 +248,7 @@
   --border: oklch(0.9 0.02 300);
   --input: oklch(0.9 0.02 300);
   --ring: #8b5cf6;
+  --link: #7c3aed;
 
   --sidebar: oklch(0.97 0.015 300);
   --sidebar-foreground: oklch(0.22 0.04 300);
@@ -227,6 +281,7 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: #a78bfa;
+  --link: var(--primary);
 
   --sidebar: oklch(0.25 0.035 300);
   --sidebar-foreground: oklch(0.97 0.01 300);
@@ -260,6 +315,7 @@
   --border: oklch(0.9 0.02 165);
   --input: oklch(0.9 0.02 165);
   --ring: #10b981;
+  --link: #047857;
 
   --sidebar: oklch(0.97 0.015 165);
   --sidebar-foreground: oklch(0.22 0.04 165);
@@ -292,6 +348,7 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: #34d399;
+  --link: var(--primary);
 
   --sidebar: oklch(0.24 0.035 165);
   --sidebar-foreground: oklch(0.97 0.01 165);
@@ -325,6 +382,7 @@
   --border: oklch(0.9 0.02 12);
   --input: oklch(0.9 0.02 12);
   --ring: #f43f5e;
+  --link: #be123c;
 
   --sidebar: oklch(0.97 0.015 12);
   --sidebar-foreground: oklch(0.22 0.04 12);
@@ -357,6 +415,7 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: #fb7185;
+  --link: var(--primary);
 
   --sidebar: oklch(0.24 0.035 12);
   --sidebar-foreground: oklch(0.97 0.01 12);
@@ -390,6 +449,7 @@
   --border: oklch(0.9 0.03 80);
   --input: oklch(0.9 0.03 80);
   --ring: #f59e0b;
+  --link: #b45309;
 
   --sidebar: oklch(0.97 0.025 80);
   --sidebar-foreground: oklch(0.24 0.04 70);
@@ -422,6 +482,7 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: #fbbf24;
+  --link: var(--primary);
 
   --sidebar: oklch(0.25 0.03 60);
   --sidebar-foreground: oklch(0.97 0.02 80);
@@ -455,6 +516,7 @@
   --border: oklch(0.89 0.01 256);
   --input: oklch(0.89 0.01 256);
   --ring: #64748b;
+  --link: #475569;
 
   --sidebar: oklch(0.96 0.006 256);
   --sidebar-foreground: oklch(0.21 0.02 256);
@@ -487,6 +549,7 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: #94a3b8;
+  --link: var(--primary);
 
   --sidebar: oklch(0.25 0.018 256);
   --sidebar-foreground: oklch(0.96 0.005 256);
@@ -520,6 +583,7 @@
   --border: oklch(0.9 0.03 45);
   --input: oklch(0.9 0.03 45);
   --ring: #f97316;
+  --link: #c2410c;
 
   --sidebar: oklch(0.97 0.03 45);
   --sidebar-foreground: oklch(0.26 0.06 35);
@@ -552,6 +616,7 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: #fb923c;
+  --link: var(--primary);
 
   --sidebar: oklch(0.25 0.05 320);
   --sidebar-foreground: oklch(0.96 0.02 50);
@@ -585,6 +650,7 @@
   --border: #b8d8bb;
   --input: #b8d8bb;
   --ring: #168f3f;
+  --link: #166534;
 
   --sidebar: #dcefdd;
   --sidebar-foreground: #14401f;
@@ -617,6 +683,7 @@
   --border: #1f4d33;
   --input: #1f4d33;
   --ring: #00ff66;
+  --link: var(--primary);
 
   --sidebar: #0a0f0a;
   --sidebar-foreground: #33ff66;
@@ -642,7 +709,7 @@
 
   --secondary: #c4c4cc;
   --secondary-foreground: #1a1a4a;
-  --muted: #c4c4cc;
+  --muted: #dcdce4;
   --muted-foreground: #4a4a6a;
   --accent: #bcdcdc;
   --accent-foreground: #003a3a;
@@ -650,6 +717,7 @@
   --border: #a8a8b4;
   --input: #a8a8b4;
   --ring: #007a7a;
+  --link: #005a5a;
 
   --sidebar: #c8c8d0;
   --sidebar-foreground: #161616;
@@ -682,6 +750,7 @@
   --border: #00aaaa;
   --input: #1818b4;
   --ring: #ffff55;
+  --link: var(--primary);
 
   --sidebar: #00008f;
   --sidebar-foreground: #d4d4d4;
@@ -696,11 +765,11 @@
 /* Solarized — Ethan Schoonover's classic palette */
 [data-theme="solarized"] {
   --background: #fdf6e3;
-  --foreground: #657b83;
+  --foreground: #526870;
   --card: #fdf6e3;
-  --card-foreground: #657b83;
+  --card-foreground: #526870;
   --popover: #fdf6e3;
-  --popover-foreground: #657b83;
+  --popover-foreground: #526870;
 
   --primary: #268bd2;
   --primary-foreground: #fdf6e3;
@@ -715,9 +784,10 @@
   --border: #ddd6c1;
   --input: #ddd6c1;
   --ring: #268bd2;
+  --link: #1a6596;
 
   --sidebar: #eee8d5;
-  --sidebar-foreground: #657b83;
+  --sidebar-foreground: #526870;
   --sidebar-primary: #268bd2;
   --sidebar-primary-foreground: #fdf6e3;
   --sidebar-accent: #e3ddc8;
@@ -747,6 +817,7 @@
   --border: #0f4a59;
   --input: #0f4a59;
   --ring: #268bd2;
+  --link: var(--primary);
 
   --sidebar: #073642;
   --sidebar-foreground: #839496;
@@ -839,6 +910,113 @@
   table td {
     @apply p-2;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   highlight.js token colors for .prose markdown surfaces (playground chat,
+   Help/docs, model detail). Palettes live in the --hljs-* custom properties
+   above (light in :root, dark in .dark, per-theme overrides in the
+   [data-theme] blocks), so every theme controls them without a mode-swapped
+   third-party stylesheet. Background declarations are deliberately absent: code
+   blocks keep painting the theme's --muted. Layout rules ported 1:1 from
+   highlight.js/styles/github.css.
+   --------------------------------------------------------------------------- */
+pre code.hljs {
+  display: block;
+  overflow-x: auto;
+  padding: 1em;
+}
+code.hljs {
+  padding: 3px 5px;
+}
+
+.prose .hljs {
+  color: var(--hljs-foreground);
+}
+.prose .hljs-doctag,
+.prose .hljs-keyword,
+.prose .hljs-meta .hljs-keyword,
+.prose .hljs-template-tag,
+.prose .hljs-template-variable,
+.prose .hljs-type,
+.prose .hljs-variable.language_ {
+  color: var(--hljs-keyword);
+}
+.prose .hljs-title,
+.prose .hljs-title.class_,
+.prose .hljs-title.class_.inherited__,
+.prose .hljs-title.function_ {
+  color: var(--hljs-title);
+}
+.prose .hljs-attr,
+.prose .hljs-attribute {
+  color: var(--hljs-attr);
+}
+.prose .hljs-literal {
+  color: var(--hljs-literal);
+}
+.prose .hljs-meta {
+  color: var(--hljs-meta);
+}
+.prose .hljs-number {
+  color: var(--hljs-number);
+}
+.prose .hljs-operator {
+  color: var(--hljs-operator);
+}
+.prose .hljs-variable {
+  color: var(--hljs-variable);
+}
+.prose .hljs-selector-attr,
+.prose .hljs-selector-class,
+.prose .hljs-selector-id {
+  color: var(--hljs-attr);
+}
+.prose .hljs-regexp,
+.prose .hljs-string,
+.prose .hljs-meta .hljs-string {
+  color: var(--hljs-string);
+}
+.prose .hljs-built_in {
+  color: var(--hljs-built_in);
+}
+.prose .hljs-symbol {
+  color: var(--hljs-symbol);
+}
+.prose .hljs-comment,
+.prose .hljs-code,
+.prose .hljs-formula {
+  color: var(--hljs-comment);
+}
+.prose .hljs-name,
+.prose .hljs-quote,
+.prose .hljs-selector-tag,
+.prose .hljs-selector-pseudo {
+  color: var(--hljs-tag);
+}
+.prose .hljs-subst,
+.prose .hljs-emphasis,
+.prose .hljs-strong {
+  color: var(--hljs-foreground);
+}
+.prose .hljs-emphasis {
+  font-style: italic;
+}
+.prose .hljs-strong {
+  font-weight: bold;
+}
+.prose .hljs-section {
+  color: var(--hljs-attr);
+  font-weight: bold;
+}
+.prose .hljs-bullet {
+  color: var(--hljs-bullet);
+}
+.prose .hljs-addition {
+  color: var(--hljs-addition);
+}
+.prose .hljs-deletion {
+  color: var(--hljs-deletion);
 }
 
 @utility activity-link {
