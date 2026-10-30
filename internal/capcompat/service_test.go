@@ -148,7 +148,7 @@ func TestCapcompat_RefreshRetriesUntilUpstreamAnswers(t *testing.T) {
 	require.NoError(t, err)
 	svc := New(newCountingCache(), nil)
 
-	require.NoError(t, svc.Refresh(context.Background(), "k", NewClient(base, config.TimeoutsConfig{}), "model-a"))
+	require.NoError(t, svc.Refresh(context.Background(), "k", NewClient(base, config.TimeoutsConfig{}, nil), "model-a"))
 
 	caps, found := svc.Lookup(context.Background(), "k")
 	require.True(t, found)
@@ -244,12 +244,12 @@ func TestCapcompat_RefreshSkipsWhenAlreadyInFlight(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.Refresh(context.Background(), "k", NewClient(base, config.TimeoutsConfig{}), "model-a")
+		done <- svc.Refresh(context.Background(), "k", NewClient(base, config.TimeoutsConfig{}, nil), "model-a")
 	}()
 	<-entered
 
 	// A model flapping ready/stopped must not stack probes on the same key.
-	require.NoError(t, svc.Refresh(context.Background(), "k", NewClient(base, config.TimeoutsConfig{}), "model-a"))
+	require.NoError(t, svc.Refresh(context.Background(), "k", NewClient(base, config.TimeoutsConfig{}, nil), "model-a"))
 
 	close(release)
 	require.NoError(t, <-done)

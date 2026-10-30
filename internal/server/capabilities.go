@@ -43,7 +43,7 @@ func (s *Server) refreshCapabilities(modelID string, mc config.ModelConfig) {
 		return
 	}
 
-	client := capcompat.NewClient(base, mc.Timeouts)
+	client := capcompat.NewClient(base, mc.Timeouts, s.logs.ProxyLogs)
 	key := capcompat.LocalKey(modelID, mc)
 	name := capcompat.UpstreamModelName(modelID, mc)
 

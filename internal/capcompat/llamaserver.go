@@ -5,39 +5,13 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tidwall/gjson"
+
 	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 // llamaServerOwner is what llama-server and its forks report in /v1/models.
 const llamaServerOwner = "llamacpp"
-
-// propsResponse is the subset of llama-server's GET /props that describes what
-// the loaded model can do.
-type propsResponse struct {
-	// DefaultGenerationSettings.NCtx is the context one generation slot is
-	// configured with, which is the window a single request is bounded by
-	// and so the number a client needs.
-	//
-	// meta.n_ctx in /v1/models is the context the model was loaded with,
-	// across all slots. llama.cpp sizes a slot with n_ctx_slot(), which an
-	// operator can cap independently with --kv-unified-per-slot, so the two
-	// agree on a single-slot server and the listing can be the larger of the
-	// two otherwise. Reading the listing would then advertise a window no
-	// one request can fill.
-	DefaultGenerationSettings struct {
-		NCtx int `json:"n_ctx"`
-	} `json:"default_generation_settings"`
-
-	// Modalities is decoded as a map so a modality added upstream does not
-	// break parsing. Known keys are mapped below; the rest are ignored.
-	Modalities map[string]bool `json:"modalities"`
-
-	// ChatTemplateCaps is what llama.cpp detected about the model's chat
-	// template. Older builds omit it entirely.
-	ChatTemplateCaps map[string]bool `json:"chat_template_caps"`
-
-	ChatTemplate string `json:"chat_template"`
-}
 
 // modalityForProp maps a llama-server modality key onto a llama-swap input
 // modality. Text is always supported and is added unconditionally.
@@ -52,9 +26,24 @@ var modalityForProp = map[string]string{
 	"video":  "video",
 }
 
+// warnFunc logs a warning about a /props field that could not be read as
+// expected. The probe continues with the field's zero value.
+type warnFunc func(format string, args ...any)
+
+// noWarn is the warnFunc for a body no field can be read from; one warning
+// about the body explains every field that then reads as its zero value.
+var noWarn warnFunc = func(string, ...any) {}
+
 // llamaServerProber reads capabilities from llama-server's /props endpoint.
 // It also covers the forks that keep llama.cpp's server API, such as
 // ik_llama.cpp, because they report the same owner.
+//
+// Fields are read out of the response one at a time with gjson rather than
+// unmarshalling the whole body: builds add fields of mixed types, such as
+// b12017's chat_template_caps carrying a list alongside its booleans, and
+// one unexpected field must not take the rest of the probe down. A field
+// that is missing or of the wrong type logs a WARN and reads as its zero
+// value, so the probe continues with what it can work out.
 type llamaServerProber struct{}
 
 var _ Prober = llamaServerProber{}
@@ -66,9 +55,21 @@ func (llamaServerProber) Matches(models ModelsResponse) bool {
 }
 
 func (p llamaServerProber) Probe(ctx context.Context, c *Client, models ModelsResponse, modelName string) (config.ModelCapConfig, error) {
-	var props propsResponse
-	if err := c.GetJSON(ctx, "/props", &props); err != nil {
+	body, err := c.GetBody(ctx, "/props")
+	if err != nil {
 		return config.ModelCapConfig{}, err
+	}
+
+	props := gjson.ParseBytes(body)
+	warn := noWarn
+	if gjson.ValidBytes(body) {
+		warn = c.Warnf
+	} else {
+		// gjson can still read fields that appear before a truncation, so
+		// the body must not answer any field at all: the warning explains
+		// every field that then reads as its zero value.
+		c.Warnf("capcompat: /props is not valid JSON, continuing with defaults")
+		props = gjson.Result{}
 	}
 
 	caps := config.ModelCapConfig{
@@ -86,9 +87,16 @@ func (p llamaServerProber) Probe(ctx context.Context, c *Client, models ModelsRe
 		caps.Out = []string{"decisions"}
 	}
 
-	for prop, modality := range modalityForProp {
-		if props.Modalities[prop] {
-			caps.In = append(caps.In, modality)
+	switch m := props.Get("modalities"); {
+	case !m.Exists():
+		warn("capcompat: /props has no modalities, assuming text only")
+	case !m.IsObject():
+		warn("capcompat: /props modalities is not an object, ignoring it")
+	default:
+		for prop, modality := range modalityForProp {
+			if propBool(props, "modalities."+prop, warn) {
+				caps.In = append(caps.In, modality)
+			}
 		}
 	}
 	// Map iteration order is random, so keep the list stable for callers and
@@ -97,13 +105,45 @@ func (p llamaServerProber) Probe(ctx context.Context, c *Client, models ModelsRe
 
 	// Tool calls are text, so a model that generates none cannot make them,
 	// whatever its chat template reports.
-	caps.Tools = slices.Contains(caps.Out, "text") && p.supportsTools(props)
-	caps.Context = props.DefaultGenerationSettings.NCtx
+	caps.Tools = slices.Contains(caps.Out, "text") && p.supportsTools(props, warn)
 
 	// reranker is not reported by /props. A reranking server answers
 	// /v1/rerank, but probing it would mean sending a real request, so it
 	// stays a manual setting.
+	caps.Context = propInt(props, "default_generation_settings.n_ctx", warn)
+
 	return caps, nil
+}
+
+// propBool reads a boolean field. A missing field reads as false: builds
+// report different subsets of the keys, such as an older build that has no
+// video key. A field that is present but not a boolean logs a WARN and also
+// reads as false, so one odd value cannot take the rest of the probe down.
+func propBool(props gjson.Result, path string, warn warnFunc) bool {
+	v := props.Get(path)
+	if !v.Exists() {
+		return false
+	}
+	if b, ok := v.Value().(bool); ok {
+		return b
+	}
+	warn("capcompat: /props %s is not a boolean, ignoring it", path)
+	return false
+}
+
+// propInt reads an integer field. A missing or non-numeric field logs a WARN
+// and reads as 0, so the value falls back to what the model's config sets.
+func propInt(props gjson.Result, path string, warn warnFunc) int {
+	v := props.Get(path)
+	if !v.Exists() {
+		warn("capcompat: /props has no %s, ignoring it", path)
+		return 0
+	}
+	if n, ok := v.Value().(float64); ok {
+		return int(n)
+	}
+	warn("capcompat: /props %s is not a number, ignoring it", path)
+	return 0
 }
 
 // supportsTools reports whether the loaded chat template can carry tools.
@@ -112,16 +152,29 @@ func (p llamaServerProber) Probe(ctx context.Context, c *Client, models ModelsRe
 // the template renders a tool list and supports_tool_calls means it can read
 // tool calls back. Both are required for a usable round trip, and requiring
 // both also guards against the C++ struct's true defaults leaking through on
-// a template llama.cpp could not fully inspect.
+// a template llama.cpp could not fully inspect. A caps value that is not a
+// boolean, such as the newer builds' reasoning_effort_levels list, is ignored
+// with a WARN rather than failing the whole probe.
 //
-// Builds predating chat_template_caps omit the object. There the only signal
-// left is the template itself, which is not conclusive, so this falls back to
-// looking for a tools loop in the template source.
-func (llamaServerProber) supportsTools(props propsResponse) bool {
-	if len(props.ChatTemplateCaps) > 0 {
-		return props.ChatTemplateCaps["supports_tools"] && props.ChatTemplateCaps["supports_tool_calls"]
+// The template source itself is never a signal: it can mention tools the
+// server cannot actually use. Builds predating chat_template_caps therefore
+// simply report no tool support.
+func (llamaServerProber) supportsTools(props gjson.Result, warn warnFunc) bool {
+	caps := props.Get("chat_template_caps")
+	if caps.Exists() {
+		switch v := caps.Value().(type) {
+		case map[string]any:
+			// An empty object reports no tool support, as it did when the
+			// caps were decoded as a map.
+			if len(v) > 0 {
+				return propBool(props, "chat_template_caps.supports_tools", warn) &&
+					propBool(props, "chat_template_caps.supports_tool_calls", warn)
+			}
+		default:
+			warn("capcompat: /props chat_template_caps is not an object, ignoring it")
+		}
 	}
-	return strings.Contains(props.ChatTemplate, "tools")
+	return false
 }
 
 // modalityOrder fixes the order modalities are listed in, so a discovered
