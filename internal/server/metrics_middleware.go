@@ -56,8 +56,11 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 			var reqHeaders map[string]string
 			if mm.enableCaptures {
 				if cf&captureReqBody != 0 && r.Body != nil {
-					if buffered, err := io.ReadAll(r.Body); err == nil {
-						reqBody = buffered
+					// FetchContext may have already buffered the body. Copy uses
+					// its WriterTo method instead of growing a second read buffer.
+					var buffered bytes.Buffer
+					if _, err := io.Copy(&buffered, r.Body); err == nil {
+						reqBody = buffered.Bytes()
 						r.Body.Close()
 						r.Body = io.NopCloser(bytes.NewReader(reqBody))
 					}

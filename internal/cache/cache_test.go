@@ -128,3 +128,63 @@ func TestCache_Concurrent(t *testing.T) {
 		wg.Wait()
 	})
 }
+
+func TestCache_RetainedStorage(t *testing.T) {
+	t.Run("charges capacity and evicts by retained storage", func(t *testing.T) {
+		c := New(64)
+		for id := 1; id <= 2; id++ {
+			require.NoError(t, c.Add(id, make([]byte, 1, 32)))
+		}
+		require.Equal(t, 64, c.Size())
+		require.NoError(t, c.Add(3, make([]byte, 1, 32)))
+		require.False(t, c.Has(1))
+		require.True(t, c.Has(2))
+		require.True(t, c.Has(3))
+		require.Equal(t, 64, c.Size())
+		require.NoError(t, c.Add(2, make([]byte, 1, 16)))
+		require.Equal(t, 48, c.Size())
+		c.Clear()
+		require.Zero(t, c.Size())
+	})
+	t.Run("compacting an overwrite preserves other entries and FIFO", func(t *testing.T) {
+		c := New(64)
+		require.NoError(t, c.Add(1, make([]byte, 1, 32)))
+		require.NoError(t, c.Add(2, make([]byte, 1, 32)))
+		data := make([]byte, 1, 128)
+		data[0] = 42
+		require.NoError(t, c.Add(1, data))
+		require.Equal(t, 33, c.Size())
+		require.True(t, c.Has(2))
+		require.ErrorIs(t, c.Add(1, make([]byte, 65)), ErrExceedsMaxSize)
+		require.Equal(t, 33, c.Size())
+		require.True(t, c.Has(1))
+		require.True(t, c.Has(2))
+		data[0] = 99
+		stored, err := c.Get(1)
+		require.NoError(t, err)
+		require.Equal(t, []byte{42}, stored)
+		require.NoError(t, c.Add(3, make([]byte, 32)))
+		require.False(t, c.Has(2))
+		require.True(t, c.Has(1))
+		require.True(t, c.Has(3))
+		require.Equal(t, 33, c.Size())
+	})
+	t.Run("compacts an oversized allocation when the payload fits", func(t *testing.T) {
+		c := New(64)
+		data := make([]byte, 1, 128)
+		data[0] = 42
+		require.NoError(t, c.Add(1, data))
+		stored, err := c.Get(1)
+		require.NoError(t, err)
+		require.Equal(t, []byte{42}, stored)
+		require.Equal(t, 1, cap(stored))
+		require.Equal(t, 1, c.Size())
+		data[0] = 99
+		require.Equal(t, byte(42), stored[0])
+		require.ErrorIs(t, c.Add(1, make([]byte, 65)), ErrExceedsMaxSize)
+		got, err := c.Get(1)
+		require.NoError(t, err)
+		require.Equal(t, []byte{42}, got)
+		require.Equal(t, 1, c.Size())
+	})
+}
