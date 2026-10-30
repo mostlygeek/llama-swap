@@ -336,9 +336,12 @@
     }
     // Let Svelte render the hidden columns out of the DOM before rasterizing.
     await tick();
-    const blob = await elementToPngBlob(tableEl);
-    for (const id of restore) table.getColumn(id)?.toggleVisibility(true);
-    return blob;
+    try {
+      return await elementToPngBlob(tableEl);
+    } finally {
+      // Restore on failure too, or a rejected capture leaves the columns hidden.
+      for (const id of restore) table.getColumn(id)?.toggleVisibility(true);
+    }
   }
 
   function setInflightOpen(open: boolean) {

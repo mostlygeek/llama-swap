@@ -75,7 +75,9 @@ export function downloadPngBlob(blob: Blob, filename: string): void {
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(url);
+  // The download is asynchronous; revoking the URL in the same task can cancel
+  // it, so release it a moment later.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** Convenience: rasterize an element and download it as a PNG. */
