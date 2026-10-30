@@ -566,6 +566,13 @@ models:
     #   no effect for this model
     disableKeepAlives: false
 
+    # Optional GJSON paths for backend-specific token rates. Paths start at the
+    # response root (or each SSE data object). These Hipfire examples override
+    # built-in detection only when a non-negative numeric value is present.
+    # metrics:
+    #   promptPerSecond: timings.prefill_tok_s
+    #   tokensPerSecond: timings.decode_tok_s
+
     # capabilities: defines what the model accepts for input, output and other metadata
     # - optional; omitted or all-zero means no capabilities
     # - used in v1/models to inform clients what the model can do

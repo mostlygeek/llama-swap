@@ -136,6 +136,13 @@ type CompatConfig struct {
 	IgnoreWebsockets bool `yaml:"ignoreWebsockets"`
 }
 
+// MetricsConfig maps response JSON paths to token rates. Empty paths use the
+// built-in backend detection; missing or non-numeric values leave it unchanged.
+type MetricsConfig struct {
+	PromptPerSecond string `yaml:"promptPerSecond"`
+	TokensPerSecond string `yaml:"tokensPerSecond"`
+}
+
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	CmdStop       string   `yaml:"cmdStop"`
@@ -162,6 +169,9 @@ type ModelConfig struct {
 
 	// Model filters see issue #174
 	Filters ModelFilters `yaml:"filters"`
+
+	// Optional response JSON paths for backend-specific token rates.
+	Metrics MetricsConfig `yaml:"metrics"`
 
 	// Macros: see #264
 	// Model level macros take precedence over the global macros
