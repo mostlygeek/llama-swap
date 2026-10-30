@@ -98,7 +98,7 @@
 
 {#snippet categoryGroupItem(classId: string, label: string, groupModels: Model[])}
   {@const open = !isGroupCollapsed(classId)}
-  <Sidebar.MenuSubItem>
+  <li>
     <Collapsible.Root open={open} class="gap-0">
       <button
         type="button"
@@ -106,11 +106,13 @@
         onclick={() => toggleGroup(classId)}
         aria-expanded={open}
       >
-        <span
-          class={`size-2 shrink-0 rounded-full ${sectionStatusDotColor(groupModels)}`}
-          role="img"
-          aria-label={`${groupModels.filter((m) => m.state === "ready").length} of ${groupModels.length} ready`}
-        ></span>
+        <span class="flex size-4 shrink-0 items-center justify-center">
+          <span
+            class={`size-2 rounded-full ${sectionStatusDotColor(groupModels)}`}
+            role="img"
+            aria-label={`${groupModels.filter((m) => m.state === "ready").length} of ${groupModels.length} ready`}
+          ></span>
+        </span>
         <span class="flex-1 truncate text-left">{label}</span>
         <span class="text-sidebar-foreground/50 tabular-nums">{groupModels.length}</span>
         <ChevronRight class={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden="true" />
@@ -123,7 +125,7 @@
         </Sidebar.MenuSub>
       </Collapsible.Content>
     </Collapsible.Root>
-  </Sidebar.MenuSubItem>
+  </li>
 {/snippet}
 
 <!-- Sits below the inference-paused banner; see --banner-h in App.svelte. -->
@@ -221,19 +223,25 @@
                 {/snippet}
               </Sidebar.MenuButton>
               <Collapsible.Content>
-                <Sidebar.MenuSub>
+                <ul class="m-0 flex min-w-0 flex-col gap-0.5 p-0">
                   {#each localClassGroups as group (group.class)}
                     {@render categoryGroupItem(group.class, modelClassLabels[group.class], group.models)}
                   {/each}
                   {#if visiblePeerModels.length > 0}
-                    <li class="text-sidebar-foreground/70 px-2 pt-2 pb-1 text-xs font-medium">
-                      Peers
+                    <li>
+                      <div class="flex h-7 min-w-0 items-center gap-2 rounded-md px-2 pt-1 text-xs font-medium text-sidebar-foreground/70">
+                        <span class="size-4 shrink-0"></span>
+                        <span class="flex-1 truncate">Peers</span>
+                        <span class="text-sidebar-foreground/50 tabular-nums">{visiblePeerModels.length}</span>
+                      </div>
+                      <Sidebar.MenuSub class="my-0.5">
+                        {#each visiblePeerModels as model (model.id)}
+                          {@render modelMenuItem(model)}
+                        {/each}
+                      </Sidebar.MenuSub>
                     </li>
-                    {#each visiblePeerModels as model (model.id)}
-                      {@render modelMenuItem(model)}
-                    {/each}
                   {/if}
-                </Sidebar.MenuSub>
+                </ul>
               </Collapsible.Content>
             </Collapsible.Root>
           </Sidebar.MenuItem>
