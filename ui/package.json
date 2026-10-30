@@ -40,6 +40,7 @@
     "@tanstack/table-core": "^8.21.3",
     "chart.js": "4.5.1",
     "highlight.js": "^11.11.1",
+    "html-to-image": "^1.11.13",
     "katex": "^0.16.28",
     "rehype-katex": "^7.0.1",
     "rehype-stringify": "^10.0.1",

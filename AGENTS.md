@@ -15,6 +15,7 @@
 - Use `make test-ui` after any changes in ui/
 - Use `make test-all` for commiting changes
 - Use the ./build subdirectory for testing binary builds
+- When synthetic metrics data is needed follow `docs/testing/synthetic-data.md`.
 - Only when the user asks use `make eval-docs-agent` to score the Help page's Docs Agent against a local model after changing its system prompt, `docs/kb/` content, the MCP tool descriptions, or the docs search ranking. See `evals/docs-agent/README.md` for the tuning loop.
 
 ## Documentation
