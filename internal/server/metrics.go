@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/cache"
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/store"
@@ -140,7 +141,7 @@ func activitySource(r *http.Request) string {
 // request only and set ErrorMsg to a description of the failure, so the error
 // can be inspected without storing unreadable raw response bytes. reqBody and
 // reqHeaders are the request data buffered before dispatch.
-func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
+func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string, metricsConfig config.MetricsConfig) {
 	tm := ActivityLogEntry{
 		Timestamp:       time.Now(),
 		Model:           modelID,
@@ -250,6 +251,8 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 	} else {
 		mp.logger.Warnf("metrics: invalid JSON in response body path=%s, recording minimal metrics", r.URL.Path)
 	}
+
+	applyConfiguredRates(&tm.Tokens, body, strings.Contains(recorder.Header().Get("Content-Type"), "text/event-stream"), metricsConfig)
 
 	stored, ok := mp.queueMetrics(tm)
 	if !ok {
@@ -391,6 +394,39 @@ func extractUsageTokens(usage gjson.Result) (input, output, cached int64, ok boo
 	return
 }
 
+// applyConfiguredRates overrides only numeric values. For SSE, the last numeric
+// value for each path wins independently, so terminal nulls cannot erase rates.
+func applyConfiguredRates(tokens *TokenMetrics, body []byte, streaming bool, cfg config.MetricsConfig) {
+	if cfg.PromptPerSecond == "" && cfg.TokensPerSecond == "" {
+		return
+	}
+	apply := func(data []byte) {
+		if !gjson.ValidBytes(data) {
+			return
+		}
+		parsed := gjson.ParseBytes(data)
+		if cfg.PromptPerSecond != "" {
+			if v := parsed.Get(cfg.PromptPerSecond); v.Type == gjson.Number && v.Float() >= 0 {
+				tokens.PromptPerSecond = v.Float()
+			}
+		}
+		if cfg.TokensPerSecond != "" {
+			if v := parsed.Get(cfg.TokensPerSecond); v.Type == gjson.Number && v.Float() >= 0 {
+				tokens.TokensPerSecond = v.Float()
+			}
+		}
+	}
+	if !streaming {
+		apply(body)
+		return
+	}
+	for line := range bytes.SplitSeq(body, []byte("\n")) {
+		if data, ok := bytes.CutPrefix(bytes.TrimSpace(line), []byte("data:")); ok {
+			apply(bytes.TrimSpace(data))
+		}
+	}
+}
+
 func processStreamingResponse(modelID string, start time.Time, body []byte) (ActivityLogEntry, error) {
 	var (
 		inputTokens, outputTokens int64
@@ -508,10 +544,18 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 	}
 
 	if timings.Exists() {
-		inputTokens = timings.Get("prompt_n").Int()
-		outputTokens = timings.Get("predicted_n").Int()
-		promptPerSecond = timings.Get("prompt_per_second").Float()
-		tokensPerSecond = timings.Get("predicted_per_second").Float()
+		if v := timings.Get("prompt_n"); v.Type == gjson.Number {
+			inputTokens = v.Int()
+		}
+		if v := timings.Get("predicted_n"); v.Type == gjson.Number {
+			outputTokens = v.Int()
+		}
+		if v := timings.Get("prompt_per_second"); v.Type == gjson.Number {
+			promptPerSecond = v.Float()
+		}
+		if v := timings.Get("predicted_per_second"); v.Type == gjson.Number {
+			tokensPerSecond = v.Float()
+		}
 		timingsDurationMs := int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float())
 		if timingsDurationMs > durationMs {
 			durationMs = timingsDurationMs

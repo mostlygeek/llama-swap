@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -16,6 +17,79 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tidwall/gjson"
 )
+
+func TestMetricsMonitor_ConfiguredRatesMiddleware(t *testing.T) {
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
+models:
+  hipfire:
+    proxy: http://127.0.0.1:8080
+    metrics:
+      promptPerSecond: timings.prefill_tok_s
+      tokensPerSecond: timings.decode_tok_s
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := newTestMetricsMonitor(t, nil, 10, 0)
+	handler := CreateMetricsMiddleware(mm, cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"usage":{"prompt_tokens":12,"completion_tokens":7},"timings":{"prefill_tok_s":200,"decode_tok_s":40}}`)
+	}))
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"hipfire"}`))
+	r.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(httptest.NewRecorder(), r)
+	entries := metricsEntries(t, mm)
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	tokens := entries[0].Tokens
+	if tokens.InputTokens != 12 || tokens.OutputTokens != 7 || tokens.PromptPerSecond != 200 || tokens.TokensPerSecond != 40 {
+		t.Fatalf("unexpected tokens: %+v", tokens)
+	}
+}
+
+func TestMetricsMonitor_ConfiguredRates(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		for _, tc := range []struct {
+			name   string
+			fields string
+			cfg    config.MetricsConfig
+			prompt float64
+			decode float64
+		}{
+			{"hipfire", `"prefill_tok_s":200,"decode_tok_s":40`, config.MetricsConfig{"timings.prefill_tok_s", "timings.decode_tok_s"}, 200, 40},
+			{"zero", `"prefill_tok_s":0,"decode_tok_s":0`, config.MetricsConfig{"timings.prefill_tok_s", "timings.decode_tok_s"}, 0, 0},
+			{"invalid", `"prefill_tok_s":null,"decode_tok_s":"40"`, config.MetricsConfig{"timings.prefill_tok_s", "timings.decode_tok_s"}, 100, 20},
+			{"negative", `"prefill_tok_s":-1,"decode_tok_s":-2`, config.MetricsConfig{"timings.prefill_tok_s", "timings.decode_tok_s"}, 100, 20},
+			{"missing", `"prefill_tok_s":200,"decode_tok_s":40`, config.MetricsConfig{"missing.prompt", "missing.decode"}, 100, 20},
+			{"prompt only", `"prefill_tok_s":200,"decode_tok_s":40`, config.MetricsConfig{PromptPerSecond: "timings.prefill_tok_s"}, 200, 20},
+			{"default", `"prefill_tok_s":200,"decode_tok_s":40`, config.MetricsConfig{}, 100, 20},
+		} {
+			t.Run(fmt.Sprintf("%s/stream=%v", tc.name, streaming), func(t *testing.T) {
+				mm := newTestMetricsMonitor(t, nil, 10, 0)
+				r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+				body := `{"usage":{"prompt_tokens":12,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":4},"prompt_tokens_per_sec":100,"completion_tokens_per_sec":20},"timings":{` + tc.fields + `}}`
+				copier := newBodyCopier(httptest.NewRecorder())
+				if streaming {
+					copier.Header().Set("Content-Type", "text/event-stream")
+					// Later nulls must not erase previously reported rates.
+					body = "data: " + body + "\n\ndata: {\"timings\":{\"prefill_tok_s\":null,\"decode_tok_s\":null}}\n\ndata: [DONE]\n\n"
+				}
+				copier.WriteHeader(http.StatusOK)
+				copier.Write([]byte(body))
+				mm.record("m", r, copier, 0, nil, nil, tc.cfg)
+				entries := metricsEntries(t, mm)
+				if len(entries) != 1 {
+					t.Fatalf("want 1 entry, got %d", len(entries))
+				}
+				tokens := entries[0].Tokens
+				if tokens.InputTokens != 12 || tokens.OutputTokens != 7 || tokens.CachedTokens != 4 || tokens.PromptPerSecond != tc.prompt || tokens.TokensPerSecond != tc.decode {
+					t.Fatalf("unexpected tokens: %+v; want rates %v/%v and counts 12/7/4", tokens, tc.prompt, tc.decode)
+				}
+			})
+		}
+	}
+}
 
 func TestServer_ParseMetrics_ChatCompletions(t *testing.T) {
 	body := `{"usage":{"prompt_tokens":12,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":4}}}`
@@ -384,7 +458,7 @@ func TestMetricsMonitor_RecordMetadata(t *testing.T) {
 	copier.WriteHeader(http.StatusOK)
 	copier.Write([]byte(`{"usage":{"prompt_tokens":1,"completion_tokens":2}}`))
 
-	mm.record("m", r, copier, 0, nil, nil)
+	mm.record("m", r, copier, 0, nil, nil, config.MetricsConfig{})
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -411,7 +485,7 @@ func TestMetricsMonitor_RecordClientClosed(t *testing.T) {
 	// Nothing is ever written: this is the cold-load cancellation shape.
 	copier.MarkStatus(swaputil.StatusClientClosedRequest)
 
-	mm.record("m", r, copier, captureAll, []byte("req"), nil)
+	mm.record("m", r, copier, captureAll, []byte("req"), nil, config.MetricsConfig{})
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -524,7 +598,7 @@ func TestMetricsMonitor_RecordFailedRequestCapture(t *testing.T) {
 	copier.Write([]byte(`{"error":{"message":"model unavailable"}}`))
 
 	reqBody := []byte(`{"model":"m","messages":[]}`)
-	mm.record("m", r, copier, captureAll, reqBody, reqHeaders)
+	mm.record("m", r, copier, captureAll, reqBody, reqHeaders, config.MetricsConfig{})
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -566,7 +640,7 @@ func TestMetricsMonitor_RecordFailedRequestStatusFallback(t *testing.T) {
 	copier.WriteHeader(http.StatusBadGateway)
 	copier.Write([]byte("<html>upstream down</html>"))
 
-	mm.record("m", r, copier, captureAll, nil, nil)
+	mm.record("m", r, copier, captureAll, nil, nil, config.MetricsConfig{})
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -586,7 +660,7 @@ func TestMetricsMonitor_RecordFailedRequestCaptureDisabled(t *testing.T) {
 	copier.WriteHeader(http.StatusInternalServerError)
 	copier.Write([]byte(`{"error":"boom"}`))
 
-	mm.record("m", r, copier, captureAll, []byte("req"), nil)
+	mm.record("m", r, copier, captureAll, []byte("req"), nil, config.MetricsConfig{})
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -614,7 +688,7 @@ func TestMetricsMonitor_RecordDecompressionFailureSetsErrorMsg(t *testing.T) {
 	copier.WriteHeader(http.StatusOK)
 	copier.Write([]byte("not-really-gzip"))
 
-	mm.record("m", r, copier, captureAll, []byte("req"), nil)
+	mm.record("m", r, copier, captureAll, []byte("req"), nil, config.MetricsConfig{})
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {

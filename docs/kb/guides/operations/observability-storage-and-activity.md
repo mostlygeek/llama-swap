@@ -3,7 +3,7 @@ title: Observability, storage and Activity
 summary: Use logs, metrics, captures and the Activity view to diagnose requests and retain useful history.
 category: guides
 tags: [operations, logs, metrics, activity, captures, stdout, http]
-config_keys: [logLevel, logToStdout, metricsMaxInMemory, captureBuffer]
+config_keys: [logLevel, logToStdout, metricsMaxInMemory, captureBuffer, models.*.metrics.promptPerSecond, models.*.metrics.tokensPerSecond]
 updated: 2026-09-25
 ---
 
@@ -20,6 +20,32 @@ logToStdout: "proxy,http"
 metricsMaxInMemory: 1000
 captureBuffer: 100
 ```
+
+## Backend token rates
+
+For backends with different performance field names, set per-model `metrics`
+paths. For an already-running Hipfire server:
+
+```yaml
+models:
+  hipfire:
+    proxy: http://127.0.0.1:8080
+    checkEndpoint: /v1/models
+    metrics:
+      promptPerSecond: timings.prefill_tok_s
+      tokensPerSecond: timings.decode_tok_s
+```
+
+Paths use GJSON syntax, relative to the response JSON root or each streaming
+SSE `data:` object. Values must be non-negative numbers in tokens/second.
+Configured rates override built-in detection independently; omit either path
+to keep its built-in behavior. For streams, the last valid number wins.
+This affects recorded statistics only, not the response sent to the client.
+
+If rates are still missing, inspect the response capture: a wrong path, null,
+string or negative value leaves the built-in rate unchanged. Hipfire may report
+null for decode speed on execution modes that do not measure it; wall-inclusive
+`hipfire.tok_s` is not a substitute for decode throughput.
 
 ## Log streams
 

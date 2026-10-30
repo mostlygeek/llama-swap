@@ -79,7 +79,7 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 			// A request abandoned before any response was written must not be
 			// filed as a successful (empty-body) metric. See #1029.
 			swaputil.MarkClientClosed(recorder, r)
-			mm.record(data.ModelID, r, recorder, cf, reqBody, reqHeaders)
+			mm.record(data.ModelID, r, recorder, cf, reqBody, reqHeaders, cfg.Models[data.ModelID].Metrics)
 		})
 	}
 }

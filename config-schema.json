@@ -539,6 +539,23 @@
                         "default": "",
                         "description": "Override the model name sent to upstream server. Useful if upstream expects a different name."
                     },
+                    "metrics": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "description": "Override token rates using GJSON paths relative to the response JSON or each SSE data object. Missing, negative or non-numeric values preserve built-in rates.",
+                        "properties": {
+                            "promptPerSecond": {
+                                "type": "string",
+                                "default": "",
+                                "description": "Response path for prefill tokens/s, e.g. timings.prefill_tok_s for Hipfire."
+                            },
+                            "tokensPerSecond": {
+                                "type": "string",
+                                "default": "",
+                                "description": "Response path for decode tokens/s, e.g. timings.decode_tok_s for Hipfire."
+                            }
+                        }
+                    },
                     "filters": {
                         "type": "object",
                         "properties": {
