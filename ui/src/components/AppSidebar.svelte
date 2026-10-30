@@ -38,6 +38,18 @@
     return path === "/" ? current === "/" : current.startsWith(path);
   }
 
+  // On small viewports the sidebar is an overlay drawer; collapse it when
+  // navigation changes the page so the page is not hidden behind it.
+  const sidebarCtx = Sidebar.useSidebar();
+  let previousRoute = "";
+  $effect(() => {
+    const route = $currentRoute;
+    if (route !== previousRoute) {
+      previousRoute = route;
+      if (sidebarCtx.isMobile) sidebarCtx.setOpenMobile(false);
+    }
+  });
+
   let visibleLocalModels = $derived(
     $models.filter((model) => !model.peerID && ($showUnlistedModels || !model.unlisted)),
   );
