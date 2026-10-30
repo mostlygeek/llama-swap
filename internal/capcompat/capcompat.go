@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
 
 // ErrUnsupportedUpstream is returned by Detect when no prober recognises the
@@ -217,6 +218,7 @@ type Client struct {
 	base       *url.URL
 	httpClient *http.Client
 	headers    http.Header
+	logger     *logmon.Monitor
 }
 
 // maxResponseBytes caps how much of an upstream response is read. /props
@@ -227,7 +229,9 @@ const maxResponseBytes = 8 << 20
 // NewClient returns a Client for base, honouring the model's proxy timeouts.
 // A zero timeout in the config means no timeout, matching the rest of
 // llama-swap, but the overall request deadline still comes from the context.
-func NewClient(base *url.URL, timeouts config.TimeoutsConfig) *Client {
+// logger receives the warnings a probe logs when a field it reads is
+// missing or of the wrong type; nil is fine, the probe just stays quiet.
+func NewClient(base *url.URL, timeouts config.TimeoutsConfig, logger *logmon.Monitor) *Client {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		// Same dialer settings the model's own reverse proxy transport uses,
@@ -246,6 +250,7 @@ func NewClient(base *url.URL, timeouts config.TimeoutsConfig) *Client {
 		base:       base,
 		httpClient: &http.Client{Transport: transport},
 		headers:    http.Header{},
+		logger:     logger,
 	}
 }
 
@@ -257,14 +262,24 @@ func (c *Client) SetHeader(key, value string) {
 	c.headers.Set(key, value)
 }
 
-// GetJSON fetches path relative to the client's base URL and decodes the body
-// into v. A non-2xx response is an error carrying the status.
-func (c *Client) GetJSON(ctx context.Context, path string, v any) error {
+// Warnf logs a warning about this upstream's answers. The probe continues
+// with the degraded value; the warning exists so a skipped field is visible
+// in the proxy log.
+func (c *Client) Warnf(format string, args ...any) {
+	if c == nil || c.logger == nil {
+		return
+	}
+	c.logger.Warnf(format, args...)
+}
+
+// GetBody fetches path relative to the client's base URL and returns the
+// response body. A non-2xx response is an error carrying the status.
+func (c *Client) GetBody(ctx context.Context, path string) ([]byte, error) {
 	target := c.base.JoinPath(path)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return fmt.Errorf("building %s request: %w", path, err)
+		return nil, fmt.Errorf("building %s request: %w", path, err)
 	}
 	req.Header.Set("Accept", "application/json")
 	for key, values := range c.headers {
@@ -275,18 +290,28 @@ func (c *Client) GetJSON(ctx context.Context, path string, v any) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("requesting %s: %w", path, err)
+		return nil, fmt.Errorf("requesting %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("requesting %s: upstream returned %s", path, resp.Status)
+		return nil, fmt.Errorf("requesting %s: upstream returned %s", path, resp.Status)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return fmt.Errorf("reading %s: %w", path, err)
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	return body, nil
+}
+
+// GetJSON fetches path relative to the client's base URL and decodes the
+// body into v. A non-2xx response is an error carrying the status.
+func (c *Client) GetJSON(ctx context.Context, path string, v any) error {
+	body, err := c.GetBody(ctx, path)
+	if err != nil {
+		return err
 	}
 	if err := json.Unmarshal(body, v); err != nil {
 		return fmt.Errorf("decoding %s: %w", path, err)

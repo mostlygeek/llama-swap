@@ -1,6 +1,7 @@
 package capcompat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
 
 // The fixtures under testdata/ are built from the documented response shapes:
@@ -60,6 +62,12 @@ import (
 // listing is verbatim; the /props file keeps only modalities,
 // default_generation_settings and chat_template_caps.
 
+// props_capture_b12017.json is a /props from a newer llama-server (b12017),
+// keeping only modalities, default_generation_settings and
+// chat_template_caps. Its chat_template_caps mixes types: the supports_*
+// keys are booleans, but reasoning_effort_levels is a list. Older code that
+// decoded chat_template_caps as map[string]bool rejected the whole response.
+
 // fixture reads a testdata file.
 func fixture(t *testing.T, parts ...string) []byte {
 	t.Helper()
@@ -98,7 +106,16 @@ func (u *upstream) client(t *testing.T) *Client {
 	t.Helper()
 	base, err := url.Parse(u.server.URL)
 	require.NoError(t, err)
-	return NewClient(base, config.TimeoutsConfig{})
+	return NewClient(base, config.TimeoutsConfig{}, nil)
+}
+
+// clientWithLogger is like client but with the warnings a probe logs for a
+// degraded /props captured in log, for tests that assert on them.
+func (u *upstream) clientWithLogger(t *testing.T, log *logmon.Monitor) *Client {
+	t.Helper()
+	base, err := url.Parse(u.server.URL)
+	require.NoError(t, err)
+	return NewClient(base, config.TimeoutsConfig{}, log)
 }
 
 func TestCapcompat_DetectLlamaServer(t *testing.T) {
@@ -256,6 +273,105 @@ func TestCapcompat_DetectLlamaServerNoTemplateCaps(t *testing.T) {
 		assert.False(t, info.Capabilities.Tools)
 		assert.Equal(t, 2048, info.Capabilities.Context)
 	})
+}
+
+// Newer builds added reasoning_effort_levels, a list, to
+// chat_template_caps. The prober must decode the caps without rejecting the
+// whole response, and still read the boolean keys from it.
+func TestCapcompat_DetectLlamaServerNewBuildProps(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     fixture(t, "llama-server", "props_capture_b12017.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "model-a")
+	require.NoError(t, err)
+
+	assert.Equal(t, "llama-server", info.Upstream)
+	assert.Equal(t, []string{"text", "image", "audio", "video"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.True(t, info.Capabilities.Tools, "caps report supports_tools and supports_tool_calls")
+	assert.Equal(t, 262144, info.Capabilities.Context)
+}
+
+// A /props that is not valid JSON must not fail the probe: the server is
+// answering, so the model is usable. Every field reads as its zero value
+// and one warning says why; the per-field warnings stay suppressed.
+func TestCapcompat_DetectLlamaServerInvalidPropsJSON(t *testing.T) {
+	var buf bytes.Buffer
+	log := logmon.NewWriter(&buf)
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     []byte(`this is not json`),
+	})
+
+	info, err := Detect(context.Background(), up.clientWithLogger(t, log), "model-a")
+	require.NoError(t, err)
+
+	assert.Equal(t, "llama-server", info.Upstream)
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools)
+	assert.Equal(t, 0, info.Capabilities.Context)
+	assert.Contains(t, buf.String(), "not valid JSON")
+	assert.NotContains(t, buf.String(), "is not a boolean", "one warning explains the whole body")
+}
+
+// A field that is present but of the wrong type logs a WARN and reads as
+// its zero value; the rest of the probe continues.
+func TestCapcompat_DetectLlamaServerContextWrongType(t *testing.T) {
+	var buf bytes.Buffer
+	log := logmon.NewWriter(&buf)
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     []byte(`{"modalities":{"vision":true},"default_generation_settings":{"n_ctx":"262144"},"chat_template_caps":{"supports_tools":true,"supports_tool_calls":true}}`),
+	})
+
+	info, err := Detect(context.Background(), up.clientWithLogger(t, log), "model-a")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"text", "image"}, info.Capabilities.In, "the other fields still read")
+	assert.True(t, info.Capabilities.Tools)
+	assert.Equal(t, 0, info.Capabilities.Context)
+	assert.Contains(t, buf.String(), "n_ctx is not a number")
+}
+
+// A caps value that is not a boolean reads as false. There is no fallback
+// to the template here: the caps object is present and non-empty, so it is
+// the authority even though one of its values is broken.
+func TestCapcompat_DetectLlamaServerCapsWrongType(t *testing.T) {
+	var buf bytes.Buffer
+	log := logmon.NewWriter(&buf)
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     []byte(`{"modalities":{},"chat_template_caps":{"supports_tools":"yes","supports_tool_calls":true},"chat_template":"<|tools|>","default_generation_settings":{"n_ctx":4096}}`),
+	})
+
+	info, err := Detect(context.Background(), up.clientWithLogger(t, log), "model-a")
+	require.NoError(t, err)
+
+	assert.False(t, info.Capabilities.Tools)
+	assert.Equal(t, 4096, info.Capabilities.Context)
+	assert.Contains(t, buf.String(), "supports_tools is not a boolean")
+}
+
+// A /props that omits a block entirely: the probe continues, the fields
+// read as their zero values, and a warning names the missing block.
+func TestCapcompat_DetectLlamaServerNoModalities(t *testing.T) {
+	var buf bytes.Buffer
+	log := logmon.NewWriter(&buf)
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     []byte(`{"default_generation_settings":{"n_ctx":4096}}`),
+	})
+
+	info, err := Detect(context.Background(), up.clientWithLogger(t, log), "model-a")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.False(t, info.Capabilities.Tools, "no caps and no template, so no tool signal")
+	assert.Equal(t, 4096, info.Capabilities.Context)
+	assert.Contains(t, buf.String(), "has no modalities")
 }
 
 func TestCapcompat_DetectVLLM(t *testing.T) {
@@ -521,7 +637,7 @@ func TestCapcompat_ClientJoinsBasePathPrefix(t *testing.T) {
 	require.NoError(t, err)
 
 	var models ModelsResponse
-	require.NoError(t, NewClient(base, config.TimeoutsConfig{}).GetJSON(context.Background(), "/v1/models", &models))
+	require.NoError(t, NewClient(base, config.TimeoutsConfig{}, nil).GetJSON(context.Background(), "/v1/models", &models))
 	assert.Equal(t, "/upstream/prefix/v1/models", gotPath)
 }
 
@@ -535,7 +651,7 @@ func TestCapcompat_ClientSendsHeaders(t *testing.T) {
 
 	base, err := url.Parse(server.URL)
 	require.NoError(t, err)
-	c := NewClient(base, config.TimeoutsConfig{})
+	c := NewClient(base, config.TimeoutsConfig{}, nil)
 	c.SetHeader("Authorization", "Bearer secret")
 
 	var models ModelsResponse
