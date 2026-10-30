@@ -3,6 +3,7 @@
   import { cancelInflightRequest, getCapture, uiConfig } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
   import { flip } from "svelte/animate";
+  import { tick } from "svelte";
   import CaptureDialog from "./CaptureDialog.svelte";
   import {
     type ColumnDef,
@@ -46,6 +47,7 @@
   import SourceCell from "./activity-table/SourceCell.svelte";
   import ExportDialog from "./activity-table/ExportDialog.svelte";
   import { buildActivityMarkdown, formatDrafted } from "../lib/activityExport";
+  import { elementToPngBlob } from "../lib/tableImage";
   import { formatDuration, formatSpeed, formatRelativeTime } from "../lib/format";
   import { formatBytes, liveElapsedMs, requestHeader, sessionID } from "../lib/inflight";
 
@@ -268,6 +270,7 @@
   let dialogOpen = $state(false);
   let exportOpen = $state(false);
   let exportMarkdown = $state("");
+  let tableEl = $state<HTMLTableElement | null>(null);
   let loadingCaptureId = $state<number | null>(null);
   let cancelingInflightIds = $state<string[]>([]);
   let inflightNowMs = $state(performance.now());
@@ -315,6 +318,27 @@
   function closeExport() {
     exportOpen = false;
     exportMarkdown = "";
+  }
+
+  // Rasterize the table for the Screenshot tab. Meta and Capture must never
+  // appear in an export: Capture is a button that fetches a body on click, and
+  // Meta is free-form and unbounded. Both are temporarily hidden (if currently
+  // visible) so the raster omits those columns, then restored afterwards.
+  async function captureScreenshot(): Promise<Blob> {
+    if (!tableEl) throw new Error("No table to export");
+    const restore: string[] = [];
+    for (const id of ["meta", "capture"]) {
+      const column = table.getColumn(id);
+      if (column?.getIsVisible()) {
+        column.toggleVisibility(false);
+        restore.push(id);
+      }
+    }
+    // Let Svelte render the hidden columns out of the DOM before rasterizing.
+    await tick();
+    const blob = await elementToPngBlob(tableEl);
+    for (const id of restore) table.getColumn(id)?.toggleVisibility(true);
+    return blob;
   }
 
   function setInflightOpen(open: boolean) {
@@ -510,12 +534,13 @@
     columnOrder.filter((id) => table.getColumn(id)?.getCanHide() ?? false)
   );
 
-  // Mirrors what is on screen (order and visibility), minus Capture: it is a
-  // button that fetches a body on click, so it has no text form to export.
+  // Mirrors what is on screen (order and visibility), minus Capture and Meta:
+  // Capture is a button that fetches a body on click (no text form), and Meta
+  // is free-form and unbounded, so neither has a sensible markdown form.
   let exportColumns = $derived(
     table
       .getVisibleLeafColumns()
-      .filter((column) => column.id !== "capture")
+      .filter((column) => column.id !== "capture" && column.id !== "meta")
       .map((column) => ({ id: column.id, label: columnLabelMap[column.id] ?? column.id }))
   );
 
@@ -542,6 +567,19 @@
     start = Math.max(1, end - maxButtons + 1);
     return Array.from({ length: end - start + 1 }, (_, i) => start + i);
   });
+
+  let exportFileName = $derived(
+    "llama-swap-" + (title ? slugify(title) : "activity")
+  );
+
+  function slugify(value: string): string {
+    return (
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "activity"
+    );
+  }
 
   function setServerPage(nextPage: number) {
     const clamped = Math.min(Math.max(nextPage, 1), pageCount);
@@ -883,7 +921,7 @@
   <Card.Content
     class="p-0 [&>[data-slot=table-container]]:max-h-[var(--activity-table-max-h,60vh)] [&>[data-slot=table-container]]:overflow-y-auto"
   >
-    <Table.Root class="min-w-full">
+    <Table.Root bind:ref={tableEl} class="min-w-full">
       <Table.Header>
         {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
           <Table.Row>
@@ -991,4 +1029,10 @@
 
 <CaptureDialog capture={selectedCapture} open={dialogOpen} onclose={closeDialog} />
 
-<ExportDialog markdown={exportMarkdown} open={exportOpen} onclose={closeExport} />
+<ExportDialog
+  markdown={exportMarkdown}
+  captureScreenshot={captureScreenshot}
+  fileName={exportFileName}
+  open={exportOpen}
+  onclose={closeExport}
+/>
