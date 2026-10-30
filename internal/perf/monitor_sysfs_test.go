@@ -1,0 +1,556 @@
+//go:build unix && !darwin
+
+package perf
+
+import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+// gpuDirHwmon locates the xe card's hwmon node inside the fake sysfs tree,
+// so tests can corrupt or remove it.
+const gpuDirHwmon = "devices/pci0000:00/0000:00:01.0/0000:01:00.0/0000:03:00.0/hwmon/hwmon9"
+
+// Fixture mirrors a real Intel Arc Pro B70 (xe driver) as observed on kernel
+// 7.1: hwmon temps labelled pkg/vram, energy counter, fan RPM+max, a 32 GiB
+// VRAM BAR in the PCI resource file, and fdinfo using the cycles-based engine
+// format with KiB-suffixed memory.
+const xeFdinfo = `pos:	0
+flags:	02000002
+drm-driver:	xe
+drm-client-id:	20
+drm-pdev:	0000:03:00.0
+drm-total-system:	0
+drm-total-gtt:	2 MiB
+drm-resident-gtt:	2 MiB
+drm-total-vram0:	16946852 KiB
+drm-resident-vram0:	16000 MiB
+drm-cycles-rcs:	744
+drm-total-cycles-rcs:	18956600119
+drm-cycles-bcs:	497250
+drm-total-cycles-bcs:	18956600119
+drm-cycles-ccs:	386293167
+drm-total-cycles-ccs:	18956600119
+drm-engine-capacity-ccs:	2
+`
+
+func writeFiles(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for rel, content := range files {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func symlink(t *testing.T, root, link, target string) {
+	t.Helper()
+	path := filepath.Join(root, link)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fakeSysfs builds a sysfs tree with one xe dGPU (with hwmon) and one bare
+// i915 iGPU (no hwmon; must be skipped by discovery).
+func fakeSysfs(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+
+	gpuDir := "devices/pci0000:00/0000:00:01.0/0000:01:00.0/0000:03:00.0"
+	igpuDir := "devices/pci0000:00/0000:00:02.0"
+
+	writeFiles(t, root, map[string]string{
+		gpuDir + "/vendor":                     "0x8086",
+		gpuDir + "/device":                     "0xe223",
+		gpuDir + "/resource":                   "0x00000041f8000000 0x00000041f8ffffff 0x000000000014220c\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000004800000000 0x0000004fffffffff 0x000000000014220c\n",
+		gpuDir + "/hwmon/hwmon9/name":          "xe",
+		gpuDir + "/hwmon/hwmon9/temp2_input":   "48000",
+		gpuDir + "/hwmon/hwmon9/temp2_label":   "pkg",
+		gpuDir + "/hwmon/hwmon9/temp3_input":   "50000",
+		gpuDir + "/hwmon/hwmon9/temp3_label":   "vram",
+		gpuDir + "/hwmon/hwmon9/temp4_input":   "39000",
+		gpuDir + "/hwmon/hwmon9/temp4_label":   "mctrl",
+		gpuDir + "/hwmon/hwmon9/fan1_input":    "1074",
+		gpuDir + "/hwmon/hwmon9/fan1_max":      "4980",
+		gpuDir + "/hwmon/hwmon9/energy1_input": "255045692199",
+		gpuDir + "/hwmon/hwmon9/energy1_label": "card",
+		igpuDir + "/vendor":                    "0x8086",
+		igpuDir + "/device":                    "0x4692",
+	})
+
+	// driver symlinks (targets must exist for EvalSymlinks)
+	for _, d := range []string{"xe", "i915"} {
+		if err := os.MkdirAll(filepath.Join(root, "bus/pci/drivers", d), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	symlink(t, root, gpuDir+"/driver", "../../../../../bus/pci/drivers/xe")
+	symlink(t, root, igpuDir+"/driver", "../../../bus/pci/drivers/i915")
+
+	// drm class entries
+	symlink(t, root, "class/drm/card0/device", "../../../"+gpuDir)
+	symlink(t, root, "class/drm/card1/device", "../../../"+igpuDir)
+	symlink(t, root, "class/drm/renderD128/device", "../../../"+gpuDir)
+	symlink(t, root, "bus/pci/devices/0000:03:00.0", "../../../"+gpuDir)
+
+	return root
+}
+
+func withSysfs(t *testing.T, root string) {
+	t.Helper()
+	old := sysfsRoot
+	sysfsRoot = root
+	t.Cleanup(func() { sysfsRoot = old })
+}
+
+func TestSysfs_DiscoverSkipsIGpuWithoutHwmon(t *testing.T) {
+	withSysfs(t, fakeSysfs(t))
+
+	gpus := discoverSysfsGpus()
+	if len(gpus) != 1 {
+		t.Fatalf("expected 1 GPU (xe with hwmon), got %d", len(gpus))
+	}
+	g := gpus[0]
+	if g.driver != "xe" {
+		t.Errorf("driver = %q, want xe", g.driver)
+	}
+	if g.uuid != "0000:03:00.0" {
+		t.Errorf("uuid = %q, want 0000:03:00.0", g.uuid)
+	}
+	if g.vramTotalMB != 32*1024 {
+		t.Errorf("vramTotalMB = %d, want %d", g.vramTotalMB, 32*1024)
+	}
+	if want := "Intel xe 0xe223"; g.name != want {
+		t.Errorf("name = %q, want %q", g.name, want)
+	}
+}
+
+func TestSysfs_ReadHwmonTempsFanWhenActive(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	withSysfs(t, sysRoot)
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": xeFdinfo})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+	oldProc := procRoot
+	procRoot = procRootLocal
+	t.Cleanup(func() { procRoot = oldProc })
+
+	g := discoverSysfsGpus()[0]
+	stat, err := g.poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if stat.TempC != 48 {
+		t.Errorf("TempC = %d, want 48 (pkg label)", stat.TempC)
+	}
+	if stat.VramTempC != 50 {
+		t.Errorf("VramTempC = %d, want 50 (vram label)", stat.VramTempC)
+	}
+	if want := 1074.0 / 4980.0 * 100; stat.FanSpeedPct < want-0.01 || stat.FanSpeedPct > want+0.01 {
+		t.Errorf("FanSpeedPct = %.2f, want ~%.2f", stat.FanSpeedPct, want)
+	}
+	if stat.MemTotalMB != 32*1024 {
+		t.Errorf("MemTotalMB = %d, want %d (BAR-derived)", stat.MemTotalMB, 32*1024)
+	}
+}
+
+// An idle GPU (no process holds the render node) must not be woken just to
+// read sensors: telemetry zeroes out instead of touching hwmon.
+func TestSysfs_IdleGpuTelemetryZeroed(t *testing.T) {
+	withSysfs(t, fakeSysfs(t))
+	oldProc := procRoot
+	procRoot = t.TempDir()
+	t.Cleanup(func() { procRoot = oldProc })
+
+	g := discoverSysfsGpus()[0]
+	stat, err := g.poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if stat.TempC != 0 || stat.FanSpeedPct != 0 || stat.PowerDrawW != 0 {
+		t.Errorf("idle stat should be zeroed, got %+v", stat)
+	}
+	if stat.MemTotalMB != 32*1024 {
+		t.Errorf("MemTotalMB = %d, want %d (BAR read does not wake the GPU)", stat.MemTotalMB, 32*1024)
+	}
+}
+
+func TestSysfs_PollReportsVramViaFdinfo(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{
+		"1234/fdinfo/17": xeFdinfo,
+	})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+
+	oldSys, oldProc := sysfsRoot, procRoot
+	sysfsRoot, procRoot = sysRoot, procRootLocal
+	t.Cleanup(func() { sysfsRoot, procRoot = oldSys, oldProc })
+
+	g := discoverSysfsGpus()[0]
+	stat, err := g.poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if want := 16946852 / 1024; stat.MemUsedMB != want {
+		t.Errorf("MemUsedMB = %d, want %d (fdinfo drm-total-vram0)", stat.MemUsedMB, want)
+	}
+	if stat.MemUtilPct < 50.4 || stat.MemUtilPct > 50.6 {
+		t.Errorf("MemUtilPct = %.2f, want ~50.4", stat.MemUtilPct)
+	}
+}
+
+// Even while active, hwmon must not be read more than once per
+// sysfsHwmonMinInterval -- each read wakes a sleeping card. Throttled
+// polls must carry the last known values forward, not publish zeros: a
+// busy GPU dipping to 0 on every other chart sample is worse than a value
+// a few seconds stale.
+func TestSysfs_HwmonThrottledWhileActive(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	withSysfs(t, sysRoot)
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": xeFdinfo})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+	oldProc := procRoot
+	procRoot = procRootLocal
+	t.Cleanup(func() { procRoot = oldProc })
+
+	g := discoverSysfsGpus()[0]
+	first, err := g.poll()
+	if err != nil || first.TempC != 48 {
+		t.Fatalf("first poll should read hwmon (TempC=48), got %+v err=%v", first, err)
+	}
+
+	// Change the underlying sensor value, then poll again inside the
+	// throttle window: the carried-forward 48 proves hwmon was skipped.
+	writeFiles(t, sysRoot, map[string]string{gpuDirHwmon + "/temp2_input": "55000"})
+	second, _ := g.poll()
+	if second.TempC != 48 {
+		t.Errorf("throttled poll must carry last known value, got TempC=%d (want 48, not a fresh 55)", second.TempC)
+	}
+
+	g.lastHwmonAt = time.Now().Add(-2 * sysfsHwmonMinInterval)
+	third, _ := g.poll()
+	if third.TempC != 55 {
+		t.Errorf("poll after interval must re-read hwmon, got TempC=%d (want 55)", third.TempC)
+	}
+}
+
+// A hwmon pass that reads nothing (e.g. the card was mid-resume) must not
+// publish zeros while the GPU is busy: last known values are carried, and
+// the throttle clock is not advanced so the next tick retries.
+func TestSysfs_HwmonFailureCarriesLastKnown(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	withSysfs(t, sysRoot)
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": xeFdinfo})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+	oldProc := procRoot
+	procRoot = procRootLocal
+	t.Cleanup(func() { procRoot = oldProc })
+
+	g := discoverSysfsGpus()[0]
+	first, err := g.poll()
+	if err != nil || first.TempC != 48 {
+		t.Fatalf("first poll should read hwmon (TempC=48), got %+v err=%v", first, err)
+	}
+
+	// Break the hwmon node and make the pass due: the poll must carry 48
+	// and leave lastHwmonAt alone so the next tick retries.
+	if err := os.Rename(filepath.Join(sysRoot, gpuDirHwmon), filepath.Join(sysRoot, gpuDirHwmon+".gone")); err != nil {
+		t.Fatal(err)
+	}
+	g.lastHwmonAt = time.Now().Add(-2 * sysfsHwmonMinInterval)
+	dueAt := g.lastHwmonAt
+	second, _ := g.poll()
+	if second.TempC != 48 || second.VramTempC != 50 {
+		t.Errorf("failed hwmon pass must carry last known temps, got %+v", second)
+	}
+	if !g.lastHwmonAt.Equal(dueAt) {
+		t.Errorf("failed pass must not advance lastHwmonAt")
+	}
+}
+
+// Carried telemetry expires: once the last good reading is too old, the
+// sample honestly reports zeros instead of an ancient value.
+func TestSysfs_TelemetryHoldExpiry(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	withSysfs(t, sysRoot)
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": xeFdinfo})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+	oldProc := procRoot
+	procRoot = procRootLocal
+	t.Cleanup(func() { procRoot = oldProc })
+
+	g := discoverSysfsGpus()[0]
+	if _, err := g.poll(); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+
+	if err := os.Rename(filepath.Join(sysRoot, gpuDirHwmon), filepath.Join(sysRoot, gpuDirHwmon+".gone")); err != nil {
+		t.Fatal(err)
+	}
+	g.lastHwmonAt = time.Now().Add(-2 * sysfsHwmonMinInterval)
+
+	g.lastTelemetry = time.Now().Add(-29 * time.Second)
+	fresh, _ := g.poll()
+	if fresh.TempC != 48 {
+		t.Errorf("reading under the hold window must be carried, got TempC=%d", fresh.TempC)
+	}
+
+	g.lastTelemetry = time.Now().Add(-31 * time.Second)
+	stale, _ := g.poll()
+	if stale.TempC != 0 || stale.PowerDrawW != 0 {
+		t.Errorf("stale telemetry must expire to zeros, got %+v", stale)
+	}
+}
+
+func TestSysfs_FdInfoVramFallsBackToResident(t *testing.T) {
+	kv := map[string]string{
+		"drm-resident-vram0": "16000 MiB",
+	}
+	if got, want := fdInfoVramKB(kv)/1024, uint64(16000); got != want {
+		t.Errorf("resident fallback = %d MiB, want %d", got, want)
+	}
+}
+
+func TestSysfs_ParseSizeKB(t *testing.T) {
+	cases := []struct {
+		in   string
+		want uint64
+	}{
+		{"16946852 KiB", 16946852},
+		{"16000 MiB", 16000 * 1024},
+		{"2 GiB", 2 * 1024 * 1024},
+		{"1048576", 1024}, // bare bytes
+		{"0", 0},
+	}
+	for _, c := range cases {
+		if got, ok := parseSizeKB(c.in); !ok || got != c.want {
+			t.Errorf("parseSizeKB(%q) = %d,%v; want %d,true", c.in, got, ok, c.want)
+		}
+	}
+}
+
+func TestSysfs_FdInfoEngineUtilCycles(t *testing.T) {
+	state := map[string]map[string]fdEngineSample{}
+	out := map[string]float64{}
+
+	fdInfoEnginePct(map[string]string{
+		"drm-client-id": "20", "drm-cycles-ccs": "1000", "drm-total-cycles-ccs": "1000000",
+	}, state, 1.0, out) // seeds state
+
+	out = map[string]float64{}
+	fdInfoEnginePct(map[string]string{
+		"drm-client-id": "20", "drm-cycles-ccs": "351000", "drm-total-cycles-ccs": "2010000",
+	}, state, 1.0, out)
+
+	if got := out["ccs"]; got < 34.6 || got > 34.7 {
+		t.Errorf("ccs util = %.2f%%, want ~34.65%% (350000/1010000)", got)
+	}
+}
+
+func TestSysfs_FdInfoEngineUtilNs(t *testing.T) {
+	state := map[string]map[string]fdEngineSample{}
+	out := map[string]float64{}
+
+	fdInfoEnginePct(map[string]string{
+		"drm-client-id": "7", "drm-engine-render": "0 ns",
+	}, state, 1.0, out)
+
+	out = map[string]float64{}
+	fdInfoEnginePct(map[string]string{
+		"drm-client-id": "7", "drm-engine-render": "500000000 ns",
+	}, state, 1.0, out)
+
+	if got := out["render"]; got < 49.9 || got > 50.1 {
+		t.Errorf("render util = %.2f%%, want ~50%%", got)
+	}
+}
+
+// A duplicated DRM fd (dup or fork inheritance) shares one drm-client-id;
+// its VRAM must be counted once, not once per fd.
+func TestSysfs_DuplicateClientVramCountedOnce(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{
+		"1234/fdinfo/17": xeFdinfo,
+		"1234/fdinfo/18": xeFdinfo,
+	})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+	symlink(t, procRootLocal, "1234/fd/18", "/dev/dri/renderD128")
+
+	oldSys, oldProc := sysfsRoot, procRoot
+	sysfsRoot, procRoot = sysRoot, procRootLocal
+	t.Cleanup(func() { sysfsRoot, procRoot = oldSys, oldProc })
+
+	g := discoverSysfsGpus()[0]
+	stat, err := g.poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if want := 16946852 / 1024; stat.MemUsedMB != want {
+		t.Errorf("MemUsedMB = %d, want %d (one client, two fds)", stat.MemUsedMB, want)
+	}
+}
+
+// fdinfo without drm-pdev (kernels before ~6.8) is attributed through the
+// render node's sysfs device link.
+func TestSysfs_FdinfoWithoutPdevResolvedViaSysfs(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	noPdev := strings.Replace(xeFdinfo, "drm-pdev:\t0000:03:00.0\n", "", 1)
+	if noPdev == xeFdinfo {
+		t.Fatal("fixture has no drm-pdev line to strip")
+	}
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": noPdev})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+
+	oldSys, oldProc := sysfsRoot, procRoot
+	sysfsRoot, procRoot = sysRoot, procRootLocal
+	t.Cleanup(func() { sysfsRoot, procRoot = oldSys, oldProc })
+
+	g := discoverSysfsGpus()[0]
+	stat, err := g.poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if want := 16946852 / 1024; stat.MemUsedMB != want {
+		t.Errorf("MemUsedMB = %d, want %d (render node resolves to this GPU)", stat.MemUsedMB, want)
+	}
+}
+
+// On a multi-GPU host a record that cannot be attributed to any card must
+// be dropped: counting it everywhere inflates VRAM and wakes idle cards.
+func TestSysfs_UnattributableFdinfoSkippedOnMultiGpu(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+
+	// A second accelerator so discovery marks the host ambiguous: another
+	// xe card with its own hwmon at a different PCI address. Same nesting
+	// depth as the first card so the relative driver symlink resolves.
+	gpu2 := "devices/pci0000:00/0000:00:03.0/0000:01:00.0/0000:04:00.0"
+	writeFiles(t, sysRoot, map[string]string{
+		gpu2 + "/vendor":                   "0x8086",
+		gpu2 + "/device":                   "0xe223",
+		gpu2 + "/hwmon/hwmon8/name":        "xe",
+		gpu2 + "/hwmon/hwmon8/temp1_input": "41000",
+	})
+	symlink(t, sysRoot, gpu2+"/driver", "../../../../../bus/pci/drivers/xe")
+	symlink(t, sysRoot, "class/drm/card2/device", "../../../"+gpu2)
+
+	// The fd points at a render node that does not exist in the fake sysfs
+	// tree, and the fixture carries no drm-pdev, so nothing can attribute
+	// it to a card.
+	noPdev := strings.Replace(xeFdinfo, "drm-pdev:\t0000:03:00.0\n", "", 1)
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": noPdev})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD999")
+
+	oldSys, oldProc := sysfsRoot, procRoot
+	sysfsRoot, procRoot = sysRoot, procRootLocal
+	t.Cleanup(func() { sysfsRoot, procRoot = oldSys, oldProc })
+
+	for _, g := range discoverSysfsGpus() {
+		stat, err := g.poll()
+		if err != nil {
+			t.Fatalf("poll: %v", err)
+		}
+		if stat.MemUsedMB != 0 || stat.TempC != 0 {
+			t.Errorf("gpu %s stat = %+v, want zeroed (unattributable fdinfo must be skipped)", g.uuid, stat)
+		}
+	}
+}
+
+// CircuitGuy part 2 (PR #1159 review): the activity gate must not go dark
+// just because llama-swap has no local processes — another container's
+// workload keeps runtime_status active, and reading that attribute never
+// wakes the card.
+func TestSysfs_RuntimeStatusGatesHwmonAcrossNamespaces(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	withSysfs(t, sysRoot)
+
+	// No fdinfo at all: proc is empty.
+	procRootLocal := t.TempDir()
+	oldProc := procRoot
+	procRoot = procRootLocal
+	t.Cleanup(func() { procRoot = oldProc })
+
+	g := discoverSysfsGpus()[0]
+
+	// Card suspended: no hwmon read, telemetry zeroed.
+	if stat, _ := g.poll(); stat.TempC != 0 {
+		t.Fatalf("suspended card must not read hwmon, got TempC=%d", stat.TempC)
+	}
+
+	// Another container keeps the card awake: runtime_status says active.
+	writeFiles(t, sysRoot, map[string]string{"devices/pci0000:00/0000:00:01.0/0000:01:00.0/0000:03:00.0/power/runtime_status": "active"})
+	if stat, _ := g.poll(); stat.TempC != 48 {
+		t.Fatalf("runtime-active card must read hwmon despite no local fdinfo, got TempC=%d (want 48)", stat.TempC)
+	}
+}
+
+// amdgpu driver counters cover every client and are cheap, so they refresh
+// every tick — a throttled tick still reports exact VRAM/util (no fdinfo
+// under-count, no BAR fallback).
+func TestSysfs_AmdgpuCountersRefreshOnThrottledTicks(t *testing.T) {
+	root := t.TempDir()
+	amdDir := "devices/pci0000:00/0000:00:01.0/0000:01:00.0"
+	writeFiles(t, root, map[string]string{
+		amdDir + "/vendor":                   "0x1002",
+		amdDir + "/device":                   "0x7551",
+		amdDir + "/gpu_busy_percent":         "42",
+		amdDir + "/mem_info_vram_total":      str(32 * 1024 * 1024 * 1024),
+		amdDir + "/mem_info_vram_used":       str(8 * 1024 * 1024 * 1024),
+		amdDir + "/hwmon/hwmon4/name":        "amdgpu",
+		amdDir + "/hwmon/hwmon4/temp1_input": "60000",
+	})
+	os.MkdirAll(filepath.Join(root, "bus/pci/drivers/amdgpu"), 0755)
+	symlink(t, root, amdDir+"/driver", "../../../../bus/pci/drivers/amdgpu")
+	symlink(t, root, "class/drm/card0/device", "../../../"+amdDir)
+	withSysfs(t, root)
+
+	g := discoverSysfsGpus()[0]
+	if !g.amdgpu {
+		t.Fatal("expected amdgpu discovery")
+	}
+	first, _ := g.poll()
+	if first.MemUsedMB != 8192 || first.MemTotalMB != 32768 || first.GpuUtilPct != 42 {
+		t.Fatalf("first poll amdgpu counters, got %+v", first)
+	}
+
+	// VRAM grows (another client) and the busy percent changes; the next
+	// poll is inside the hwmon throttle window but must still see it.
+	writeFiles(t, root, map[string]string{
+		amdDir + "/gpu_busy_percent":   "97",
+		amdDir + "/mem_info_vram_used": str(16 * 1024 * 1024 * 1024),
+	})
+	second, _ := g.poll()
+	if second.GpuUtilPct != 97 || second.MemUsedMB != 16384 {
+		t.Fatalf("throttled tick must refresh amdgpu counters, got util=%v used=%d", second.GpuUtilPct, second.MemUsedMB)
+	}
+	if second.MemTotalMB != 32768 {
+		t.Fatalf("exact total must stay, got %d (BAR fallback would differ)", second.MemTotalMB)
+	}
+}
+
+func str(v int64) string { return strconv.FormatInt(v, 10) }
