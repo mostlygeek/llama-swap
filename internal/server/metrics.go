@@ -231,6 +231,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		usage := parsed.Get("usage")
 		timings := parsed.Get("timings")
 		responseMetrics := parsed.Get("metrics")
+		tensorfold := parsed.Get("tensorfold")
 
 		// /infill responses are arrays; timings live in the last element (#463).
 		if strings.HasPrefix(r.URL.Path, "/infill") {
@@ -239,8 +240,8 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 			}
 		}
 
-		if usage.Exists() || timings.Exists() || responseMetrics.Exists() {
-			if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings, responseMetrics); err != nil {
+		if usage.Exists() || timings.Exists() || responseMetrics.Exists() || tensorfold.Exists() {
+			if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings, responseMetrics, tensorfold); err != nil {
 				mp.logger.Warnf("error parsing metrics: %v, path=%s, recording minimal metrics", err, r.URL.Path)
 			} else {
 				tm.Tokens = parsedMetrics.Tokens
@@ -399,6 +400,7 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Act
 		usage                     gjson.Result
 		timings                   gjson.Result
 		responseMetrics           gjson.Result
+		tensorfold                gjson.Result
 	)
 
 	prefix := []byte("data:")
@@ -457,26 +459,33 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Act
 			responseMetrics = m
 			hasAny = true
 		}
+		// TensorFold attaches its metrics object to the finish_reason chunk;
+		// usage may follow in a separate chunk, so both are retained.
+		if tf := parsed.Get("tensorfold"); tf.Exists() {
+			tensorfold = tf
+			hasAny = true
+		}
 	}
 
 	if !hasAny {
 		return ActivityLogEntry{}, fmt.Errorf("no valid JSON data found in stream")
 	}
 
-	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, usage, timings, responseMetrics), nil
+	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, usage, timings, responseMetrics, tensorfold), nil
 }
 
-func parseMetrics(modelID string, start time.Time, usage, timings, responseMetrics gjson.Result) (ActivityLogEntry, error) {
+func parseMetrics(modelID string, start time.Time, usage, timings, responseMetrics, tensorfold gjson.Result) (ActivityLogEntry, error) {
 	input, output, cached, _ := extractUsageTokens(usage)
-	return buildMetrics(modelID, start, input, output, cached, usage, timings, responseMetrics), nil
+	return buildMetrics(modelID, start, input, output, cached, usage, timings, responseMetrics, tensorfold), nil
 }
 
 // buildMetrics composes an ActivityLogEntry from accumulated token counts and
 // optional llama-server timings (which override input/output and provide rates)
-// or vLLM response metrics (rates and speculative decoding counters). TabbyAPI
-// and oMLX embed rates in the usage block, which supplies base rates
-// when timings and metrics are absent.
-func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, usage, timings, responseMetrics gjson.Result) ActivityLogEntry {
+// or vLLM response metrics (rates and speculative decoding counters). TabbyAPI,
+// oMLX and TensorFold supply base rates when timings and metrics are absent:
+// TabbyAPI and oMLX embed rates in the usage block, TensorFold reports phase
+// durations in a top-level tensorfold object.
+func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, usage, timings, responseMetrics, tensorfold gjson.Result) ActivityLogEntry {
 	wallDurationMs := int(time.Since(start).Milliseconds())
 	durationMs := wallDurationMs
 	tokensPerSecond := -1.0
@@ -503,6 +512,34 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 		if v := usage.Get("total_time"); v.Exists() {
 			if totalTimeMs := int(v.Float() * 1000); totalTimeMs > durationMs {
 				durationMs = totalTimeMs
+			}
+		}
+	}
+
+	// TensorFold reports prefill/decode phase durations and cached-token counts
+	// in a top-level tensorfold object (#1226). Prefill rate excludes cached
+	// prompt tokens; decode rate covers the completion. These are base values
+	// that llama-server timings and vLLM metrics override when present. The
+	// phase durations do not adjust the recorded duration, which stays the wall
+	// time the request was observed for.
+	if tensorfold.Exists() {
+		if v := tensorfold.Get("cached"); v.Exists() && v.Type == gjson.Number && v.Int() >= 0 {
+			cachedTokens = v.Int()
+		}
+		prefill := tensorfold.Get("prefill_s")
+		decode := tensorfold.Get("decode_s")
+		if prefill.Exists() && prefill.Type == gjson.Number && prefill.Float() > 0 {
+			uncached := inputTokens
+			if cachedTokens > 0 {
+				uncached -= cachedTokens
+			}
+			if uncached > 0 {
+				promptPerSecond = float64(uncached) / prefill.Float()
+			}
+		}
+		if decode.Exists() && decode.Type == gjson.Number && decode.Float() > 0 {
+			if outputTokens > 0 {
+				tokensPerSecond = float64(outputTokens) / decode.Float()
 			}
 		}
 	}
