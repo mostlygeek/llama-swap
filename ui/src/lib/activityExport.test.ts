@@ -185,6 +185,7 @@ describe("activityCellText", () => {
   const row = entry({
     id: 42,
     model: "llama-3",
+    task: "embedding",
     req_path: "/v1/embeddings",
     resp_status_code: 500,
     resp_content_type: "text/event-stream",
@@ -205,6 +206,7 @@ describe("activityCellText", () => {
     expect(activityCellText(row, "id")).toBe("42");
     expect(activityCellText(row, "time")).toBe("2026-06-25 12:34:56");
     expect(activityCellText(row, "model")).toBe("llama-3");
+    expect(activityCellText(row, "task")).toBe("embedding");
     expect(activityCellText(row, "req_path")).toBe("/v1/embeddings");
     expect(activityCellText(row, "resp_status_code")).toBe("500");
     expect(activityCellText(row, "resp_content_type")).toBe("text/event-stream");
@@ -220,6 +222,7 @@ describe("activityCellText", () => {
 
   it("renders dashes for empty values", () => {
     const empty = entry({ req_path: "", resp_content_type: "", resp_status_code: 0 });
+    expect(activityCellText(empty, "task")).toBe("-");
     expect(activityCellText(empty, "req_path")).toBe("-");
     expect(activityCellText(empty, "resp_content_type")).toBe("-");
     expect(activityCellText(empty, "resp_status_code")).toBe("-");

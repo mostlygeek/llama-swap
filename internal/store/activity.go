@@ -85,6 +85,7 @@ var activitySortKeys = []string{
 	"time",
 	"model",
 	"src",
+	"task",
 	"req_path",
 	"resp_status_code",
 	"resp_content_type",

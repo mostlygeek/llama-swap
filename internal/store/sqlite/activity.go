@@ -27,6 +27,7 @@ var activitySortColumns = map[string]string{
 	"time":              "ts_created",
 	"model":             "model_id",
 	"src":               "src",
+	"task":              "task",
 	"req_path":          "req_path",
 	"resp_status_code":  "resp_status_code",
 	"resp_content_type": "resp_content_type",

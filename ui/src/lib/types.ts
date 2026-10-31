@@ -77,6 +77,7 @@ export interface ActivityLogEntry {
   timestamp: string;
   src: string;
   model: string;
+  task?: string;
   req_path: string;
   resp_content_type: string;
   resp_status_code: number;
