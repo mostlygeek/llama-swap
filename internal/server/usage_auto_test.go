@@ -29,6 +29,7 @@ func TestServer_UsageAuto_ReadsEachServer(t *testing.T) {
 		{hint.TabbyAPI, "/v1/chat/completions", "tabbyapi/chat_completion_stream.sse"},
 		{hint.OMLX, "/v1/chat/completions", "omlx/chat_completion.json"},
 		{hint.Kyojin, "/v1/chat/completions", "kyojin/chat_completion_stream.sse"},
+		{hint.Radiance, "/v1/chat/completions", "radiance/chat_completion_stream.sse"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

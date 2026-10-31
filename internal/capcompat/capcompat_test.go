@@ -465,6 +465,20 @@ func TestCapcompat_DetectGufo(t *testing.T) {
 	require.NoError(t, info.Capabilities.Validate())
 }
 
+func TestCapcompat_DetectRadiance(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "radiance", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "qwen35")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.Radiance, info.Upstream)
+	assert.Equal(t, 200000, info.Capabilities.Context)
+	assert.Equal(t, 0, up.hits["/props"], "radiance has no /props to read")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
 func TestCapcompat_DetectYamz(t *testing.T) {
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "yamz", "v1_models.json"),

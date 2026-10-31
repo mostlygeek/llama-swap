@@ -57,7 +57,7 @@ func TestHint_ForURL(t *testing.T) {
 }
 
 func TestHint_UpstreamKnown(t *testing.T) {
-	for _, u := range []Upstream{LlamaServer, VLLM, TabbyAPI, OMLX, Kyojin, Halogen, OpenAICompatible, LlamaSwap, OpenAI, Anthropic, OpenRouter} {
+	for _, u := range []Upstream{LlamaServer, VLLM, TabbyAPI, OMLX, Kyojin, Radiance, Halogen, OpenAICompatible, LlamaSwap, OpenAI, Anthropic, OpenRouter} {
 		if !u.Known() {
 			t.Errorf("%q should be known", u)
 		}

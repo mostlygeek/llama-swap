@@ -10,7 +10,7 @@ import (
 // peers, which pass through whatever their own upstream returns. It reads
 // the API usage block and then applies every server's extra fields it finds,
 // in the order oMLX rates, TabbyAPI rates, llama-server timings (plus the
-// kyojin draft counters kept in the same block), vLLM metrics, so a more
+// kyojin and radiance fields kept in the same block), vLLM metrics, so a more
 // precise source overrides a less precise one.
 type autoExtractor struct{}
 
@@ -47,6 +47,7 @@ func (p *autoParser) usage() Usage {
 	applyTabbyAPIRates(&u, p.block) // TabbyAPI's fields win when both appear
 	applyTimings(&u, p.timings)
 	applyKyojinDrafts(&u, p.timings)
+	applyRadianceTotal(&u, p.timings)
 	applyVLLMMetrics(&u, p.metrics)
 	return u
 }

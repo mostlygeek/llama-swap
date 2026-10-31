@@ -74,6 +74,7 @@ func TestServer_Usage_ExtractorFor(t *testing.T) {
 		{hint.TabbyAPI, tabbyAPIExtractor{}},
 		{hint.OMLX, omlxExtractor{}},
 		{hint.Kyojin, kyojinExtractor{}},
+		{hint.Radiance, radianceExtractor{}},
 		{hint.OpenAI, apiExtractor{}},
 		{hint.Anthropic, apiExtractor{}},
 		{hint.OpenRouter, apiExtractor{}},

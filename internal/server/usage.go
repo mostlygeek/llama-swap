@@ -54,6 +54,8 @@ func extractorFor(u hint.Upstream) usageExtractor {
 		return omlxExtractor{}
 	case hint.Kyojin:
 		return kyojinExtractor{}
+	case hint.Radiance:
+		return radianceExtractor{}
 	case hint.OpenAI, hint.Anthropic, hint.OpenRouter, hint.OpenAICompatible, hint.Halogen:
 		return apiExtractor{}
 	default:
