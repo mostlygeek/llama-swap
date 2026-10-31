@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/store"
 )
@@ -62,8 +63,9 @@ type Service struct {
 
 // memoEntry is a remembered lookup. found is false for a remembered miss.
 type memoEntry struct {
-	caps  config.ModelCapConfig
-	found bool
+	caps     config.ModelCapConfig
+	upstream hint.Upstream
+	found    bool
 }
 
 // New returns a Service backed by cache. A nil cache disables persistence;
@@ -99,28 +101,38 @@ func UpstreamModelName(modelID string, mc config.ModelConfig) string {
 // is false when nothing has been discovered for it.
 //
 // The store is read at most once per key; later calls are answered from
-// memory until Refresh replaces the entry.
+// memory until Record replaces the entry.
 func (s *Service) Lookup(ctx context.Context, key string) (config.ModelCapConfig, bool) {
+	entry := s.lookup(ctx, key)
+	return entry.caps, entry.found
+}
+
+// Upstream returns the server family cached under key, or hint.Unknown when
+// nothing has been discovered for it.
+func (s *Service) Upstream(ctx context.Context, key string) hint.Upstream {
+	return s.lookup(ctx, key).upstream
+}
+
+func (s *Service) lookup(ctx context.Context, key string) memoEntry {
 	if s == nil {
-		return config.ModelCapConfig{}, false
+		return memoEntry{}
 	}
 
 	s.mu.RLock()
 	entry, memoized := s.memo[key]
 	s.mu.RUnlock()
 	if memoized {
-		return entry.caps, entry.found
+		return entry
 	}
 
 	info, found, err := s.read(ctx, key)
 	if err != nil {
 		// A failed read is not memoized: the next request should try again.
 		s.logf("capcompat: reading cache for %s: %v", key, err)
-		return config.ModelCapConfig{}, false
+		return memoEntry{}
 	}
 
-	s.remember(key, info.Capabilities, found)
-	return info.Capabilities, found
+	return s.remember(key, info, found)
 }
 
 // Refresh probes the upstream behind c and stores what it reports under key.
@@ -140,9 +152,22 @@ func (s *Service) Refresh(ctx context.Context, key string, c *Client, modelName 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	info, err := s.detect(ctx, c, modelName)
-	if err != nil {
-		if errors.Is(err, ErrUnsupportedUpstream) {
+	info, err := DetectWithRetry(ctx, c, modelName)
+	return s.Record(ctx, key, info, err)
+}
+
+// Record stores the outcome of a detection under key: the Info on success,
+// or a remembered miss when the upstream is not supported. Any other
+// detection error is returned unchanged and nothing is stored.
+//
+// It is the write half of the cache. Processes detect their upstream when
+// they become ready and publish a DetectedEvent; Listen feeds those here.
+func (s *Service) Record(ctx context.Context, key string, info Info, detectErr error) error {
+	if s == nil {
+		return nil
+	}
+	if detectErr != nil {
+		if errors.Is(detectErr, ErrUnsupportedUpstream) {
 			// Not every upstream has capabilities to report. Drop anything
 			// stored under this key first: a server can be replaced by one
 			// llama-swap does not recognise without cmd, proxy or
@@ -155,11 +180,11 @@ func (s *Service) Refresh(ctx context.Context, key string, c *Client, modelName 
 				}
 			}
 			// Remember the miss so /v1/models stops hitting the store.
-			s.remember(key, config.ModelCapConfig{}, false)
-			s.logf("capcompat: %s: %v", key, err)
+			s.remember(key, Info{}, false)
+			s.logf("capcompat: %s: %v", key, detectErr)
 			return nil
 		}
-		return err
+		return detectErr
 	}
 
 	blob, err := json.Marshal(info)
@@ -170,7 +195,7 @@ func (s *Service) Refresh(ctx context.Context, key string, c *Client, modelName 
 	// Remember before persisting. The probe succeeded either way, so a store
 	// that cannot be written should cost durability across a restart, not the
 	// value this process just learned.
-	s.remember(key, info.Capabilities, true)
+	s.remember(key, info, true)
 	s.logf("capcompat: %s reported by %s: %s", key, info.Upstream, describe(info.Capabilities))
 
 	if s.cache != nil {
@@ -187,10 +212,10 @@ func (s *Service) Refresh(ctx context.Context, key string, c *Client, modelName 
 	return nil
 }
 
-// detect runs Detect, retrying a connection that is not answering yet. An
-// upstream that answers and is simply not supported is returned immediately;
-// retrying would not change the answer.
-func (s *Service) detect(ctx context.Context, c *Client, modelName string) (Info, error) {
+// DetectWithRetry runs Detect, retrying a connection that is not answering
+// yet. An upstream that answers and is simply not supported is returned
+// immediately; retrying would not change the answer.
+func DetectWithRetry(ctx context.Context, c *Client, modelName string) (Info, error) {
 	var lastErr error
 	for attempt := 0; attempt < probeAttempts; attempt++ {
 		if attempt > 0 {
@@ -249,10 +274,12 @@ func (s *Service) Forget(key string) {
 	s.mu.Unlock()
 }
 
-func (s *Service) remember(key string, caps config.ModelCapConfig, found bool) {
+func (s *Service) remember(key string, info Info, found bool) memoEntry {
+	entry := memoEntry{caps: info.Capabilities, upstream: info.Upstream, found: found}
 	s.mu.Lock()
-	s.memo[key] = memoEntry{caps: caps, found: found}
+	s.memo[key] = entry
 	s.mu.Unlock()
+	return entry
 }
 
 // claim reserves key for a probe, reporting false when one is already running.

@@ -52,8 +52,9 @@ func (r *activityRepository) Insert(ctx context.Context, entry store.ActivityLog
 		INSERT INTO activity (
 			ts_created, src, model_id, req_path, resp_content_type, resp_status_code,
 			cache_tokens, draft_tokens, draft_acc_tokens, input_tokens, output_tokens,
-			prompt_per_second, tokens_per_second, duration_ms, error_msg, metadata_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			prompt_per_second, tokens_per_second, duration_ms, error_msg, metadata_json,
+			task, route, peer_id, reasoning_tokens
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.Timestamp.Unix(),
 		entry.Src,
 		entry.Model,
@@ -70,6 +71,10 @@ func (r *activityRepository) Insert(ctx context.Context, entry store.ActivityLog
 		entry.DurationMs,
 		entry.ErrorMsg,
 		metadataJSON,
+		entry.Task,
+		entry.Route,
+		entry.PeerID,
+		entry.Tokens.ReasoningTokens,
 	)
 	if err != nil {
 		return store.ActivityLogEntry{}, fmt.Errorf("insert activity: %w", err)
@@ -96,7 +101,8 @@ func (r *activityRepository) List(ctx context.Context, query store.ActivityQuery
 		SELECT
 			id, ts_created, src, model_id, req_path, resp_content_type, resp_status_code,
 			cache_tokens, draft_tokens, draft_acc_tokens, input_tokens, output_tokens,
-			prompt_per_second, tokens_per_second, duration_ms, error_msg, metadata_json
+			prompt_per_second, tokens_per_second, duration_ms, error_msg, metadata_json,
+			task, route, peer_id, reasoning_tokens
 		FROM activity`+where+activityOrderBy(query)+`
 		LIMIT ? OFFSET ?`,
 		append(args, query.Limit, offset)...,
@@ -309,6 +315,10 @@ func scanActivity(scanner activityScanner) (store.ActivityLogEntry, error) {
 		&entry.DurationMs,
 		&entry.ErrorMsg,
 		&metadataJSON,
+		&entry.Task,
+		&entry.Route,
+		&entry.PeerID,
+		&entry.Tokens.ReasoningTokens,
 	); err != nil {
 		return store.ActivityLogEntry{}, fmt.Errorf("scan activity: %w", err)
 	}

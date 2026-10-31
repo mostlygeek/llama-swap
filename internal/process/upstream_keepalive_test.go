@@ -182,7 +182,10 @@ func TestProcessCommand_DisableKeepAlives(t *testing.T) {
 			var mu sync.Mutex
 			remotes := map[string]struct{}{}
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/health" {
+				if r.Method != http.MethodPost {
+					// /health, and the upstream detection GETs that run on
+					// their own client before ready; only proxied requests
+					// count.
 					_, _ = io.WriteString(w, "ok")
 					return
 				}

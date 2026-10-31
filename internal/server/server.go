@@ -17,6 +17,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
@@ -56,9 +57,10 @@ type Server struct {
 	// discovery; Service methods are nil-receiver safe.
 	capcompat *capcompat.Service
 
-	// capcompatCancel unsubscribes the process-state listener that drives
-	// discovery. The event dispatcher is process-wide, so a hot config reload
-	// would otherwise leave the retired Server probing alongside the new one.
+	// capcompatCancel unsubscribes the listener that stores what processes
+	// detect about their upstream. The event dispatcher is process-wide, so a
+	// hot config reload would otherwise leave the retired Server storing
+	// alongside the new one.
 	capcompatCancel context.CancelFunc
 
 	// tools is the MCP tool surface served at /api/mcp. Providers are
@@ -184,25 +186,54 @@ var modelGetRoutes = []string{
 	"/props",
 }
 
-// isMetricsRecordPath reports whether path is one of the model-dispatched
-// endpoints that the metrics middleware records in the activity log.
-func isMetricsRecordPath(path string) bool {
-	for _, p := range modelPostJSONRoutes {
-		if p == path {
-			return true
-		}
-	}
-	for _, p := range modelPostFormRoutes {
-		if p == path {
-			return true
-		}
-	}
-	for _, p := range modelGetRoutes {
-		if p == path {
-			return true
-		}
-	}
-	return false
+// meteredRoutes maps every endpoint the metrics middleware records to the
+// kind of inference it performs. A path is metered if and only if it is
+// listed here, so the table is both the gate and the task label. Listing-only
+// endpoints such as /v1/audio/voices, /props and /sdapi/v1/loras are left out.
+var meteredRoutes = map[string]hint.Task{
+	"/v1/chat/completions": hint.TaskChat,
+	"/v1/responses":        hint.TaskChat,
+	"/v1/completions":      hint.TaskChat,
+	"/v1/messages":         hint.TaskChat,
+	"/completion":          hint.TaskChat,
+	"/infill":              hint.TaskChat,
+
+	"/v1/embeddings": hint.TaskEmbedding,
+
+	"/rerank":       hint.TaskRerank,
+	"/reranking":    hint.TaskRerank,
+	"/v1/rerank":    hint.TaskRerank,
+	"/v1/reranking": hint.TaskRerank,
+
+	"/v1/messages/count_tokens": hint.TaskTokenCount,
+
+	"/v1/images/generations": hint.TaskImageGeneration,
+	"/sdapi/v1/txt2img":      hint.TaskImageGeneration,
+	"/v1/images/edits":       hint.TaskImageEdit,
+	"/sdapi/v1/img2img":      hint.TaskImageEdit,
+
+	"/v1/audio/speech":         hint.TaskSpeech,
+	"/v1/audio/transcriptions": hint.TaskTranscription,
+
+	"/v1/systemone":          hint.TaskDecision,
+	"/audioapi/v1/tasks/run": hint.TaskAudio,
+
+	// versionless routes, see issue #728
+	"/v/chat/completions":      hint.TaskChat,
+	"/v/responses":             hint.TaskChat,
+	"/v/completions":           hint.TaskChat,
+	"/v/messages":              hint.TaskChat,
+	"/v/messages/count_tokens": hint.TaskTokenCount,
+	"/v/embeddings":            hint.TaskEmbedding,
+	"/v/rerank":                hint.TaskRerank,
+	"/v/reranking":             hint.TaskRerank,
+}
+
+// meteredTask reports the task for a metered endpoint path, and whether the
+// path is metered at all.
+func meteredTask(path string) (hint.Task, bool) {
+	task, ok := meteredRoutes[path]
+	return task, ok
 }
 
 // BuildInfo carries version metadata surfaced by GET /api/version.
@@ -276,7 +307,7 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 		shutdownFn:    shutdownFn,
 	}
 	s.capcompat = capcompat.New(st.Cache(), logs.ProxyLogs)
-	s.capcompatCancel = event.On(s.onProcessStateChange)
+	s.capcompatCancel = event.On(s.onUpstreamDetected)
 
 	// SysProvider is constructed here because this is where perf and hardware
 	// are in scope; wiring those in later is a change to internal/mcptools.
