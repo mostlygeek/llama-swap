@@ -72,15 +72,22 @@ curl -s localhost:PORT/v1/models | jq -r '.data[0].owned_by'
 ```
 
 **llama-server** (`owned_by: llamacpp`, covers forks such as ik_llama.cpp)
-reads `/props`:
+reads `/props`. Its fields are extracted one at a time with gjson rather
+than unmarshalling the whole body: builds add fields of mixed types
+(b12017's `chat_template_caps` carries a list alongside its booleans), and
+one unexpected field must not take the rest of the probe down. A field
+that is missing or of the wrong type logs a WARN and reads as its zero
+value, so the probe continues with what it can work out. A body that is
+not valid JSON is not used at all: gjson can still read fields that
+appear before a truncation, and partial capabilities must not be cached.
+One WARN explains the result.
 
 - `in` is `text` plus `image`, `audio` and `video` from `modalities.vision`,
   `modalities.audio` and `modalities.video`. All three key names are
   confirmed against a running server, which reports
   `{"vision":false,"video":false,"audio":false}` on a text-only build.
-  Modalities are decoded as a map so a new one upstream does not break
-  parsing, and keys with no mapping are dropped rather than passed through,
-  where they would fail `ModelCapConfig.Validate`.
+  Keys with no mapping are dropped rather than passed through, where they
+  would fail `ModelCapConfig.Validate`.
 - The listing also carries an Ollama-style `models[]` block with its own
   `capabilities` array. It is not read. A capture of a multimodal model
   served without a projector lists `"multimodal"` there while `/props`
@@ -89,9 +96,12 @@ reads `/props`:
 - `tools` requires both `supports_tools` and `supports_tool_calls` in
   `chat_template_caps`. Several flags in llama.cpp's caps struct are
   initialised to `true`, so requiring both guards against a default leaking
-  through on a template llama.cpp could not fully inspect. Builds predating
-  `chat_template_caps` fall back to looking for a tools loop in the template
-  source.
+  through on a template llama.cpp could not fully inspect. A caps value
+  that is not a boolean, such as the newer builds'
+  `reasoning_effort_levels` list, is ignored with a WARN rather than
+  failing the probe. The template source itself is never a signal: it can
+  mention tools the server cannot actually use, so builds predating
+  `chat_template_caps` simply report no tool support.
 - `context` is `default_generation_settings.n_ctx`, the window one
   generation slot is configured with and so the window a single request is
   bounded by. `meta.n_ctx` in the listing is the context the model was
