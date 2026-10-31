@@ -211,6 +211,49 @@ func TestKubeswap_ParseKeyValues(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ParseAnnotations Verifies annotation parsing: keys follow
+// the API server's qualified-name rule (case-insensitive, label-key form)
+// and values are free-form (they may contain '=').
+func TestKubeswap_ParseAnnotations(t *testing.T) {
+	got, err := parseAnnotations([]string{"k1=v1", "k4=a=b", "MY.KEY=v3"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 3 || got["k1"] != "v1" || got["k4"] != "a=b" || got["MY.KEY"] != "v3" {
+		t.Errorf("got %v", got)
+	}
+	if _, err := parseAnnotations([]string{"NOEQUALS"}); err == nil {
+		t.Error("expected error for missing '='")
+	}
+	if _, err := parseAnnotations([]string{"=v"}); err == nil {
+		t.Error("expected error for empty key")
+	}
+	// Uppercase keys are valid (the API server lowercases before checking);
+	// values are free-form: spaces and any length (the 256KiB cap is per
+	// object, not per value).
+	for _, good := range []string{
+		"feature.node.kubernetes.io/My.Key=v", // prefixed key
+		"a.b_c=v",                             // underscore in the name part
+		"k=with spaces", "k=" + strings.Repeat("v", 100),
+	} {
+		if _, err := parseAnnotations([]string{good}); err != nil {
+			t.Errorf("expected annotation %q to be valid: %v", good, err)
+		}
+	}
+	for _, bad := range []string{
+		"BAD KEY=v",   // space
+		"a/=v", "/=v", // empty name / empty prefix
+		"a/b/c=v",             // two slashes
+		".lead=v", "trail.=v", // must start/end alphanumeric
+		"a" + strings.Repeat("b", 63) + "=v", // 64 characters
+		"a_c/key=v",                          // underscore in the prefix (DNS subdomain)
+	} {
+		if _, err := parseAnnotations([]string{bad}); err == nil {
+			t.Errorf("expected error for annotation key %q", bad)
+		}
+	}
+}
+
 // TestKubeswap_ParseTolerationValueIsLabelValue verifies a toleration value
 // is checked with the API server's label-value rule at parse time.
 func TestKubeswap_ParseTolerationValueIsLabelValue(t *testing.T) {
