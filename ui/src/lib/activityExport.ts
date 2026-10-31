@@ -82,8 +82,11 @@ export function summarizeActivity(rows: ActivityLogEntry[]): ActivitySummary {
     summary.draftAccTokens += row.tokens.draft_acc_tokens;
 
     // prompt_per_second measures only the prompt tokens actually processed,
-    // so cached tokens are left out of the weighting.
-    const processed = row.tokens.input_tokens - Math.max(row.tokens.cache_tokens, 0);
+    // so cached tokens are left out of the weighting. Rows recorded before
+    // input_tokens included the cache can have more cached than input
+    // tokens; those fall back to input_tokens rather than being dropped.
+    let processed = row.tokens.input_tokens - Math.max(row.tokens.cache_tokens, 0);
+    if (processed <= 0) processed = row.tokens.input_tokens;
     if (processed > 0 && row.tokens.prompt_per_second > 0) {
       promptTokens += processed;
       promptSeconds += processed / row.tokens.prompt_per_second;

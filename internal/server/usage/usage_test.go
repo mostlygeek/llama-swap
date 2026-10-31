@@ -78,7 +78,7 @@ func TestUsage_ExtractorFor(t *testing.T) {
 		{hint.OpenAI, apiExtractor{}},
 		{hint.Anthropic, apiExtractor{}},
 		{hint.OpenRouter, apiExtractor{}},
-		{hint.OpenAICompatible, apiExtractor{}},
+		{hint.OpenAICompatible, autoExtractor{}},
 		{hint.Halogen, halogenExtractor{}},
 		{hint.LlamaSwap, autoExtractor{}},
 		{hint.Unknown, autoExtractor{}},

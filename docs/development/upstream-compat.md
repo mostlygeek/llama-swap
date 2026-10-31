@@ -103,8 +103,10 @@ Building blocks in `usage.go`:
 
 Adding an extractor:
 
-1. If the server adds nothing to the standard usage block, add it to the
-   `apiExtractor` case in `extractorFor`. Otherwise create
+1. Hosted APIs that add nothing to the standard usage block go in the
+   `apiExtractor` case in `extractorFor`. A local server gets its own
+   extractor; don't send `OpenAICompatible` to `apiExtractor`, because it
+   covers unrecognized servers that may still add timings. Create
    `<upstream>.go`. Reuse an existing parser when the format is the
    same (`halogenExtractor` reuses llama-server's), and keep server-specific
    fields in the server's own file.

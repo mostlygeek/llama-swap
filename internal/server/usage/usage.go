@@ -41,9 +41,11 @@ type usageParser interface {
 	usage() Usage
 }
 
-// extractorFor returns the extractor for u. Unknown upstreams, and upstreams
-// that pass through another server's format (llama-swap peers), use auto,
-// which reads every format llama-swap knows.
+// extractorFor returns the extractor for u. Unknown upstreams, generic
+// OpenAI-compatible servers (any local server capcompat could not name,
+// which may still add timings or rates), and upstreams that pass through
+// another server's format (llama-swap peers) use auto, which reads every
+// format llama-swap knows.
 func extractorFor(u hint.Upstream) usageExtractor {
 	switch u {
 	case hint.LlamaServer:
@@ -60,7 +62,7 @@ func extractorFor(u hint.Upstream) usageExtractor {
 		return radianceExtractor{}
 	case hint.Halogen:
 		return halogenExtractor{}
-	case hint.OpenAI, hint.Anthropic, hint.OpenRouter, hint.OpenAICompatible:
+	case hint.OpenAI, hint.Anthropic, hint.OpenRouter:
 		return apiExtractor{}
 	default:
 		return autoExtractor{}
@@ -204,8 +206,7 @@ func setReported(dst *int, v gjson.Result) bool {
 }
 
 // apiExtractor reads only the API usage block. It serves hosted APIs
-// (OpenAI, Anthropic, OpenRouter) and OpenAI-compatible servers that add
-// nothing to it.
+// (OpenAI, Anthropic, OpenRouter), which add nothing to it.
 type apiExtractor struct{}
 
 func (apiExtractor) newParser(path string, start time.Time) usageParser {

@@ -181,6 +181,26 @@ describe("summarizeActivity", () => {
     expect(summary.promptPerSecond).toBeCloseTo(200, 6);
   });
 
+  it("keeps older rows whose cached count exceeds input_tokens", () => {
+    // Before input_tokens included the cache, llama-server rows stored the
+    // processed count there; such a row is weighted by input_tokens.
+    const summary = summarizeActivity([
+      entry({
+        tokens: {
+          cache_tokens: 5000,
+          draft_tokens: 0,
+          draft_acc_tokens: 0,
+          input_tokens: 200,
+          output_tokens: 0,
+          prompt_per_second: 100,
+          tokens_per_second: -1,
+        },
+      }),
+    ]);
+
+    expect(summary.promptPerSecond).toBeCloseTo(100, 6);
+  });
+
   it("ignores rows with unreported speeds or no tokens", () => {
     const summary = summarizeActivity([
       entry({

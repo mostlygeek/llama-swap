@@ -86,3 +86,11 @@ func TestUsage_Auto_TimingsDraftTokensSurviveEmptyMetrics(t *testing.T) {
 	assert.Equal(t, 30, u.Tokens.DraftTokens)
 	assert.Equal(t, 12, u.Tokens.DraftAccTokens)
 }
+
+func TestUsage_Auto_OpenAICompatibleKeepsServerRates(t *testing.T) {
+	// capcompat names any unrecognized local server OpenAICompatible; it may
+	// be a TabbyAPI or oMLX build, so its rates must still be read.
+	u := parseUsageFixture(t, hint.OpenAICompatible, "/v1/chat/completions", "tabbyapi/chat_completion.json")
+	assert.Equal(t, 35.17, u.Tokens.PromptPerSecond)
+	assert.Equal(t, 17.11, u.Tokens.TokensPerSecond)
+}
