@@ -136,7 +136,14 @@
       {/if}
     </Card.Root>
 
-    <Tabs value="activity" class="min-h-0 flex-1">
+    <!--
+      The explicit min-height replaces the flex item's content-based minimum
+      (min-height: auto) with a floor: the tab area never collapses below a
+      usable log panel, and a tall header - a long description or a wall of
+      wrapped aliases in a short window - scrolls this route instead of
+      squeezing the logs out of view behind Card.Root's overflow-hidden.
+    -->
+    <Tabs value="activity" class="min-h-[min(20rem,70vh)] flex-1">
       <TabsList variant="line">
         <TabsTrigger value="activity">Activity</TabsTrigger>
         <TabsTrigger value="logs">Logs</TabsTrigger>
