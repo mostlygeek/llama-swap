@@ -86,7 +86,7 @@ export function summarizeActivity(rows: ActivityLogEntry[]): ActivitySummary {
     // input_tokens included the cache can have more cached than input
     // tokens; those fall back to input_tokens rather than being dropped.
     let processed = row.tokens.input_tokens - Math.max(row.tokens.cache_tokens, 0);
-    if (processed <= 0) processed = row.tokens.input_tokens;
+    if (row.tokens.cache_tokens > row.tokens.input_tokens) processed = row.tokens.input_tokens;
     if (processed > 0 && row.tokens.prompt_per_second > 0) {
       promptTokens += processed;
       promptSeconds += processed / row.tokens.prompt_per_second;

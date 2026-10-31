@@ -201,6 +201,24 @@ describe("summarizeActivity", () => {
     expect(summary.promptPerSecond).toBeCloseTo(100, 6);
   });
 
+  it("leaves fully cached rows out of the prompt speed", () => {
+    const summary = summarizeActivity([
+      entry({
+        tokens: {
+          cache_tokens: 500,
+          draft_tokens: 0,
+          draft_acc_tokens: 0,
+          input_tokens: 500,
+          output_tokens: 0,
+          prompt_per_second: 999,
+          tokens_per_second: -1,
+        },
+      }),
+    ]);
+
+    expect(summary.promptPerSecond).toBe(-1);
+  });
+
   it("ignores rows with unreported speeds or no tokens", () => {
     const summary = summarizeActivity([
       entry({

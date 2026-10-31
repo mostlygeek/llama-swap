@@ -67,3 +67,13 @@ func TestUsage_LlamaServer_IgnoresVLLMMetrics(t *testing.T) {
 	assert.Equal(t, -1.0, u.Tokens.PromptPerSecond, "metrics are vLLM's")
 	assert.Equal(t, -1.0, u.Tokens.TokensPerSecond)
 }
+
+func TestUsage_LlamaServer_PartialTimingsKeepUsage(t *testing.T) {
+	// Fields missing from timings must not overwrite what usage reported.
+	u := parseUsageJSON(t, hint.LlamaServer, "/v1/chat/completions",
+		`{"usage":{"prompt_tokens":28,"completion_tokens":50},"timings":{"prompt_n":20,"prompt_per_second":100}}`)
+	assert.Equal(t, 28, u.Tokens.InputTokens, "no cache_n, so prompt_n alone is not the whole prompt")
+	assert.Equal(t, 50, u.Tokens.OutputTokens)
+	assert.Equal(t, 100.0, u.Tokens.PromptPerSecond)
+	assert.Equal(t, -1.0, u.Tokens.TokensPerSecond)
+}

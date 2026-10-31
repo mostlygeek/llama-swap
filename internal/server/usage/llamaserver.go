@@ -60,11 +60,23 @@ func applyTimings(u *Usage, timings gjson.Result) {
 		return
 	}
 	u.Found = true
+	// Each field only replaces what the usage block reported when it is
+	// present. Without cache_n, prompt_n alone would undercount a prompt the
+	// usage block already counted in full, so it is used only when there is
+	// no usage count (e.g. /infill).
 	cached := timings.Get("cache_n")
-	u.Tokens.InputTokens = int(timings.Get("prompt_n").Int() + cached.Int())
-	u.Tokens.OutputTokens = int(timings.Get("predicted_n").Int())
-	u.Tokens.PromptPerSecond = timings.Get("prompt_per_second").Float()
-	u.Tokens.TokensPerSecond = timings.Get("predicted_per_second").Float()
+	if prompt := timings.Get("prompt_n"); prompt.Exists() && (cached.Exists() || u.Tokens.InputTokens == 0) {
+		u.Tokens.InputTokens = int(prompt.Int() + cached.Int())
+	}
+	if v := timings.Get("predicted_n"); v.Exists() {
+		u.Tokens.OutputTokens = int(v.Int())
+	}
+	if v := timings.Get("prompt_per_second"); v.Exists() {
+		u.Tokens.PromptPerSecond = v.Float()
+	}
+	if v := timings.Get("predicted_per_second"); v.Exists() {
+		u.Tokens.TokensPerSecond = v.Float()
+	}
 	if ms := int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float()); ms > u.DurationMs {
 		u.DurationMs = ms
 	}
