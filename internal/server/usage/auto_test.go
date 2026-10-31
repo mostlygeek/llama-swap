@@ -33,6 +33,17 @@ func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 		{hint.Halogen, "/v1/chat/completions", "halogen/chat_completion_stream.sse"},
 		{hint.Radiance, "/v1/messages", "radiance/messages_stream.sse"},
 		{hint.Radiance, "/v1/responses", "radiance/responses_stream.sse"},
+		{hint.OpenAI, "/v1/chat/completions", "openai/chat_completion_reasoning.json"},
+		{hint.OpenAI, "/v1/chat/completions", "openai/chat_completion_stream.sse"},
+		{hint.OpenAI, "/v1/embeddings", "openai/embeddings.json"},
+		{hint.OpenAI, "/v1/responses", "openai/responses.json"},
+		{hint.Anthropic, "/v1/messages", "anthropic/message.json"},
+		{hint.LlamaServer, "/v1/chat/completions", "llama-server/chat_completion_draft.json"},
+		{hint.LlamaServer, "/v1/chat/completions", "llama-server/chat_completion_stream.sse"},
+		{hint.TabbyAPI, "/v1/chat/completions", "tabbyapi/chat_completion.json"},
+		{hint.OMLX, "/v1/chat/completions", "omlx/chat_completion_stream.sse"},
+		{hint.VLLM, "/v1/chat/completions", "vllm/chat_completion_stream.sse"},
+		{hint.VLLM, "/v1/chat/completions", "vllm/chat_completion_reasoning_stream.sse"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

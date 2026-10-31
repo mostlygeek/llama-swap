@@ -437,7 +437,7 @@
       {
         id: "prompt",
         accessorFn: (row) => row.tokens.input_tokens,
-        header: () => renderComponent(HeaderLabel, { label: "Prompt", tooltip: "new prompt tokens processed" }),
+        header: () => renderComponent(HeaderLabel, { label: "Prompt", tooltip: "whole prompt, cached tokens included" }),
         cell: ({ row }) => row.original.tokens.input_tokens.toLocaleString(),
       },
       {
