@@ -46,32 +46,25 @@ func (r *captureRepository) Put(ctx context.Context, entry store.CaptureEntry) e
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	// ON CONFLICT DO NOTHING turns a duplicate id into zero affected rows
+	// rather than a driver-specific constraint error.
+	res, err := r.db.ExecContext(ctx, `
+		INSERT INTO captures (id, ts_created, size, data)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING`,
+		entry.ID, entry.Timestamp.Unix(), len(entry.Data), entry.Data,
+	)
 	if err != nil {
 		return fmt.Errorf("put capture: %w", err)
 	}
-	defer tx.Rollback()
-
-	var oldSize int64
-	err = tx.QueryRowContext(ctx, `SELECT size FROM captures WHERE id = ?`, entry.ID).Scan(&oldSize)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	n, err := res.RowsAffected()
+	if err != nil {
 		return fmt.Errorf("put capture: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO captures (id, ts_created, size, data)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			ts_created = excluded.ts_created,
-			size = excluded.size,
-			data = excluded.data`,
-		entry.ID, entry.Timestamp.Unix(), len(entry.Data), entry.Data,
-	); err != nil {
-		return fmt.Errorf("put capture: %w", err)
+	if n == 0 {
+		return fmt.Errorf("put capture %s: %w", entry.ID, store.ErrCaptureExists)
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("put capture: %w", err)
-	}
-	r.total += int64(len(entry.Data)) - oldSize
+	r.total += int64(len(entry.Data))
 	return nil
 }
 
@@ -150,7 +143,7 @@ func (r *captureRepository) Prune(ctx context.Context, maxBytes int64) error {
 
 	// Walk from the oldest written capture, summing sizes until enough
 	// would be freed. This reads only the rows that are about to be deleted.
-	// rowid is insertion order; a replaced row keeps its rowid.
+	// rowid is insertion order.
 	rows, err := r.db.QueryContext(ctx, `SELECT rowid, size FROM captures ORDER BY rowid ASC`)
 	if err != nil {
 		return fmt.Errorf("prune captures: %w", err)

@@ -494,7 +494,7 @@ func (s *Server) handleAPIHardware(w http.ResponseWriter, r *http.Request) {
 // capture ID recorded on an activity row.
 func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if len(id) != store.CaptureIDLen {
+	if !store.ValidCaptureID(id) {
 		swaputil.SendResponse(w, r, http.StatusBadRequest, "invalid capture ID")
 		return
 	}

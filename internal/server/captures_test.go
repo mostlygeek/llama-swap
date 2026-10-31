@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -93,6 +94,19 @@ func TestServer_CaptureBufferPrunesOldest(t *testing.T) {
 	}
 }
 
+func TestServer_CaptureIDCollisionKeepsFirst(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 5)
+	if !mm.addCapture("26103120-abcd", ReqRespCapture{ID: 1, ReqPath: "/first"}) {
+		t.Fatal("first addCapture returned false")
+	}
+	if mm.addCapture("26103120-abcd", ReqRespCapture{ID: 2, ReqPath: "/second"}) {
+		t.Fatal("addCapture with a taken ID should return false")
+	}
+	if got := mm.getCaptureByID("26103120-abcd"); got == nil || got.ID != 1 {
+		t.Fatalf("getCaptureByID = %+v, want the first capture", got)
+	}
+}
+
 func TestServer_CaptureTooLargeSkipped(t *testing.T) {
 	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 1)
 	body := make([]byte, 2*1024*1024)
@@ -110,7 +124,7 @@ func TestServer_CaptureDisabled(t *testing.T) {
 	if mm.enableCaptures {
 		t.Fatal("captures should be disabled with zero buffer")
 	}
-	if mm.newCaptureID() != "" {
+	if mm.newCaptureID(time.Now()) != "" {
 		t.Fatal("newCaptureID should return \"\" when disabled")
 	}
 	if mm.addCapture("cap-1", ReqRespCapture{ID: 1}) {

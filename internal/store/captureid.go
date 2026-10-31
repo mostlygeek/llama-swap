@@ -1,45 +1,66 @@
 package store
 
 import (
-	"fmt"
-
-	"github.com/google/uuid"
+	"crypto/rand"
+	"strings"
+	"time"
 )
 
 // CaptureIDLen is the length of every capture ID.
-const CaptureIDLen = 22
+const CaptureIDLen = len(captureIDTimeLayout) + 1 + captureIDSuffixLen
 
-// base58Alphabet is the Bitcoin base58 alphabet. Its characters are in
-// ascending ASCII order, so fixed-width encodings sort like the numbers
-// they encode.
+// captureIDTimeLayout is the yymmddhh prefix of a capture ID, in UTC.
+const captureIDTimeLayout = "06010215"
+
+// captureIDSuffixLen is the number of random base58 characters after the
+// prefix. 58^4 is about 11.3 million IDs per hour.
+const captureIDSuffixLen = 4
+
+// base58Alphabet leaves out 0, O, I and l so IDs are easy to read and type.
 const base58Alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
-// NewCaptureID returns a new capture ID: a UUIDv7 encoded as fixed-width
-// base58. UUIDv7 starts with a millisecond timestamp and the encoding is
-// left-padded to CaptureIDLen, so IDs sort by creation time as strings.
-func NewCaptureID() (string, error) {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return "", fmt.Errorf("new capture id: %w", err)
+// NewCaptureID returns a capture ID for a request recorded at t, such as
+// "26103120-a7Kq": the UTC hour as yymmddhh, a dash and four random base58
+// characters. IDs are unique enough rather than guaranteed unique; a
+// CaptureRepository rejects a duplicate instead of overwriting the earlier
+// capture.
+func NewCaptureID(t time.Time) string {
+	var b strings.Builder
+	b.Grow(CaptureIDLen)
+	b.WriteString(t.UTC().Format(captureIDTimeLayout))
+	b.WriteByte('-')
+
+	// Rejection sampling keeps every character equally likely: bytes at or
+	// above the largest multiple of 58 that fits in a byte are discarded.
+	const limit = 256 - 256%len(base58Alphabet)
+	var buf [16]byte
+	for n := 0; n < captureIDSuffixLen; {
+		rand.Read(buf[:])
+		for _, c := range buf {
+			if int(c) >= limit {
+				continue
+			}
+			b.WriteByte(base58Alphabet[int(c)%len(base58Alphabet)])
+			if n++; n == captureIDSuffixLen {
+				break
+			}
+		}
 	}
-	return encodeBase58Fixed(id), nil
+	return b.String()
 }
 
-// encodeBase58Fixed encodes the 128-bit big-endian number in b as base58,
-// left-padded with the zero digit to CaptureIDLen characters. 58^22 is
-// greater than 2^128, so every value fits.
-func encodeBase58Fixed(b [16]byte) string {
-	out := make([]byte, CaptureIDLen)
-	num := b
-	for i := CaptureIDLen - 1; i >= 0; i-- {
-		// Divide num by 58 in place, keeping the remainder as this digit.
-		var rem uint
-		for j := range num {
-			acc := rem<<8 | uint(num[j])
-			num[j] = byte(acc / 58)
-			rem = acc % 58
-		}
-		out[i] = base58Alphabet[rem]
+// ValidCaptureID reports whether id has the shape NewCaptureID produces.
+func ValidCaptureID(id string) bool {
+	if len(id) != CaptureIDLen || id[len(captureIDTimeLayout)] != '-' {
+		return false
 	}
-	return string(out)
+	if _, err := time.Parse(captureIDTimeLayout, id[:len(captureIDTimeLayout)]); err != nil {
+		return false
+	}
+	for _, c := range id[len(captureIDTimeLayout)+1:] {
+		if !strings.ContainsRune(base58Alphabet, c) {
+			return false
+		}
+	}
+	return true
 }

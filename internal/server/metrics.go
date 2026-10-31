@@ -122,20 +122,15 @@ func (mp *metricsMonitor) overlayCaptureState(entries []ActivityLogEntry) {
 	}
 }
 
-// newCaptureID returns a capture ID for an activity row that will get a
-// capture, or "" when captures are disabled. The ID is recorded on the row
-// before the capture is written; if writing fails or the capture is pruned
-// later, the row simply has no capture.
-func (mp *metricsMonitor) newCaptureID() string {
+// newCaptureID returns a capture ID for an activity row recorded at t that
+// will get a capture, or "" when captures are disabled. The ID is recorded on
+// the row before the capture is written; if writing fails or the capture is
+// pruned later, the row simply has no capture.
+func (mp *metricsMonitor) newCaptureID(t time.Time) string {
 	if !mp.enableCaptures {
 		return ""
 	}
-	id, err := store.NewCaptureID()
-	if err != nil {
-		mp.warnf("skipping capture: %v", err)
-		return ""
-	}
-	return id
+	return store.NewCaptureID(t)
 }
 
 func (mp *metricsMonitor) warnf(format string, args ...any) {
@@ -240,7 +235,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), r.URL.Path)
 		decoded, decErr := mp.decodeResponseBody(recorder, r.URL.Path)
 		tm.ErrorMsg = failedErrorMessage(recorder.Status(), decoded, decErr)
-		tm.CaptureID = mp.newCaptureID()
+		tm.CaptureID = mp.newCaptureID(tm.Timestamp)
 		stored, ok := mp.queueMetrics(tm)
 		if !ok {
 			return
@@ -278,7 +273,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		tm.DurationMs = u.DurationMs
 	}
 
-	tm.CaptureID = mp.newCaptureID()
+	tm.CaptureID = mp.newCaptureID(tm.Timestamp)
 	stored, ok := mp.queueMetrics(tm)
 	if !ok {
 		return

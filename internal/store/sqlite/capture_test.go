@@ -43,18 +43,19 @@ func TestStore_CapturePutGet(t *testing.T) {
 	assert.False(t, found)
 }
 
-func TestStore_CapturePutReplacesAndTracksSize(t *testing.T) {
+func TestStore_CapturePutRejectsDuplicateID(t *testing.T) {
 	ctx := context.Background()
 	_, captures := newCaptureStore(t)
 
-	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "a", Data: make([]byte, 100)}))
-	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "a", Data: make([]byte, 30)}))
-	assert.EqualValues(t, 30, captures.Size())
+	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "a", Data: []byte("first")}))
+	err := captures.Put(ctx, store.CaptureEntry{ID: "a", Data: []byte("second")})
+	require.ErrorIs(t, err, store.ErrCaptureExists)
+	assert.EqualValues(t, 5, captures.Size(), "a rejected put does not count")
 
 	got, found, err := captures.Get(ctx, "a")
 	require.NoError(t, err)
 	require.True(t, found)
-	assert.Len(t, got.Data, 30)
+	assert.Equal(t, []byte("first"), got.Data, "the earlier capture is kept")
 }
 
 func TestStore_CaptureHas(t *testing.T) {
@@ -122,8 +123,7 @@ func TestStore_CapturesPersistAcrossReopen(t *testing.T) {
 	activityPath := filepath.Join(dir, "activity.db")
 	capturesPath := filepath.Join(dir, "captures.db")
 
-	captureID, err := store.NewCaptureID()
-	require.NoError(t, err)
+	captureID := store.NewCaptureID(time.Now())
 
 	first, err := New(activityPath, capturesPath)
 	require.NoError(t, err)

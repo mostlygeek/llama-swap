@@ -57,7 +57,8 @@ store:
 captureBuffer: 2048 # MB of compressed captures to keep
 ```
 
-Each activity row records the ID of its capture. The captures file only
+Each activity row records the ID of its capture, such as `26103120-a7Kq`:
+the UTC hour (yymmddhh) and four random characters. The captures file only
 holds captures, so the two files do not have to match: a row whose capture
 was pruned, or lives in a captures file that was moved aside, just shows no
 capture.
@@ -77,6 +78,9 @@ What goes wrong:
   pushes them out. They take up space but no row links to them.
 - A single capture larger than `captureBuffer` is skipped and logged as a
   warning.
+- At very high request rates two requests in the same hour can draw the
+  same capture ID. The second capture is skipped with a warning; the first
+  is never overwritten.
 
 Do not put secrets in captures or debug logs. Reduce retention after diagnosing
 an issue.

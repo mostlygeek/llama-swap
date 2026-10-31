@@ -1,54 +1,51 @@
 package store
 
 import (
-	"math/big"
-	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestStore_CaptureIDFormat(t *testing.T) {
-	seen := make(map[string]bool)
-	ids := make([]string, 0, 1000)
+	at := time.Date(2026, 10, 31, 20, 59, 59, 0, time.UTC)
 	for range 1000 {
-		id, err := NewCaptureID()
-		require.NoError(t, err)
-		require.Len(t, id, CaptureIDLen)
-		for _, c := range id {
-			require.True(t, strings.ContainsRune(base58Alphabet, c), "id %q has non-base58 %q", id, c)
-		}
-		require.False(t, seen[id], "duplicate id %q", id)
-		seen[id] = true
-		ids = append(ids, id)
+		id := NewCaptureID(at)
+		assert.Len(t, id, CaptureIDLen)
+		assert.True(t, strings.HasPrefix(id, "26103120-"), "id %q", id)
+		assert.True(t, ValidCaptureID(id), "id %q", id)
 	}
-	assert.True(t, sort.StringsAreSorted(ids), "ids should sort by creation order")
+
+	// The prefix is the UTC hour, whatever the time zone of t.
+	local := time.Date(2026, 1, 2, 8, 0, 0, 0, time.FixedZone("UTC+5", 5*3600))
+	assert.True(t, strings.HasPrefix(NewCaptureID(local), "26010203-"))
 }
 
-func TestStore_CaptureIDEncodeBase58Fixed(t *testing.T) {
-	var zero, one, max [16]byte
-	one[15] = 1
-	for i := range max {
-		max[i] = 0xff
+func TestStore_CaptureIDSuffixVaries(t *testing.T) {
+	at := time.Now()
+	seen := make(map[string]bool)
+	for range 200 {
+		seen[NewCaptureID(at)] = true
 	}
-	assert.Equal(t, strings.Repeat("1", CaptureIDLen), encodeBase58Fixed(zero))
-	assert.Equal(t, strings.Repeat("1", CaptureIDLen-1)+"2", encodeBase58Fixed(one))
+	// 200 draws from ~11.3 million suffixes: a repeat is possible but more
+	// than a couple means the suffix is not random.
+	assert.Greater(t, len(seen), 197)
+}
 
-	// Cross-check against math/big for a few values.
-	for _, b := range [][16]byte{max, {0x01, 0x9a, 0x3b, 0x00, 0x11}, {15: 57}, {15: 58}} {
-		n := new(big.Int).SetBytes(b[:])
-		want := make([]byte, CaptureIDLen)
-		base := big.NewInt(58)
-		mod := new(big.Int)
-		for i := CaptureIDLen - 1; i >= 0; i-- {
-			n.DivMod(n, base, mod)
-			want[i] = base58Alphabet[mod.Int64()]
-		}
-		assert.Equal(t, string(want), encodeBase58Fixed(b))
+func TestStore_CaptureIDValid(t *testing.T) {
+	for _, tc := range []struct {
+		id   string
+		want bool
+	}{
+		{"26103120-a7Kq", true},
+		{"26103120-a7K", false},   // short
+		{"26103120_a7Kq", false},  // wrong separator
+		{"26133120-a7Kq", false},  // month 13
+		{"26103120-a0Kq", false},  // 0 is not base58
+		{"26103120-a7Kq1", false}, // long
+		{"", false},
+	} {
+		assert.Equal(t, tc.want, ValidCaptureID(tc.id), tc.id)
 	}
-
-	// Fixed width keeps numeric order and string order the same.
-	assert.Less(t, encodeBase58Fixed([16]byte{15: 57}), encodeBase58Fixed([16]byte{15: 58}))
 }

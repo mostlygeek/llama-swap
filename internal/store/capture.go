@@ -2,8 +2,13 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrCaptureExists is returned by CaptureRepository.Put when the ID is
+// already taken.
+var ErrCaptureExists = errors.New("capture id already exists")
 
 // CaptureEntry is one stored request/response capture. ID is the capture ID
 // recorded on the activity row (see NewCaptureID) and Timestamp is when the
@@ -20,8 +25,10 @@ type CaptureEntry struct {
 // Captures are bounded by total size rather than by count, since one can be a
 // few KB or several MB.
 type CaptureRepository interface {
-	// Put stores the entry, replacing any capture with the same ID. A zero
-	// Timestamp is replaced with the current time.
+	// Put stores the entry. It returns an error wrapping ErrCaptureExists
+	// when a capture with the same ID is already stored, so an ID collision
+	// never overwrites an earlier capture. A zero Timestamp is replaced with
+	// the current time.
 	Put(ctx context.Context, entry CaptureEntry) error
 
 	// Get returns the capture stored under id. found is false when none

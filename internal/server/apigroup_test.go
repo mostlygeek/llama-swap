@@ -385,7 +385,7 @@ func TestServer_APIMetricsActivity(t *testing.T) {
 		Model:     "m1",
 		ReqPath:   "/v1/chat/completions",
 		Tokens:    TokenMetrics{InputTokens: 1, OutputTokens: 2},
-		CaptureID: s.metrics.newCaptureID(),
+		CaptureID: s.metrics.newCaptureID(time.Unix(1, 0)),
 	})
 	if !ok {
 		t.Fatal("queueMetrics m1 failed")
