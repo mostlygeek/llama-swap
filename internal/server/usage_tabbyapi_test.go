@@ -7,10 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const tabbyAPIFinalChunk = `{"id":"chatcmpl-131b9995cd0c40c99e2ce958083ee406","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":83,"prompt_time":2.36,"prompt_tokens_per_sec":35.17,"completion_tokens":192,"completion_time":11.22,"completion_tokens_per_sec":17.11,"total_tokens":275,"total_time":13.63},"model":"SC_6.00bpw_H6_V6"}`
-
-func TestServer_UsageTabbyAPI_Rates(t *testing.T) {
-	u := parseUsageJSON(t, hint.TabbyAPI, "/v1/chat/completions", tabbyAPIFinalChunk)
+func TestServer_UsageTabbyAPI_ChatCompletion(t *testing.T) {
+	u := parseUsageFixture(t, hint.TabbyAPI, "/v1/chat/completions", "tabbyapi/chat_completion.json")
 	assert.Equal(t, 83, u.Tokens.InputTokens)
 	assert.Equal(t, 192, u.Tokens.OutputTokens)
 	assert.InDelta(t, 35.17, u.Tokens.PromptPerSecond, 1e-9)
@@ -18,11 +16,12 @@ func TestServer_UsageTabbyAPI_Rates(t *testing.T) {
 	assert.Equal(t, 13630, u.DurationMs, "total_time in seconds")
 }
 
-func TestServer_UsageTabbyAPI_RatesStream(t *testing.T) {
-	u := parseUsageStream(t, hint.TabbyAPI, "/v1/chat/completions", contentChunk, tabbyAPIFinalChunk)
+func TestServer_UsageTabbyAPI_ChatCompletionStream(t *testing.T) {
+	u := parseUsageFixture(t, hint.TabbyAPI, "/v1/chat/completions", "tabbyapi/chat_completion_stream.sse")
 	assert.Equal(t, 83, u.Tokens.InputTokens)
 	assert.InDelta(t, 35.17, u.Tokens.PromptPerSecond, 1e-9)
 	assert.InDelta(t, 17.11, u.Tokens.TokensPerSecond, 1e-9)
+	assert.Equal(t, 13630, u.DurationMs)
 }
 
 func TestServer_UsageTabbyAPI_RateValues(t *testing.T) {
@@ -48,9 +47,9 @@ func TestServer_UsageTabbyAPI_RateValues(t *testing.T) {
 }
 
 func TestServer_UsageTabbyAPI_IgnoresOtherServersFields(t *testing.T) {
-	u := parseUsageJSON(t, hint.TabbyAPI, "/v1/chat/completions",
-		`{"usage":{"prompt_tokens":4,"completion_tokens":6,"prompt_tokens_per_second":12},"timings":{"prompt_n":40,"predicted_n":60,"predicted_per_second":5}}`)
-	assert.Equal(t, 4, u.Tokens.InputTokens, "timings are llama-server's")
-	assert.Equal(t, -1.0, u.Tokens.PromptPerSecond, "*_per_second is oMLX's")
-	assert.Equal(t, -1.0, u.Tokens.TokensPerSecond)
+	llama := parseUsageFixture(t, hint.TabbyAPI, "/v1/chat/completions", "llama-server/chat_completion.json")
+	assert.Equal(t, -1.0, llama.Tokens.TokensPerSecond, "timings are llama-server's")
+	omlx := parseUsageFixture(t, hint.TabbyAPI, "/v1/chat/completions", "omlx/chat_completion.json")
+	assert.Equal(t, -1.0, omlx.Tokens.PromptPerSecond, "*_per_second is oMLX's")
+	assert.Equal(t, -1.0, omlx.Tokens.TokensPerSecond)
 }

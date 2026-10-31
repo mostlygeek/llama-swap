@@ -473,7 +473,7 @@ func TestCapcompat_DetectYamz(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "qwen-3.8-next-kyojin")
 	require.NoError(t, err)
 
-	assert.Equal(t, hint.OpenAICompatible, info.Upstream)
+	assert.Equal(t, hint.Kyojin, info.Upstream, "kyojin lists its models as owned_by yamz")
 	assert.Equal(t, 262144, info.Capabilities.Context)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)

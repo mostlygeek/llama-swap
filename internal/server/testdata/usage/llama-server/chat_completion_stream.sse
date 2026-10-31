@@ -1,0 +1,6 @@
+data: {"choices":[{"index":0,"delta":{"content":"Hello!"},"finish_reason":null}],"object":"chat.completion.chunk"}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"object":"chat.completion.chunk","usage":{"prompt_tokens":20,"completion_tokens":50,"total_tokens":70},"timings":{"cache_n":8,"prompt_n":20,"prompt_ms":200,"prompt_per_second":100.0,"predicted_n":50,"predicted_ms":1250,"predicted_per_second":40.0}}
+
+data: [DONE]
+

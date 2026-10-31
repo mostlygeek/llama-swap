@@ -12,25 +12,30 @@ import (
 // TabbyAPI rates, then llama-server timings, then vLLM metrics.
 
 func TestServer_UsageAuto_ReadsEachServer(t *testing.T) {
+	// Every server's fixture gives the same result through auto as through
+	// its own extractor.
 	tests := []struct {
-		name       string
-		body       string
-		wantPrompt float64
-		wantGen    float64
+		upstream hint.Upstream
+		path     string
+		file     string
 	}{
-		{"openai", `{"usage":{"prompt_tokens":56,"completion_tokens":8}}`, -1, -1},
-		{"tabbyapi", `{"usage":{"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11}}`, 35.17, 17.11},
-		{"omlx", `{"usage":{"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38}}`, 63.74, 66.38},
-		{"llama-server", `{"timings":{"prompt_n":56,"predicted_n":8,"prompt_per_second":100,"predicted_per_second":40}}`, 100, 40},
-		{"vllm", `{"usage":{"prompt_tokens":56,"completion_tokens":8},"metrics":{"time_to_first_token_ms":200,"mean_itl_ms":10}}`, 280, 100},
+		{hint.OpenAI, "/v1/chat/completions", "openai/chat_completion.json"},
+		{hint.OpenAI, "/v1/responses", "openai/responses_stream.sse"},
+		{hint.Anthropic, "/v1/messages", "anthropic/message_stream.sse"},
+		{hint.LlamaServer, "/v1/chat/completions", "llama-server/chat_completion.json"},
+		{hint.LlamaServer, "/infill", "llama-server/infill.json"},
+		{hint.VLLM, "/v1/chat/completions", "vllm/chat_completion.json"},
+		{hint.VLLM, "/v1/chat/completions", "vllm/chat_completion_spec_decode_stream.sse"},
+		{hint.TabbyAPI, "/v1/chat/completions", "tabbyapi/chat_completion_stream.sse"},
+		{hint.OMLX, "/v1/chat/completions", "omlx/chat_completion.json"},
+		{hint.Kyojin, "/v1/chat/completions", "kyojin/chat_completion_stream.sse"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			u := parseUsageJSON(t, hint.Unknown, "/v1/chat/completions", tt.body)
-			assert.Equal(t, 56, u.Tokens.InputTokens)
-			assert.Equal(t, 8, u.Tokens.OutputTokens)
-			assert.InDelta(t, tt.wantPrompt, u.Tokens.PromptPerSecond, 1e-9)
-			assert.InDelta(t, tt.wantGen, u.Tokens.TokensPerSecond, 1e-9)
+		t.Run(tt.file, func(t *testing.T) {
+			want := parseUsageFixture(t, tt.upstream, tt.path, tt.file)
+			got := parseUsageFixture(t, hint.Unknown, tt.path, tt.file)
+			assert.Equal(t, want.Found, got.Found)
+			assert.Equal(t, want.Tokens, got.Tokens)
 		})
 	}
 }
@@ -76,20 +81,4 @@ func TestServer_UsageAuto_TimingsDraftTokensSurviveEmptyMetrics(t *testing.T) {
 		`{"timings":{"prompt_n":20,"predicted_n":50,"draft_n":30,"draft_n_accepted":12},"metrics":{"speculative_decoding":{}}}`)
 	assert.Equal(t, 30, u.Tokens.DraftTokens)
 	assert.Equal(t, 12, u.Tokens.DraftAccTokens)
-}
-
-func TestServer_UsageAuto_Infill(t *testing.T) {
-	u := parseUsageJSON(t, hint.Unknown, "/infill",
-		`[{"content":"a"},{"content":"b","timings":{"prompt_n":5,"predicted_n":9}}]`)
-	assert.Equal(t, 5, u.Tokens.InputTokens)
-	assert.Equal(t, 9, u.Tokens.OutputTokens)
-}
-
-func TestServer_UsageAuto_AnthropicStream(t *testing.T) {
-	u := parseUsageStream(t, hint.Unknown, "/v1/messages",
-		`{"type":"message_start","message":{"usage":{"input_tokens":25,"cache_read_input_tokens":10}}}`,
-		`{"type":"message_delta","usage":{"output_tokens":42}}`)
-	assert.Equal(t, 25, u.Tokens.InputTokens)
-	assert.Equal(t, 42, u.Tokens.OutputTokens)
-	assert.Equal(t, 10, u.Tokens.CachedTokens)
 }

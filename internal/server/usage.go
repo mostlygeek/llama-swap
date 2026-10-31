@@ -52,6 +52,8 @@ func extractorFor(u hint.Upstream) usageExtractor {
 		return tabbyAPIExtractor{}
 	case hint.OMLX:
 		return omlxExtractor{}
+	case hint.Kyojin:
+		return kyojinExtractor{}
 	case hint.OpenAI, hint.Anthropic, hint.OpenRouter, hint.OpenAICompatible, hint.Halogen:
 		return apiExtractor{}
 	default:

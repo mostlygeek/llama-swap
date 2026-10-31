@@ -30,6 +30,7 @@ func (defaultProber) Name() string { return "default" }
 // Add a family here once its owned_by value is confirmed against the server.
 var ownerUpstreams = map[string]hint.Upstream{
 	"vllm": hint.VLLM,
+	"yamz": hint.Kyojin,
 }
 
 func (defaultProber) Upstream(models ModelsResponse) hint.Upstream {

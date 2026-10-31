@@ -1,0 +1,1 @@
+{"id":"chatcmpl-r1","object":"chat.completion","model":"o4-mini","choices":[{"index":0,"message":{"role":"assistant","content":"42"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":9,"total_tokens":14,"completion_tokens_details":{"reasoning_tokens":7}}}

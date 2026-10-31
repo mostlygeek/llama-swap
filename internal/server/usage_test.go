@@ -1,6 +1,8 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,23 @@ import (
 )
 
 // Helpers shared by the usage_<upstream>_test.go files.
+
+// parseUsageFixture runs a recorded response from testdata/usage through the
+// extractor for u. A .sse file is sent as an event stream, anything else as
+// a JSON body. Fixtures live in one directory per upstream, e.g.
+// testdata/usage/vllm/chat_completion_stream.sse.
+func parseUsageFixture(t *testing.T, u hint.Upstream, path, file string) Usage {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("testdata", "usage", file))
+	require.NoError(t, err)
+	contentType := "application/json"
+	if strings.HasSuffix(file, ".sse") {
+		contentType = "text/event-stream"
+	}
+	usage, err := extractUsage(u, path, contentType, body, time.Now())
+	require.NoError(t, err)
+	return usage
+}
 
 // parseUsageJSON runs a non-streaming body through the extractor for u.
 func parseUsageJSON(t *testing.T, u hint.Upstream, path, body string) Usage {
@@ -54,6 +73,7 @@ func TestServer_Usage_ExtractorFor(t *testing.T) {
 		{hint.VLLM, vllmExtractor{}},
 		{hint.TabbyAPI, tabbyAPIExtractor{}},
 		{hint.OMLX, omlxExtractor{}},
+		{hint.Kyojin, kyojinExtractor{}},
 		{hint.OpenAI, apiExtractor{}},
 		{hint.Anthropic, apiExtractor{}},
 		{hint.OpenRouter, apiExtractor{}},
