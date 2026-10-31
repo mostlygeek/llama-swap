@@ -293,9 +293,10 @@
     return () => cancelAnimationFrame(frame);
   });
 
-  async function viewCapture(id: number) {
+  async function viewCapture(id: number, captureId: string | undefined) {
+    if (!captureId) return;
     loadingCaptureId = id;
-    const capture = await getCapture(id);
+    const capture = await getCapture(captureId);
     loadingCaptureId = null;
     selectedCapture = capture;
     dialogOpen = true;
@@ -479,7 +480,7 @@
           renderComponent(ViewCaptureButton, {
             hasCapture: row.original.has_capture,
             loading: loadingCaptureId === row.original.id,
-            onclick: () => viewCapture(row.original.id),
+            onclick: () => viewCapture(row.original.id, row.original.capture_id),
           }),
       },
       {

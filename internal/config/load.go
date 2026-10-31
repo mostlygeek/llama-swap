@@ -383,29 +383,26 @@ func normalizeHeaderNames(names []string) []string {
 	return normalized
 }
 
-// validateStore checks the store section. store.path is required. Captures
-// are keyed by activity ID, so a persistent store.captures also needs the
-// persistent activity database it refers to, and the two must not share a
-// database file.
+// validateStore checks the store section. Each set path must be a writable
+// file location, at least one must be set, and activity and captures must
+// not share a database file.
 func validateStore(st *Store) error {
 	path := strings.TrimSpace(st.Path)
 	captures := strings.TrimSpace(st.Captures)
-	if path == "" {
-		if captures != "" {
-			return fmt.Errorf("store.captures requires store.path: captures are linked to activity rows by ID")
-		}
+	if path == "" && captures == "" {
 		return fmt.Errorf("store.path must not be empty")
 	}
-	if err := validateStorePath("store.path", path); err != nil {
-		return err
+	if path != "" {
+		if err := validateStorePath("store.path", path); err != nil {
+			return err
+		}
 	}
-	if captures == "" {
-		return nil
+	if captures != "" {
+		if err := validateStorePath("store.captures", captures); err != nil {
+			return err
+		}
 	}
-	if err := validateStorePath("store.captures", captures); err != nil {
-		return err
-	}
-	if sameStoreFile(path, captures) {
+	if path != "" && captures != "" && sameStoreFile(path, captures) {
 		return fmt.Errorf("store.captures must be a different file than store.path")
 	}
 	return nil

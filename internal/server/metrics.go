@@ -96,25 +96,46 @@ func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry) {
 	event.Emit(ActivityLogEvent{Metrics: metric})
 }
 
-// overlayCaptureState sets HasCapture on entries from the capture repository.
-// Stored captures are hidden while captures are disabled.
+// overlayCaptureState sets HasCapture on entries whose capture is still in
+// the capture repository. Stored captures are hidden while captures are
+// disabled.
 func (mp *metricsMonitor) overlayCaptureState(entries []ActivityLogEntry) {
-	var found map[int]bool
-	if mp.enableCaptures && len(entries) > 0 {
-		ids := make([]int, len(entries))
+	var found map[string]bool
+	if mp.enableCaptures {
+		ids := make([]string, 0, len(entries))
 		for i := range entries {
-			ids[i] = entries[i].ID
+			if entries[i].CaptureID != "" {
+				ids = append(ids, entries[i].CaptureID)
+			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		var err error
-		if found, err = mp.store.Captures().Has(ctx, ids); err != nil {
-			mp.warnf("failed to look up captures: %v", err)
+		if len(ids) > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			var err error
+			if found, err = mp.store.Captures().Has(ctx, ids); err != nil {
+				mp.warnf("failed to look up captures: %v", err)
+			}
 		}
 	}
 	for i := range entries {
-		entries[i].HasCapture = found[entries[i].ID]
+		entries[i].HasCapture = entries[i].CaptureID != "" && found[entries[i].CaptureID]
 	}
+}
+
+// newCaptureID returns a capture ID for an activity row that will get a
+// capture, or "" when captures are disabled. The ID is recorded on the row
+// before the capture is written; if writing fails or the capture is pruned
+// later, the row simply has no capture.
+func (mp *metricsMonitor) newCaptureID() string {
+	if !mp.enableCaptures {
+		return ""
+	}
+	id, err := store.NewCaptureID()
+	if err != nil {
+		mp.warnf("skipping capture: %v", err)
+		return ""
+	}
+	return id
 }
 
 func (mp *metricsMonitor) warnf(format string, args ...any) {
@@ -219,6 +240,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), r.URL.Path)
 		decoded, decErr := mp.decodeResponseBody(recorder, r.URL.Path)
 		tm.ErrorMsg = failedErrorMessage(recorder.Status(), decoded, decErr)
+		tm.CaptureID = mp.newCaptureID()
 		stored, ok := mp.queueMetrics(tm)
 		if !ok {
 			return
@@ -256,6 +278,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		tm.DurationMs = u.DurationMs
 	}
 
+	tm.CaptureID = mp.newCaptureID()
 	stored, ok := mp.queueMetrics(tm)
 	if !ok {
 		return
@@ -265,12 +288,13 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 	mp.emitMetric(tm)
 }
 
-// storeCapture assembles a ReqRespCapture for the stored activity row tm, honoring the captureFields
-// mask, and stores it when captures are enabled. body is the response body to
+// storeCapture assembles a ReqRespCapture for the stored activity row tm,
+// honoring the captureFields mask, and stores it under tm.CaptureID when one
+// was assigned. body is the response body to
 // capture (already decompressed by the caller); pass nil to omit it. Returns
 // true if a capture was stored.
 func (mp *metricsMonitor) storeCapture(tm ActivityLogEntry, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string, body []byte) bool {
-	if !mp.enableCaptures {
+	if !mp.enableCaptures || tm.CaptureID == "" {
 		return false
 	}
 	capture := ReqRespCapture{
@@ -289,7 +313,7 @@ func (mp *metricsMonitor) storeCapture(tm ActivityLogEntry, r *http.Request, rec
 	if cf&captureRespBody != 0 {
 		capture.RespBody = body
 	}
-	return mp.addCapture(capture, tm.Timestamp)
+	return mp.addCapture(tm.CaptureID, capture)
 }
 
 // decodeResponseBody returns the buffered response body, decompressing it when

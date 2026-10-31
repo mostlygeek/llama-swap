@@ -47,7 +47,8 @@ What goes wrong:
 
 By default activity rows and request/response captures are kept in memory and
 lost on restart. `store.path` keeps activity rows in a SQLite file.
-`store.captures` keeps captures in a second SQLite file:
+`store.captures` keeps captures in a second SQLite file. Each can be set
+without the other.
 
 ```yaml
 store:
@@ -55,6 +56,11 @@ store:
   captures: /data/captures.db
 captureBuffer: 2048 # MB of compressed captures to keep
 ```
+
+Each activity row records the ID of its capture. The captures file only
+holds captures, so the two files do not have to match: a row whose capture
+was pruned, or lives in a captures file that was moved aside, just shows no
+capture.
 
 `captureBuffer` limits both in-memory and on-disk captures. When a new
 capture pushes the total over the limit, the oldest captures are deleted.
@@ -65,14 +71,10 @@ that size.
 
 What goes wrong:
 
-- `store.captures` without `store.path` fails config loading. Each capture is
-  linked to an activity row by ID, so the activity rows have to persist too.
 - `store.captures` set to the same file as `store.path` fails config loading.
-- llama-swap refuses to start when the captures file does not match the
-  activity file, for example after `store.path` was pointed at a new file or
-  the activity file was replaced. The error says the captures database is out
-  of sync. Point `store.captures` back at the file that was created with that
-  activity database, or move the captures file aside to start a new one.
+- With `store.captures` set but not `store.path`, activity rows are lost on
+  restart while their captures stay in the file until `captureBuffer`
+  pushes them out. They take up space but no row links to them.
 - A single capture larger than `captureBuffer` is skipped and logged as a
   warning.
 

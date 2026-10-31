@@ -54,8 +54,8 @@ func (r *activityRepository) Insert(ctx context.Context, entry store.ActivityLog
 			ts_created, src, model_id, req_path, resp_content_type, resp_status_code,
 			cache_tokens, draft_tokens, draft_acc_tokens, input_tokens, output_tokens,
 			prompt_per_second, tokens_per_second, duration_ms, error_msg, metadata_json,
-			task, route, peer_id, reasoning_tokens
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			task, route, peer_id, reasoning_tokens, capture_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.Timestamp.Unix(),
 		entry.Src,
 		entry.Model,
@@ -76,6 +76,7 @@ func (r *activityRepository) Insert(ctx context.Context, entry store.ActivityLog
 		entry.Route,
 		entry.PeerID,
 		entry.Tokens.ReasoningTokens,
+		entry.CaptureID,
 	)
 	if err != nil {
 		return store.ActivityLogEntry{}, fmt.Errorf("insert activity: %w", err)
@@ -103,7 +104,7 @@ func (r *activityRepository) List(ctx context.Context, query store.ActivityQuery
 			id, ts_created, src, model_id, req_path, resp_content_type, resp_status_code,
 			cache_tokens, draft_tokens, draft_acc_tokens, input_tokens, output_tokens,
 			prompt_per_second, tokens_per_second, duration_ms, error_msg, metadata_json,
-			task, route, peer_id, reasoning_tokens
+			task, route, peer_id, reasoning_tokens, capture_id
 		FROM activity`+where+activityOrderBy(query)+`
 		LIMIT ? OFFSET ?`,
 		append(args, query.Limit, offset)...,
@@ -320,6 +321,7 @@ func scanActivity(scanner activityScanner) (store.ActivityLogEntry, error) {
 		&entry.Route,
 		&entry.PeerID,
 		&entry.Tokens.ReasoningTokens,
+		&entry.CaptureID,
 	); err != nil {
 		return store.ActivityLogEntry{}, fmt.Errorf("scan activity: %w", err)
 	}

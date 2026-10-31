@@ -75,7 +75,7 @@ func (r *captureRepository) Put(ctx context.Context, entry store.CaptureEntry) e
 	return nil
 }
 
-func (r *captureRepository) Get(ctx context.Context, id int) (store.CaptureEntry, bool, error) {
+func (r *captureRepository) Get(ctx context.Context, id string) (store.CaptureEntry, bool, error) {
 	var (
 		ts   int64
 		data []byte
@@ -90,8 +90,8 @@ func (r *captureRepository) Get(ctx context.Context, id int) (store.CaptureEntry
 	return store.CaptureEntry{ID: id, Timestamp: time.Unix(ts, 0), Data: data}, true, nil
 }
 
-func (r *captureRepository) Has(ctx context.Context, ids []int) (map[int]bool, error) {
-	found := make(map[int]bool)
+func (r *captureRepository) Has(ctx context.Context, ids []string) (map[string]bool, error) {
+	found := make(map[string]bool)
 	for start := 0; start < len(ids); start += hasBatchSize {
 		batch := ids[start:min(start+hasBatchSize, len(ids))]
 		args := make([]any, len(batch))
@@ -104,7 +104,7 @@ func (r *captureRepository) Has(ctx context.Context, ids []int) (map[int]bool, e
 			return nil, fmt.Errorf("has captures: %w", err)
 		}
 		for rows.Next() {
-			var id int
+			var id string
 			if err := rows.Scan(&id); err != nil {
 				rows.Close()
 				return nil, fmt.Errorf("has captures: %w", err)
@@ -120,7 +120,7 @@ func (r *captureRepository) Has(ctx context.Context, ids []int) (map[int]bool, e
 	return found, nil
 }
 
-func (r *captureRepository) Delete(ctx context.Context, id int) error {
+func (r *captureRepository) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -148,14 +148,15 @@ func (r *captureRepository) Prune(ctx context.Context, maxBytes int64) error {
 		return nil
 	}
 
-	// Walk from the oldest capture, summing sizes until enough would be
-	// freed. This reads only the rows that are about to be deleted.
-	rows, err := r.db.QueryContext(ctx, `SELECT id, size FROM captures ORDER BY id ASC`)
+	// Walk from the oldest written capture, summing sizes until enough
+	// would be freed. This reads only the rows that are about to be deleted.
+	// rowid is insertion order; a replaced row keeps its rowid.
+	rows, err := r.db.QueryContext(ctx, `SELECT rowid, size FROM captures ORDER BY rowid ASC`)
 	if err != nil {
 		return fmt.Errorf("prune captures: %w", err)
 	}
 	var (
-		cutoff int
+		cutoff int64
 		freed  int64
 	)
 	for freed < excess && rows.Next() {
@@ -175,7 +176,7 @@ func (r *captureRepository) Prune(ctx context.Context, maxBytes int64) error {
 		return nil
 	}
 
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM captures WHERE id <= ?`, cutoff); err != nil {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM captures WHERE rowid <= ?`, cutoff); err != nil {
 		return fmt.Errorf("prune captures: %w", err)
 	}
 	r.total -= freed
@@ -187,37 +188,3 @@ func (r *captureRepository) Size() int64 {
 	defer r.mu.Unlock()
 	return r.total
 }
-
-// checkCapturesInSync verifies that the captures database belongs to the
-// activity database: the newest capture must match an activity row with the
-// same id and timestamp. Captures that do not match would be shown against
-// unrelated activity rows, so a mismatch is an error rather than something to
-// repair silently.
-func checkCapturesInSync(ctx context.Context, activityDB, capturesDB *sql.DB) error {
-	var id, captureTS int64
-	err := capturesDB.QueryRowContext(ctx, `SELECT id, ts_created FROM captures ORDER BY id DESC LIMIT 1`).Scan(&id, &captureTS)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("check captures: %w", err)
-	}
-
-	var activityTS int64
-	err = activityDB.QueryRowContext(ctx, `SELECT ts_created FROM activity WHERE id = ?`, id).Scan(&activityTS)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("%w: capture %d has no matching activity row", ErrCapturesOutOfSync, id)
-	}
-	if err != nil {
-		return fmt.Errorf("check captures: %w", err)
-	}
-	if activityTS != captureTS {
-		return fmt.Errorf("%w: capture %d was recorded at %d but activity row %d at %d",
-			ErrCapturesOutOfSync, id, captureTS, id, activityTS)
-	}
-	return nil
-}
-
-// ErrCapturesOutOfSync is returned by New when the captures database does
-// not belong to the activity database it is opened with.
-var ErrCapturesOutOfSync = errors.New("captures database is out of sync with the activity database; use the captures file that was created with this store.path, or move it aside to start a new one")

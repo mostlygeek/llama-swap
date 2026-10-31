@@ -43,9 +43,8 @@ var _ store.Store = (*Store)(nil)
 // activity database and capturesPath the captures database; an empty path
 // keeps that database in memory, lost on Close.
 //
-// Captures are keyed by activity ID, so New returns an error wrapping
-// ErrCapturesOutOfSync when the captures database holds captures that do not
-// match rows in the activity database.
+// The two databases are independent: activity rows name their capture by
+// capture ID, and a missing capture is not an error.
 func New(path, capturesPath string) (*Store, error) {
 	ctx := context.Background()
 
@@ -65,9 +64,6 @@ func New(path, capturesPath string) (*Store, error) {
 		return nil, err
 	}
 
-	if err := checkCapturesInSync(ctx, db, capturesDB); err != nil {
-		return fail(err)
-	}
 	captures, err := newCaptureRepository(ctx, capturesDB)
 	if err != nil {
 		return fail(err)

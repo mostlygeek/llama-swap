@@ -488,9 +488,9 @@ export async function loadModel(model: string, signal?: AbortSignal): Promise<vo
   }
 }
 
-export async function getCapture(id: number): Promise<ReqRespCapture | null> {
+export async function getCapture(captureId: string): Promise<ReqRespCapture | null> {
   try {
-    const response = await fetch(apiUrl(`/api/captures/${id}`));
+    const response = await fetch(apiUrl(`/api/captures/${encodeURIComponent(captureId)}`));
     if (response.status === 404) {
       return null;
     }

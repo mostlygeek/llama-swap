@@ -244,11 +244,20 @@
                 "captures": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Separate SQLite database file path for persistent request/response captures. Requires path and must be a different file. Total size is capped by captureBuffer."
+                    "description": "Separate SQLite database file path for persistent request/response captures. Must be a different file than path. Total size is capped by captureBuffer."
                 }
             },
-            "required": [
-                "path"
+            "anyOf": [
+                {
+                    "required": [
+                        "path"
+                    ]
+                },
+                {
+                    "required": [
+                        "captures"
+                    ]
+                }
             ],
             "additionalProperties": false,
             "description": "Store configuration for durable llama-swap state."

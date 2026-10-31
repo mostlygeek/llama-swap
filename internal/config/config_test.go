@@ -129,13 +129,16 @@ store:
 		assert.Equal(t, capturesPath, cfg.Store.Captures)
 	})
 
-	t.Run("requires store.path", func(t *testing.T) {
-		_, err := LoadConfigFromReader(strings.NewReader(`
+	t.Run("captures without store.path accepted", func(t *testing.T) {
+		capturesPath := filepath.Join(t.TempDir(), "captures.db")
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
 store:
-  captures: ` + filepath.Join(t.TempDir(), "captures.db") + `
+  captures: ` + capturesPath + `
 `))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "store.captures requires store.path")
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Store)
+		assert.Empty(t, cfg.Store.Path)
+		assert.Equal(t, capturesPath, cfg.Store.Captures)
 	})
 
 	t.Run("same file as store.path rejected", func(t *testing.T) {

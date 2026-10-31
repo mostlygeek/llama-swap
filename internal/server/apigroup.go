@@ -490,10 +490,11 @@ func (s *Server) handleAPIHardware(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleAPICapture returns the stored request/response capture for a metric ID.
+// handleAPICapture returns the stored request/response capture for the
+// capture ID recorded on an activity row.
 func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	id := r.PathValue("id")
+	if len(id) != store.CaptureIDLen {
 		swaputil.SendResponse(w, r, http.StatusBadRequest, "invalid capture ID")
 		return
 	}

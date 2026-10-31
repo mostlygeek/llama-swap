@@ -385,11 +385,12 @@ func TestServer_APIMetricsActivity(t *testing.T) {
 		Model:     "m1",
 		ReqPath:   "/v1/chat/completions",
 		Tokens:    TokenMetrics{InputTokens: 1, OutputTokens: 2},
+		CaptureID: s.metrics.newCaptureID(),
 	})
 	if !ok {
 		t.Fatal("queueMetrics m1 failed")
 	}
-	if ok := s.metrics.addCapture(ReqRespCapture{ID: storedM1.ID, ReqPath: "/v1/chat/completions"}, storedM1.Timestamp); !ok {
+	if ok := s.metrics.addCapture(storedM1.CaptureID, ReqRespCapture{ID: storedM1.ID, ReqPath: "/v1/chat/completions"}); !ok {
 		t.Fatal("addCapture failed")
 	}
 	if _, ok := s.metrics.queueMetrics(ActivityLogEntry{
@@ -413,7 +414,7 @@ func TestServer_APIMetricsActivity(t *testing.T) {
 	if page.Total != 1 || len(page.Data) != 1 {
 		t.Fatalf("page = %+v", page)
 	}
-	if page.Data[0].ID != storedM1.ID || !page.Data[0].HasCapture {
+	if page.Data[0].ID != storedM1.ID || page.Data[0].CaptureID != storedM1.CaptureID || !page.Data[0].HasCapture {
 		t.Fatalf("entry = %+v", page.Data[0])
 	}
 }

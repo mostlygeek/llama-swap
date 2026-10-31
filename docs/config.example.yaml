@@ -57,10 +57,10 @@ logToStdout: "proxy"
 # - file-backed sqlite keeps activity logs across restarts
 # - captures: optional, a separate sqlite database file for request/response
 #   captures so they are kept across restarts
-#   - requires path, and must be a different file than path
+#   - must be a different file than path
 #   - total size is capped by captureBuffer; the oldest captures are deleted
-#   - llama-swap will not start if the captures file does not belong to the
-#     activity database in path
+#   - activity rows refer to captures by capture ID; a row whose capture was
+#     deleted shows no capture
 # store:
 #   path: /path/to/file.sqlite
 #   captures: /path/to/captures.sqlite

@@ -144,14 +144,16 @@ type HookOnStartup struct {
 	Profile string   `yaml:"profile"`
 }
 
-// Store configures where llama-swap persists data. Data without a configured
-// path is kept in memory.
+// Store configures where llama-swap persists data. Both paths are optional,
+// but at least one must be set when the store section is present. Data
+// without a configured path is kept in memory.
 type Store struct {
 	// Path is the SQLite database file for activity logs.
 	Path string `yaml:"path"`
-	// Captures is an optional, separate SQLite database file for
-	// request/response captures. It requires Path because captures are
-	// linked to activity rows by ID. Its size is bounded by captureBuffer.
+	// Captures is a separate SQLite database file for request/response
+	// captures. Activity rows name their capture by capture ID, so the two
+	// files do not need to stay in step. Its size is bounded by
+	// captureBuffer.
 	Captures string `yaml:"captures"`
 }
 

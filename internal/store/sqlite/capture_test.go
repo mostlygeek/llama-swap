@@ -3,6 +3,7 @@ package sqlite
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -27,17 +28,17 @@ func TestStore_CapturePutGet(t *testing.T) {
 	_, captures := newCaptureStore(t)
 
 	ts := time.Unix(1750000000, 0)
-	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: 7, Timestamp: ts, Data: []byte("blob")}))
+	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "c7", Timestamp: ts, Data: []byte("blob")}))
 
-	got, found, err := captures.Get(ctx, 7)
+	got, found, err := captures.Get(ctx, "c7")
 	require.NoError(t, err)
 	require.True(t, found)
-	assert.Equal(t, 7, got.ID)
+	assert.Equal(t, "c7", got.ID)
 	assert.Equal(t, ts.Unix(), got.Timestamp.Unix())
 	assert.Equal(t, []byte("blob"), got.Data)
 	assert.EqualValues(t, 4, captures.Size())
 
-	_, found, err = captures.Get(ctx, 8)
+	_, found, err = captures.Get(ctx, "c8")
 	require.NoError(t, err)
 	assert.False(t, found)
 }
@@ -46,11 +47,11 @@ func TestStore_CapturePutReplacesAndTracksSize(t *testing.T) {
 	ctx := context.Background()
 	_, captures := newCaptureStore(t)
 
-	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: 1, Data: make([]byte, 100)}))
-	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: 1, Data: make([]byte, 30)}))
+	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "a", Data: make([]byte, 100)}))
+	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "a", Data: make([]byte, 30)}))
 	assert.EqualValues(t, 30, captures.Size())
 
-	got, found, err := captures.Get(ctx, 1)
+	got, found, err := captures.Get(ctx, "a")
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.Len(t, got.Data, 30)
@@ -60,7 +61,7 @@ func TestStore_CaptureHas(t *testing.T) {
 	ctx := context.Background()
 	_, captures := newCaptureStore(t)
 
-	for _, id := range []int{2, 4, 600} {
+	for _, id := range []string{"id-2", "id-4", "id-600"} {
 		require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: id, Data: []byte("x")}))
 	}
 
@@ -69,26 +70,26 @@ func TestStore_CaptureHas(t *testing.T) {
 	assert.Empty(t, empty)
 
 	// More ids than one batch, so the lookup spans several queries.
-	ids := make([]int, 0, 700)
+	ids := make([]string, 0, 700)
 	for id := 1; id <= 700; id++ {
-		ids = append(ids, id)
+		ids = append(ids, fmt.Sprintf("id-%d", id))
 	}
 	found, err := captures.Has(ctx, ids)
 	require.NoError(t, err)
-	assert.Equal(t, map[int]bool{2: true, 4: true, 600: true}, found)
+	assert.Equal(t, map[string]bool{"id-2": true, "id-4": true, "id-600": true}, found)
 }
 
 func TestStore_CaptureDelete(t *testing.T) {
 	ctx := context.Background()
 	_, captures := newCaptureStore(t)
 
-	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: 1, Data: make([]byte, 10)}))
-	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: 2, Data: make([]byte, 20)}))
-	require.NoError(t, captures.Delete(ctx, 1))
-	require.NoError(t, captures.Delete(ctx, 99), "deleting a missing id is not an error")
+	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "a", Data: make([]byte, 10)}))
+	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "b", Data: make([]byte, 20)}))
+	require.NoError(t, captures.Delete(ctx, "a"))
+	require.NoError(t, captures.Delete(ctx, "missing"), "deleting a missing id is not an error")
 	assert.EqualValues(t, 20, captures.Size())
 
-	_, found, err := captures.Get(ctx, 1)
+	_, found, err := captures.Get(ctx, "a")
 	require.NoError(t, err)
 	assert.False(t, found)
 }
@@ -97,7 +98,10 @@ func TestStore_CapturePruneDropsOldestBySize(t *testing.T) {
 	ctx := context.Background()
 	_, captures := newCaptureStore(t)
 
-	for id := 1; id <= 5; id++ {
+	// IDs are written out of string order to show pruning follows write
+	// order, not ID order.
+	order := []string{"e", "d", "c", "b", "a"}
+	for _, id := range order {
 		require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: id, Data: make([]byte, 100)}))
 	}
 
@@ -107,9 +111,9 @@ func TestStore_CapturePruneDropsOldestBySize(t *testing.T) {
 
 	require.NoError(t, captures.Prune(ctx, 250))
 	assert.EqualValues(t, 200, captures.Size())
-	found, err := captures.Has(ctx, []int{1, 2, 3, 4, 5})
+	found, err := captures.Has(ctx, order)
 	require.NoError(t, err)
-	assert.Equal(t, map[int]bool{4: true, 5: true}, found)
+	assert.Equal(t, map[string]bool{"b": true, "a": true}, found)
 }
 
 func TestStore_CapturesPersistAcrossReopen(t *testing.T) {
@@ -118,19 +122,28 @@ func TestStore_CapturesPersistAcrossReopen(t *testing.T) {
 	activityPath := filepath.Join(dir, "activity.db")
 	capturesPath := filepath.Join(dir, "captures.db")
 
+	captureID, err := store.NewCaptureID()
+	require.NoError(t, err)
+
 	first, err := New(activityPath, capturesPath)
 	require.NoError(t, err)
-	entry, err := first.Activity().Insert(ctx, store.ActivityLogEntry{Model: "m", Timestamp: time.Unix(1750000000, 0)})
+	entry, err := first.Activity().Insert(ctx, store.ActivityLogEntry{Model: "m", CaptureID: captureID})
 	require.NoError(t, err)
 	data := bytes.Repeat([]byte("c"), 64)
-	require.NoError(t, first.Captures().Put(ctx, store.CaptureEntry{ID: entry.ID, Timestamp: entry.Timestamp, Data: data}))
+	require.NoError(t, first.Captures().Put(ctx, store.CaptureEntry{ID: captureID, Data: data}))
 	require.NoError(t, first.Close())
 
 	second, err := New(activityPath, capturesPath)
 	require.NoError(t, err)
 	defer second.Close()
 
-	got, found, err := second.Captures().Get(ctx, entry.ID)
+	page, err := second.Activity().List(ctx, store.ActivityQuery{})
+	require.NoError(t, err)
+	require.Len(t, page.Data, 1)
+	assert.Equal(t, entry.ID, page.Data[0].ID)
+	assert.Equal(t, captureID, page.Data[0].CaptureID, "capture_id is stored on the activity row")
+
+	got, found, err := second.Captures().Get(ctx, captureID)
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, data, got.Data)
@@ -142,55 +155,28 @@ func TestStore_CapturesPersistAcrossReopen(t *testing.T) {
 	assert.Zero(t, tables)
 }
 
-func TestStore_CapturesOutOfSyncFailsOpen(t *testing.T) {
+// The activity and captures files are independent: either can be replaced
+// and the store still opens. Rows whose capture is gone just have none.
+func TestStore_CapturesIndependentOfActivity(t *testing.T) {
 	ctx := context.Background()
+	dir := t.TempDir()
+	capturesPath := filepath.Join(dir, "captures.db")
 
-	// seed writes one activity row and its capture to fresh files and
-	// returns their paths.
-	seed := func(t *testing.T) (activityPath, capturesPath string) {
-		t.Helper()
-		dir := t.TempDir()
-		activityPath = filepath.Join(dir, "activity.db")
-		capturesPath = filepath.Join(dir, "captures.db")
-		st, err := New(activityPath, capturesPath)
-		require.NoError(t, err)
-		entry, err := st.Activity().Insert(ctx, store.ActivityLogEntry{Model: "m", Timestamp: time.Unix(1750000000, 0)})
-		require.NoError(t, err)
-		require.NoError(t, st.Captures().Put(ctx, store.CaptureEntry{ID: entry.ID, Timestamp: entry.Timestamp, Data: []byte("x")}))
-		require.NoError(t, st.Close())
-		return activityPath, capturesPath
-	}
+	first, err := New(filepath.Join(dir, "activity.db"), capturesPath)
+	require.NoError(t, err)
+	require.NoError(t, first.Captures().Put(ctx, store.CaptureEntry{ID: "orphan", Data: []byte("x")}))
+	require.NoError(t, first.Close())
 
-	t.Run("new activity database", func(t *testing.T) {
-		_, capturesPath := seed(t)
-		_, err := New(filepath.Join(t.TempDir(), "other.db"), capturesPath)
-		require.ErrorIs(t, err, ErrCapturesOutOfSync)
-		assert.Contains(t, err.Error(), "no matching activity row")
-	})
+	// A new activity database with the old captures file.
+	second, err := New(filepath.Join(dir, "other.db"), capturesPath)
+	require.NoError(t, err)
+	_, found, err := second.Captures().Get(ctx, "orphan")
+	require.NoError(t, err)
+	assert.True(t, found)
+	require.NoError(t, second.Close())
 
-	t.Run("in-memory activity database", func(t *testing.T) {
-		_, capturesPath := seed(t)
-		_, err := New("", capturesPath)
-		require.ErrorIs(t, err, ErrCapturesOutOfSync)
-	})
-
-	t.Run("different activity row", func(t *testing.T) {
-		activityPath, capturesPath := seed(t)
-		other, err := New(activityPath, "")
-		require.NoError(t, err)
-		_, err = other.db.Exec(`UPDATE activity SET ts_created = ts_created + 1`)
-		require.NoError(t, err)
-		require.NoError(t, other.Close())
-
-		_, err = New(activityPath, capturesPath)
-		require.ErrorIs(t, err, ErrCapturesOutOfSync)
-		assert.Contains(t, err.Error(), "was recorded at")
-	})
-
-	t.Run("in sync", func(t *testing.T) {
-		activityPath, capturesPath := seed(t)
-		st, err := New(activityPath, capturesPath)
-		require.NoError(t, err)
-		require.NoError(t, st.Close())
-	})
+	// An in-memory activity database with the old captures file.
+	third, err := New("", capturesPath)
+	require.NoError(t, err)
+	require.NoError(t, third.Close())
 }

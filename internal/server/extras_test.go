@@ -9,10 +9,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/store"
 )
 
 func TestServer_DecompressBody(t *testing.T) {
@@ -282,11 +284,12 @@ func TestServer_HandleAPIUnloadModel(t *testing.T) {
 func TestServer_HandleAPICapture(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 	s.metrics = newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 5)
-	s.metrics.addCapture(ReqRespCapture{ID: 42, ReqPath: "/v1/chat/completions"}, testClock)
+	captureID := s.metrics.newCaptureID()
+	s.metrics.addCapture(captureID, ReqRespCapture{ID: 42, ReqPath: "/v1/chat/completions"})
 
 	t.Run("found", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/captures/42", nil))
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/captures/"+captureID, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d", w.Code)
 		}
@@ -297,7 +300,7 @@ func TestServer_HandleAPICapture(t *testing.T) {
 
 	t.Run("not found", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/captures/999", nil))
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/captures/"+strings.Repeat("1", store.CaptureIDLen), nil))
 		if w.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want 404", w.Code)
 		}

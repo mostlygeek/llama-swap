@@ -39,16 +39,20 @@ type ActivityLogEntry struct {
 	// Task is the kind of inference (chat, embedding, ...); see hint.Task.
 	Task string `json:"task,omitempty"`
 	// Route is "local" or "peer"; PeerID names the peer for peer requests.
-	Route           string            `json:"route,omitempty"`
-	PeerID          string            `json:"peer_id,omitempty"`
-	ReqPath         string            `json:"req_path"`
-	RespContentType string            `json:"resp_content_type"`
-	RespStatusCode  int               `json:"resp_status_code"`
-	Tokens          TokenMetrics      `json:"tokens"`
-	DurationMs      int               `json:"duration_ms"`
-	HasCapture      bool              `json:"has_capture"`
-	ErrorMsg        string            `json:"error_msg,omitempty"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
+	Route           string       `json:"route,omitempty"`
+	PeerID          string       `json:"peer_id,omitempty"`
+	ReqPath         string       `json:"req_path"`
+	RespContentType string       `json:"resp_content_type"`
+	RespStatusCode  int          `json:"resp_status_code"`
+	Tokens          TokenMetrics `json:"tokens"`
+	DurationMs      int          `json:"duration_ms"`
+	// CaptureID names this row's request/response capture, or is empty
+	// when none was taken. A set CaptureID does not guarantee the capture
+	// still exists: captures are pruned by size. HasCapture reports that.
+	CaptureID  string            `json:"capture_id,omitempty"`
+	HasCapture bool              `json:"has_capture"`
+	ErrorMsg   string            `json:"error_msg,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 // ActivityFilter narrows which activity rows a query matches. The zero value
