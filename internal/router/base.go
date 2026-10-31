@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
@@ -263,6 +264,7 @@ func (b *baseRouter) StopProcesses(timeout time.Duration, ids []string) {
 // notification rather than blocking the HTTP goroutine forever.
 func (b *baseRouter) trackedServe(modelID string, p process.Process) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		setLocalHint(r, p)
 		defer func() {
 			select {
 			case b.serveDoneCh <- scheduler.ServeDoneEvent{ModelID: modelID}:
@@ -270,6 +272,16 @@ func (b *baseRouter) trackedServe(modelID string, p process.Process) http.Handle
 			}
 		}()
 		p.ServeHTTP(w, r)
+	}
+}
+
+// setLocalHint tells the metrics middleware, through the request's hint,
+// that a local process serves r and which upstream it detected.
+func setLocalHint(r *http.Request, p process.Process) {
+	if h := hint.From(r.Context()); h != nil {
+		h.Route = hint.RouteLocal
+		h.PeerID = ""
+		h.Upstream = p.Status().Upstream
 	}
 }
 
@@ -531,6 +543,7 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				fmt.Sprintf("model %s is not loaded; ignored websocket requests cannot start it", data.ModelID))
 			return
 		}
+		setLocalHint(req, p)
 		p.ServeHTTP(w, req)
 		return
 	}

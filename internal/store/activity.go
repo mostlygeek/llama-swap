@@ -8,21 +8,29 @@ import (
 
 // TokenMetrics holds token usage and performance metrics.
 type TokenMetrics struct {
-	CachedTokens    int     `json:"cache_tokens"`
-	DraftTokens     int     `json:"draft_tokens"`
-	DraftAccTokens  int     `json:"draft_acc_tokens"`
-	InputTokens     int     `json:"input_tokens"`
-	OutputTokens    int     `json:"output_tokens"`
+	CachedTokens   int `json:"cache_tokens"`
+	DraftTokens    int `json:"draft_tokens"`
+	DraftAccTokens int `json:"draft_acc_tokens"`
+	InputTokens    int `json:"input_tokens"`
+	OutputTokens   int `json:"output_tokens"`
+	// ReasoningTokens is the reasoning share of OutputTokens, -1 when the
+	// upstream does not report it.
+	ReasoningTokens int     `json:"reasoning_tokens"`
 	PromptPerSecond float64 `json:"prompt_per_second"`
 	TokensPerSecond float64 `json:"tokens_per_second"`
 }
 
 // ActivityLogEntry represents parsed token statistics from llama-server logs.
 type ActivityLogEntry struct {
-	ID              int               `json:"id"`
-	Timestamp       time.Time         `json:"timestamp"`
-	Src             string            `json:"src"`
-	Model           string            `json:"model"`
+	ID        int       `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Src       string    `json:"src"`
+	Model     string    `json:"model"`
+	// Task is the kind of inference (chat, embedding, ...); see hint.Task.
+	Task string `json:"task,omitempty"`
+	// Route is "local" or "peer"; PeerID names the peer for peer requests.
+	Route           string            `json:"route,omitempty"`
+	PeerID          string            `json:"peer_id,omitempty"`
 	ReqPath         string            `json:"req_path"`
 	RespContentType string            `json:"resp_content_type"`
 	RespStatusCode  int               `json:"resp_status_code"`

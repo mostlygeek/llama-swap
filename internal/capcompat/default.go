@@ -2,8 +2,10 @@ package capcompat
 
 import (
 	"context"
+	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 )
 
 // defaultProber is the fallback prober for any OpenAI-compatible server whose
@@ -22,6 +24,20 @@ type defaultProber struct{}
 var _ Prober = defaultProber{}
 
 func (defaultProber) Name() string { return "default" }
+
+// ownerUpstreams names the families the default prober can tell apart by
+// owned_by. Anything else is reported as a generic OpenAI-compatible server.
+// Add a family here once its owned_by value is confirmed against the server.
+var ownerUpstreams = map[string]hint.Upstream{
+	"vllm": hint.VLLM,
+}
+
+func (defaultProber) Upstream(models ModelsResponse) hint.Upstream {
+	if u, ok := ownerUpstreams[strings.ToLower(models.OwnedBy())]; ok {
+		return u
+	}
+	return hint.OpenAICompatible
+}
 
 func (defaultProber) Matches(models ModelsResponse) bool {
 	for _, entry := range models.Data {

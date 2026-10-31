@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tailscale/tailcat"
@@ -875,5 +877,48 @@ peers:
 	}
 	if err := pr.Shutdown(time.Second); err != nil {
 		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
+func TestPeer_ServeHTTP_SetsPeerHint(t *testing.T) {
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	proxyURL, _ := url.Parse(testServer.URL)
+	pr, err := NewPeer(config.Config{Peers: config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{Proxy: testServer.URL, ProxyURL: proxyURL, Models: []string{"test-model"}},
+	}}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, h := hint.New(context.Background())
+	ctx = swaputil.SetContext(ctx, swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil).WithContext(ctx)
+	pr.ServeHTTP(httptest.NewRecorder(), req)
+
+	// A local test server matches no host rule, so the upstream is unknown.
+	if h.Route != hint.RoutePeer || h.PeerID != "peer1" || h.Upstream != hint.Unknown {
+		t.Errorf("hint = %+v, want peer1 with unknown upstream", *h)
+	}
+}
+
+func TestNewPeer_UpstreamFromProxyHost(t *testing.T) {
+	openai, _ := url.Parse("https://api.openai.com/v1")
+	other, _ := url.Parse("http://10.0.0.5:8080")
+	pr, err := NewPeer(config.Config{Peers: config.PeerDictionaryConfig{
+		"oai":   config.PeerConfig{Proxy: openai.String(), ProxyURL: openai, Models: []string{"gpt"}},
+		"other": config.PeerConfig{Proxy: other.String(), ProxyURL: other, Models: []string{"local"}},
+	}}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pr.peers["gpt"].member.upstream; got != hint.OpenAI {
+		t.Errorf("oai upstream = %q, want openai", got)
+	}
+	if got := pr.peers["local"].member.upstream; got != hint.Unknown {
+		t.Errorf("other upstream = %q, want unknown", got)
 	}
 }

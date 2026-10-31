@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
 
@@ -35,7 +36,7 @@ var ErrUnsupportedUpstream = errors.New("capcompat: unsupported upstream")
 // Info is what Detect produces and what callers cache.
 type Info struct {
 	// Upstream is the server family that answered, e.g. "llama-server".
-	Upstream string `json:"upstream"`
+	Upstream hint.Upstream `json:"upstream"`
 	// Capabilities is the discovered subset. Fields a server cannot report
 	// are left at their zero value, never guessed.
 	Capabilities config.ModelCapConfig `json:"capabilities"`
@@ -160,8 +161,12 @@ func (m ModelsResponse) Find(modelName string) (ModelEntry, bool) {
 // Prober knows one upstream server family: how to recognise it from its model
 // listing, and what else to ask it.
 type Prober interface {
-	// Name identifies the family, and is stored in Info.Upstream.
+	// Name identifies the prober in log and error messages.
 	Name() string
+
+	// Upstream names the server family behind a matching listing, and is
+	// stored in Info.Upstream. One prober can cover several families.
+	Upstream(models ModelsResponse) hint.Upstream
 
 	// Matches reports whether the listing came from this family.
 	Matches(models ModelsResponse) bool
@@ -200,7 +205,7 @@ func Detect(ctx context.Context, c *Client, modelName string) (Info, error) {
 			return Info{}, fmt.Errorf("capcompat: %s reported invalid capabilities: %w", prober.Name(), err)
 		}
 		return Info{
-			Upstream:     prober.Name(),
+			Upstream:     prober.Upstream(models),
 			Capabilities: caps,
 			DetectedAt:   time.Now(),
 		}, nil

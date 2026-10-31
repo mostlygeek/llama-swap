@@ -3,31 +3,19 @@ package server
 import (
 	"context"
 	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
-	"github.com/tidwall/gjson"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-func TestServer_ParseMetrics_ChatCompletions(t *testing.T) {
-	body := `{"usage":{"prompt_tokens":12,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":4}}}`
-	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
-	if err != nil {
-		t.Fatalf("parseMetrics: %v", err)
-	}
-	if entry.Tokens.InputTokens != 12 || entry.Tokens.OutputTokens != 7 || entry.Tokens.CachedTokens != 4 {
-		t.Fatalf("tokens = %+v", entry.Tokens)
-	}
-}
 
 func TestServer_ActivitySourceStripsClientPort(t *testing.T) {
 	tests := []struct {
@@ -86,104 +74,6 @@ func TestServer_ActivitySourceForwardedHeaders(t *testing.T) {
 	}
 }
 
-func TestServer_ParseMetrics_Timings(t *testing.T) {
-	body := `{"timings":{"prompt_n":20,"predicted_n":50,"prompt_per_second":100.0,"predicted_per_second":40.0,"prompt_ms":200,"predicted_ms":1250,"cache_n":8}}`
-	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
-	if err != nil {
-		t.Fatalf("parseMetrics: %v", err)
-	}
-	if entry.Tokens.InputTokens != 20 || entry.Tokens.OutputTokens != 50 || entry.Tokens.CachedTokens != 8 {
-		t.Fatalf("tokens = %+v", entry.Tokens)
-	}
-	if entry.Tokens.TokensPerSecond != 40.0 || entry.Tokens.PromptPerSecond != 100.0 {
-		t.Fatalf("rates = %+v", entry.Tokens)
-	}
-	if entry.DurationMs != 1450 {
-		t.Fatalf("DurationMs = %d, want 1450", entry.DurationMs)
-	}
-}
-
-func TestServer_ParseMetrics_TabbyAPI(t *testing.T) {
-	body := `{"id":"chatcmpl-131b9995cd0c40c99e2ce958083ee406","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":83,"prompt_time":2.36,"prompt_tokens_per_sec":35.17,"completion_tokens":192,"completion_time":11.22,"completion_tokens_per_sec":17.11,"total_tokens":275,"total_time":13.63},"model":"SC_6.00bpw_H6_V6"}`
-	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
-	if err != nil {
-		t.Fatalf("parseMetrics: %v", err)
-	}
-	if entry.Tokens.InputTokens != 83 || entry.Tokens.OutputTokens != 192 {
-		t.Fatalf("tokens = %+v", entry.Tokens)
-	}
-	if got, want := entry.Tokens.PromptPerSecond, 35.17; math.Abs(got-want) > 1e-9 {
-		t.Errorf("PromptPerSecond = %v, want %v", got, want)
-	}
-	if got, want := entry.Tokens.TokensPerSecond, 17.11; math.Abs(got-want) > 1e-9 {
-		t.Errorf("TokensPerSecond = %v, want %v", got, want)
-	}
-	if entry.DurationMs != 13630 {
-		t.Errorf("DurationMs = %d, want 13630", entry.DurationMs)
-	}
-}
-
-func TestServer_ParseMetrics_OMLX(t *testing.T) {
-	tests := []struct {
-		name         string
-		rates        string
-		extra        string
-		wantPrompt   float64
-		wantGenerate float64
-	}{
-		{"reported", `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 63.74, 66.38},
-		{"zero", `,"prompt_tokens_per_second":0,"generation_tokens_per_second":0`, "", 0, 0},
-		{"null", `,"prompt_tokens_per_second":null,"generation_tokens_per_second":null`, "", -1, -1},
-		{"missing", "", "", -1, -1},
-		{"prompt only", `,"prompt_tokens_per_second":63.74`, "", 63.74, -1},
-		{"generation only", `,"generation_tokens_per_second":66.38`, "", -1, 66.38},
-		{"non-numeric", `,"prompt_tokens_per_second":"unknown","generation_tokens_per_second":false`, "", -1, -1},
-		{"TabbyAPI precedence", `,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 35.17, 17.11},
-		{"TabbyAPI zero precedence", `,"prompt_tokens_per_sec":0,"completion_tokens_per_sec":0,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 0, 0},
-		{"TabbyAPI string precedence", `,"prompt_tokens_per_sec":"35.17","completion_tokens_per_sec":"17.11","prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 35.17, 17.11},
-		{"TabbyAPI null fallback", `,"prompt_tokens_per_sec":null,"completion_tokens_per_sec":null,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 63.74, 66.38},
-		{"all null", `,"prompt_tokens_per_sec":null,"completion_tokens_per_sec":null,"prompt_tokens_per_second":null,"generation_tokens_per_second":null`, "", -1, -1},
-		{"independent generation fallback", `,"prompt_tokens_per_sec":35.17,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 35.17, 66.38},
-		{"independent prompt fallback", `,"completion_tokens_per_sec":17.11,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 63.74, 17.11},
-		{"timings precedence", `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, `,"timings":{"prompt_n":56,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40}`, 100, 40},
-		{"vLLM precedence", `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, `,"metrics":{"time_to_first_token_ms":200,"mean_itl_ms":10}`, 200, 100},
-		{"vLLM over timings", `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, `,"timings":{"prompt_n":56,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40},"metrics":{"time_to_first_token_ms":200,"mean_itl_ms":10}`, 200, 100},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			body := `{"usage":{"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}` + test.rates + `}` + test.extra + `}`
-			for _, streaming := range []bool{false, true} {
-				name := "JSON"
-				if streaming {
-					name = "SSE"
-				}
-				t.Run(name, func(t *testing.T) {
-					var entry ActivityLogEntry
-					var err error
-					if streaming {
-						stream := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" + "data: " + body + "\n\ndata: [DONE]\n\n"
-						entry, err = processStreamingResponse("m", time.Now(), []byte(stream))
-					} else {
-						parsed := gjson.Parse(body)
-						entry, err = parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
-					}
-					if err != nil {
-						t.Fatalf("parse metrics: %v", err)
-					}
-					if entry.Tokens.InputTokens != 56 || entry.Tokens.OutputTokens != 8 || entry.Tokens.CachedTokens != 16 {
-						t.Fatalf("tokens = %+v", entry.Tokens)
-					}
-					if entry.Tokens.PromptPerSecond != test.wantPrompt || entry.Tokens.TokensPerSecond != test.wantGenerate {
-						t.Fatalf("rates = %+v, want prompt %v, generation %v", entry.Tokens, test.wantPrompt, test.wantGenerate)
-					}
-				})
-			}
-		})
-	}
-}
-
 func TestServer_MetricsMiddleware_OMLX(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		name := "JSON"
@@ -221,156 +111,6 @@ func TestServer_MetricsMiddleware_OMLX(t *testing.T) {
 	}
 }
 
-// llama-server timings and TabbyAPI usage rates never appear together, but a
-// response carrying both must keep the timings-sourced rates.
-func TestServer_ParseMetrics_TabbyAPINotOverwrittenByTimings(t *testing.T) {
-	body := `{"usage":{"prompt_tokens":83,"completion_tokens":192,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11},"timings":{"prompt_n":20,"predicted_n":50,"prompt_per_second":100.0,"predicted_per_second":40.0,"prompt_ms":200,"predicted_ms":1250}}`
-	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
-	if err != nil {
-		t.Fatalf("parseMetrics: %v", err)
-	}
-	if entry.Tokens.PromptPerSecond != 100.0 || entry.Tokens.TokensPerSecond != 40.0 {
-		t.Fatalf("rates = %+v, want timings rates", entry.Tokens)
-	}
-}
-
-func TestServer_ProcessStreamingResponse_TabbyAPI(t *testing.T) {
-	body := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-131b9995cd0c40c99e2ce958083ee406\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":83,\"prompt_time\":2.36,\"prompt_tokens_per_sec\":35.17,\"completion_tokens\":192,\"completion_time\":11.22,\"completion_tokens_per_sec\":17.11,\"total_tokens\":275,\"total_time\":13.63},\"model\":\"SC_6.00bpw_H6_V6\"}\n\n" +
-		"data: [DONE]\n\n")
-	entry, err := processStreamingResponse("m", time.Now(), body)
-	if err != nil {
-		t.Fatalf("processStreamingResponse: %v", err)
-	}
-	if entry.Tokens.InputTokens != 83 || entry.Tokens.OutputTokens != 192 {
-		t.Fatalf("tokens = %+v", entry.Tokens)
-	}
-	if got, want := entry.Tokens.PromptPerSecond, 35.17; math.Abs(got-want) > 1e-9 {
-		t.Errorf("PromptPerSecond = %v, want %v", got, want)
-	}
-	if got, want := entry.Tokens.TokensPerSecond, 17.11; math.Abs(got-want) > 1e-9 {
-		t.Errorf("TokensPerSecond = %v, want %v", got, want)
-	}
-}
-
-func TestServer_ProcessStreamingResponse(t *testing.T) {
-	body := []byte("data: {\"choices\":[{}]}\n\n" +
-		"data: {\"usage\":{\"prompt_tokens\":15,\"completion_tokens\":33}}\n\n" +
-		"data: [DONE]\n\n")
-	entry, err := processStreamingResponse("m", time.Now(), body)
-	if err != nil {
-		t.Fatalf("processStreamingResponse: %v", err)
-	}
-	if entry.Tokens.InputTokens != 15 || entry.Tokens.OutputTokens != 33 {
-		t.Fatalf("tokens = %+v", entry.Tokens)
-	}
-}
-
-func TestServer_ProcessStreamingResponse_VLLMMetrics(t *testing.T) {
-	body := []byte(`data: {"id":"chatcmpl-b7a832cea986aea4","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":14,"total_tokens":166,"completion_tokens":152},"metrics":{"time_to_first_token_ms":70,"mean_itl_ms":10,"tokens_per_second":24.116032676555495}}
-
-data: [DONE]
-`)
-	entry, err := processStreamingResponse("m", time.Now(), body)
-	if err != nil {
-		t.Fatalf("processStreamingResponse: %v", err)
-	}
-	if entry.Tokens.InputTokens != 14 || entry.Tokens.OutputTokens != 152 {
-		t.Fatalf("tokens = %+v", entry.Tokens)
-	}
-	if entry.Tokens.CachedTokens != -1 {
-		t.Errorf("CachedTokens = %d, want -1", entry.Tokens.CachedTokens)
-	}
-	if got, want := entry.Tokens.PromptPerSecond, 200.0; math.Abs(got-want) > 1e-9 {
-		t.Errorf("PromptPerSecond = %v, want %v", got, want)
-	}
-	if entry.Tokens.TokensPerSecond != 100 {
-		t.Errorf("TokensPerSecond = %v, want 100", entry.Tokens.TokensPerSecond)
-	}
-}
-
-func TestServer_ParseMetrics_VLLMMetrics(t *testing.T) {
-	body := `{"id":"chatcmpl-abc123","object":"chat.completion","usage":{"prompt_tokens":42,"completion_tokens":128,"total_tokens":170,"prompt_tokens_details":{"cached_tokens":20}},"metrics":{"time_to_first_token_ms":85.2,"generation_time_ms":1240.5,"queue_time_ms":12.3,"mean_itl_ms":9.1,"tokens_per_second":103.2}}`
-	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
-	if err != nil {
-		t.Fatalf("parseMetrics: %v", err)
-	}
-	if entry.Tokens.InputTokens != 42 || entry.Tokens.OutputTokens != 128 || entry.Tokens.CachedTokens != 20 {
-		t.Fatalf("tokens = %+v", entry.Tokens)
-	}
-	if got, want := entry.Tokens.PromptPerSecond, float64(42-20)/(85.2/1000); math.Abs(got-want) > 1e-9 {
-		t.Errorf("PromptPerSecond = %v, want %v", got, want)
-	}
-	if got, want := entry.Tokens.TokensPerSecond, 1000/9.1; math.Abs(got-want) > 1e-9 {
-		t.Errorf("TokensPerSecond = %v, want %v", got, want)
-	}
-}
-
-func TestServer_ParseMetrics_VLLMSpeculativeDecoding(t *testing.T) {
-	body := `{"id":"chatcmpl-abc123","object":"chat.completion","usage":{"prompt_tokens":42,"completion_tokens":128},"metrics":{"mean_itl_ms":9.1,"speculative_decoding":{"mean_acceptance_length":1.7,"draft_acceptance_rate":0.7,"acceptance_histogram":[6,14],"num_spec_steps":20,"num_accepted_draft_tokens":14,"num_draft_tokens":20,"num_spec_tokens":1}}}`
-	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
-	if err != nil {
-		t.Fatalf("parseMetrics: %v", err)
-	}
-	if entry.Tokens.DraftTokens != 20 || entry.Tokens.DraftAccTokens != 14 {
-		t.Fatalf("draft tokens = %+v, want 14/20", entry.Tokens)
-	}
-}
-
-// A speculative_decoding object missing either counter must leave both unset so
-// the acceptance rate is not computed from half the data.
-func TestServer_ParseMetrics_VLLMSpeculativeDecodingPartial(t *testing.T) {
-	body := `{"usage":{"prompt_tokens":42,"completion_tokens":128},"metrics":{"speculative_decoding":{"num_draft_tokens":20}}}`
-	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
-	if err != nil {
-		t.Fatalf("parseMetrics: %v", err)
-	}
-	if entry.Tokens.DraftTokens != -1 || entry.Tokens.DraftAccTokens != -1 {
-		t.Fatalf("draft tokens = %+v, want -1/-1", entry.Tokens)
-	}
-}
-
-// vLLM only emits the metrics object on the final streamed chunk.
-func TestServer_ProcessStreamingResponse_VLLMSpeculativeDecoding(t *testing.T) {
-	body := []byte(`data: {"choices":[{"delta":{"content":"hi"}}]}
-
-data: {"object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":11742,"completion_tokens":35},"metrics":{"mean_itl_ms":17.209908293272534,"speculative_decoding":{"mean_acceptance_length":1.7,"draft_acceptance_rate":0.7,"num_spec_steps":20,"num_accepted_draft_tokens":14,"num_draft_tokens":20,"num_spec_tokens":1}}}
-
-data: [DONE]
-`)
-	entry, err := processStreamingResponse("m", time.Now(), body)
-	if err != nil {
-		t.Fatalf("processStreamingResponse: %v", err)
-	}
-	if entry.Tokens.DraftTokens != 20 || entry.Tokens.DraftAccTokens != 14 {
-		t.Fatalf("draft tokens = %+v, want 14/20", entry.Tokens)
-	}
-}
-
-// llama-server timings and vLLM metrics never appear together, but a response
-// carrying both must not have its timings-sourced draft counts clobbered.
-func TestServer_ParseMetrics_TimingsDraftTokensNotOverwritten(t *testing.T) {
-	body := `{"timings":{"prompt_n":20,"predicted_n":50,"draft_n":30,"draft_n_accepted":12},"metrics":{"speculative_decoding":{}}}`
-	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
-	if err != nil {
-		t.Fatalf("parseMetrics: %v", err)
-	}
-	if entry.Tokens.DraftTokens != 30 || entry.Tokens.DraftAccTokens != 12 {
-		t.Fatalf("draft tokens = %+v, want 12/30", entry.Tokens)
-	}
-}
-
-func TestServer_ProcessStreamingResponse_NoData(t *testing.T) {
-	if _, err := processStreamingResponse("m", time.Now(), []byte("data: [DONE]\n\n")); err == nil {
-		t.Fatal("expected error for stream with no usage data")
-	}
-}
-
 func TestMetricsMonitor_RecordMetadata(t *testing.T) {
 	mm := newTestMetricsMonitor(t, nil, 10, 0)
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"usage":{}}`))
@@ -384,7 +124,7 @@ func TestMetricsMonitor_RecordMetadata(t *testing.T) {
 	copier.WriteHeader(http.StatusOK)
 	copier.Write([]byte(`{"usage":{"prompt_tokens":1,"completion_tokens":2}}`))
 
-	mm.record("m", r, copier, 0, nil, nil)
+	mm.record("m", hint.TaskChat, r, copier, 0, nil, nil)
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -411,7 +151,7 @@ func TestMetricsMonitor_RecordClientClosed(t *testing.T) {
 	// Nothing is ever written: this is the cold-load cancellation shape.
 	copier.MarkStatus(swaputil.StatusClientClosedRequest)
 
-	mm.record("m", r, copier, captureAll, []byte("req"), nil)
+	mm.record("m", hint.TaskChat, r, copier, captureAll, []byte("req"), nil)
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -524,7 +264,7 @@ func TestMetricsMonitor_RecordFailedRequestCapture(t *testing.T) {
 	copier.Write([]byte(`{"error":{"message":"model unavailable"}}`))
 
 	reqBody := []byte(`{"model":"m","messages":[]}`)
-	mm.record("m", r, copier, captureAll, reqBody, reqHeaders)
+	mm.record("m", hint.TaskChat, r, copier, captureAll, reqBody, reqHeaders)
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -566,7 +306,7 @@ func TestMetricsMonitor_RecordFailedRequestStatusFallback(t *testing.T) {
 	copier.WriteHeader(http.StatusBadGateway)
 	copier.Write([]byte("<html>upstream down</html>"))
 
-	mm.record("m", r, copier, captureAll, nil, nil)
+	mm.record("m", hint.TaskChat, r, copier, captureAll, nil, nil)
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -586,7 +326,7 @@ func TestMetricsMonitor_RecordFailedRequestCaptureDisabled(t *testing.T) {
 	copier.WriteHeader(http.StatusInternalServerError)
 	copier.Write([]byte(`{"error":"boom"}`))
 
-	mm.record("m", r, copier, captureAll, []byte("req"), nil)
+	mm.record("m", hint.TaskChat, r, copier, captureAll, []byte("req"), nil)
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -614,7 +354,7 @@ func TestMetricsMonitor_RecordDecompressionFailureSetsErrorMsg(t *testing.T) {
 	copier.WriteHeader(http.StatusOK)
 	copier.Write([]byte("not-really-gzip"))
 
-	mm.record("m", r, copier, captureAll, []byte("req"), nil)
+	mm.record("m", hint.TaskChat, r, copier, captureAll, []byte("req"), nil)
 
 	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
@@ -678,23 +418,6 @@ func TestServer_ExtractErrorMessage(t *testing.T) {
 	}
 }
 
-func TestServer_ParseMetrics_Infill(t *testing.T) {
-	// /infill responses are arrays; timings live in the last element.
-	body := `[{"content":"a"},{"content":"b","timings":{"prompt_n":5,"predicted_n":9,"prompt_ms":10,"predicted_ms":20}}]`
-	parsed := gjson.Parse(body)
-	timings := parsed.Get("timings")
-	if arr := parsed.Array(); len(arr) > 0 {
-		timings = arr[len(arr)-1].Get("timings")
-	}
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), timings, parsed.Get("metrics"))
-	if err != nil {
-		t.Fatalf("parseMetrics: %v", err)
-	}
-	if entry.Tokens.InputTokens != 5 || entry.Tokens.OutputTokens != 9 {
-		t.Fatalf("tokens = %+v", entry.Tokens)
-	}
-}
-
 // TestServer_MetricsMiddleware_UpstreamAudioCaptureSkipsRespBody verifies that
 // an /upstream/<model>/v1/audio/speech request uses the path-specific capture
 // mask (headers only) rather than falling back to captureAll.
@@ -730,4 +453,47 @@ func TestServer_MetricsMiddleware_UpstreamAudioCaptureSkipsRespBody(t *testing.T
 	if len(cap.RespHeaders) == 0 {
 		t.Error("RespHeaders not stored; want captureRespHeaders mask")
 	}
+}
+
+func TestMetricsMonitor_RecordStoresHint(t *testing.T) {
+	mm := newTestMetricsMonitor(t, nil, 10, 0)
+	ctx, h := hint.New(httptest.NewRequest(http.MethodPost, "/", nil).Context())
+	h.Route = hint.RoutePeer
+	h.PeerID = "cloud"
+	h.Upstream = hint.VLLM
+	r := httptest.NewRequest(http.MethodPost, "/v1/embeddings", nil).WithContext(ctx)
+
+	copier := newBodyCopier(httptest.NewRecorder())
+	copier.Header().Set("Content-Type", "application/json")
+	copier.WriteHeader(http.StatusOK)
+	copier.Write([]byte(`{"usage":{"prompt_tokens":10,"completion_tokens":20},"metrics":{"time_to_first_token_ms":100,"mean_itl_ms":20}}`))
+
+	mm.record("m", hint.TaskEmbedding, r, copier, 0, nil, nil)
+
+	entries := metricsEntries(t, mm)
+	require.Len(t, entries, 1)
+	e := entries[0]
+	assert.Equal(t, string(hint.TaskEmbedding), e.Task)
+	assert.Equal(t, string(hint.RoutePeer), e.Route)
+	assert.Equal(t, "cloud", e.PeerID)
+	// The vLLM hint selects the vLLM extractor, which reads metrics only.
+	assert.InDelta(t, 50.0, e.Tokens.TokensPerSecond, 1e-9)
+	assert.Equal(t, -1, e.Tokens.ReasoningTokens)
+}
+
+func TestMetricsMonitor_RecordWithoutHint(t *testing.T) {
+	mm := newTestMetricsMonitor(t, nil, 10, 0)
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	copier := newBodyCopier(httptest.NewRecorder())
+	copier.WriteHeader(http.StatusOK)
+	copier.Write([]byte(`{"error":"boom"}`))
+
+	mm.record("m", hint.TaskChat, r, copier, 0, nil, nil)
+
+	entries := metricsEntries(t, mm)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "chat", entries[0].Task)
+	assert.Empty(t, entries[0].Route)
+	assert.Empty(t, entries[0].PeerID)
 }

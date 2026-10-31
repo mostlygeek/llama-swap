@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
@@ -833,5 +834,24 @@ func TestBaseRouter_Shutdown_StopsAllProcesses(t *testing.T) {
 	// Second Shutdown should report already in progress.
 	if err := b.Shutdown(0); err == nil {
 		t.Errorf("second Shutdown returned nil, want error")
+	}
+}
+
+func TestBaseRouter_SetsLocalHint(t *testing.T) {
+	a := newFakeProcess("a")
+	a.autoReady = true
+	a.upstream = hint.VLLM
+
+	b := newTestBase(t, map[string]process.Process{"a": a}, &stubPlanner{})
+
+	ctx, h := hint.New(context.Background())
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, newRequest("a").WithContext(ctx))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if h.Route != hint.RouteLocal || h.PeerID != "" || h.Upstream != hint.VLLM {
+		t.Errorf("hint = %+v, want local vllm", *h)
 	}
 }
