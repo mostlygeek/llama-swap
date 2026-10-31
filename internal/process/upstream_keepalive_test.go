@@ -170,19 +170,26 @@ func TestProcessCommand_UpstreamClosesAfterStream(t *testing.T) {
 func TestProcessCommand_DisableKeepAlives(t *testing.T) {
 	skipIfNoSimpleResponder(t)
 
+	// The transport returns a connection to its idle pool on its own
+	// goroutine after the response body is read, so a request sent right
+	// after the previous one can occasionally beat it and dial again. The
+	// default case therefore only requires that some connection was reused.
+	const requests = 5
 	for _, tc := range []struct {
 		name              string
 		disableKeepAlives bool
-		wantConns         int
 	}{
-		{"default reuses connections", false, 1},
-		{"disableKeepAlives opens one per request", true, 3},
+		{"default reuses connections", false},
+		{"disableKeepAlives opens one per request", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var mu sync.Mutex
 			remotes := map[string]struct{}{}
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/health" {
+				if r.Method != http.MethodPost {
+					// /health, and the upstream detection GETs that run on
+					// their own client before ready; only proxied requests
+					// count.
 					_, _ = io.WriteString(w, "ok")
 					return
 				}
@@ -195,12 +202,15 @@ func TestProcessCommand_DisableKeepAlives(t *testing.T) {
 			t.Cleanup(upstream.Close)
 
 			frontURL, logBuf := startKeepAliveProxy(t, upstream.URL, tc.disableKeepAlives)
-			postStreams(t, frontURL, 3, logBuf)
+			postStreams(t, frontURL, requests, logBuf)
 
 			mu.Lock()
 			defer mu.Unlock()
-			if len(remotes) != tc.wantConns {
-				t.Fatalf("upstream connections = %d, want %d", len(remotes), tc.wantConns)
+			if tc.disableKeepAlives && len(remotes) != requests {
+				t.Fatalf("upstream connections = %d, want %d", len(remotes), requests)
+			}
+			if !tc.disableKeepAlives && len(remotes) >= requests {
+				t.Fatalf("upstream connections = %d, want fewer than %d", len(remotes), requests)
 			}
 		})
 	}

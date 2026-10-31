@@ -8,6 +8,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
@@ -35,7 +36,8 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 				}
 			}
 
-			if !isMetricsRecordPath(checkPath) {
+			task, metered := meteredTask(checkPath)
+			if !metered {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -74,12 +76,17 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 				r.Header.Set("Accept-Encoding", filterAcceptEncoding(ae))
 			}
 
+			// The router or peer proxy fills the hint in while dispatching:
+			// where the request went and what kind of server answered it.
+			ctx, _ := hint.New(r.Context())
+			r = r.WithContext(ctx)
+
 			recorder := newBodyCopier(w)
 			next.ServeHTTP(recorder, r)
 			// A request abandoned before any response was written must not be
 			// filed as a successful (empty-body) metric. See #1029.
 			swaputil.MarkClientClosed(recorder, r)
-			mm.record(data.ModelID, r, recorder, cf, reqBody, reqHeaders)
+			mm.record(data.ModelID, task, r, recorder, cf, reqBody, reqHeaders)
 		})
 	}
 }

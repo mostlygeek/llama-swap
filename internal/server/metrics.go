@@ -15,7 +15,9 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/server/usage"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
@@ -139,17 +141,29 @@ func activitySource(r *http.Request) string {
 // controlling which parts are retained. Failed (non-200) requests capture the
 // request only and set ErrorMsg to a description of the failure, so the error
 // can be inspected without storing unreadable raw response bytes. reqBody and
-// reqHeaders are the request data buffered before dispatch.
-func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
+// reqHeaders are the request data buffered before dispatch. task is the kind
+// of inference, from the metered route table.
+func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
 	tm := ActivityLogEntry{
 		Timestamp:       time.Now(),
 		Model:           modelID,
+		Task:            string(task),
 		ReqPath:         r.URL.Path,
 		RespContentType: recorder.Header().Get("Content-Type"),
 		RespStatusCode:  recorder.Status(),
 		DurationMs:      int(time.Since(recorder.StartTime()).Milliseconds()),
+		Tokens:          TokenMetrics{ReasoningTokens: -1},
 	}
 	tm.Src = activitySource(r)
+
+	// The router or peer proxy fills the hint while dispatching; it says
+	// where the request went and which extractor understands the response.
+	upstream := hint.Unknown
+	if h := hint.From(r.Context()); h != nil {
+		tm.Route = string(h.Route)
+		tm.PeerID = h.PeerID
+		upstream = h.Upstream
+	}
 
 	if ctxData, ok := swaputil.ReadContext(r.Context()); ok && len(ctxData.Metadata) > 0 {
 		tm.Metadata = make(map[string]string, len(ctxData.Metadata))
@@ -219,36 +233,11 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		body = decoded
 	}
 
-	if strings.Contains(recorder.Header().Get("Content-Type"), "text/event-stream") {
-		if parsed, err := processStreamingResponse(modelID, recorder.StartTime(), body); err != nil {
-			mp.logger.Warnf("error processing streaming response: %v, path=%s, recording minimal metrics", err, r.URL.Path)
-		} else {
-			tm.Tokens = parsed.Tokens
-			tm.DurationMs = parsed.DurationMs
-		}
-	} else if gjson.ValidBytes(body) {
-		parsed := gjson.ParseBytes(body)
-		usage := parsed.Get("usage")
-		timings := parsed.Get("timings")
-		responseMetrics := parsed.Get("metrics")
-
-		// /infill responses are arrays; timings live in the last element (#463).
-		if strings.HasPrefix(r.URL.Path, "/infill") {
-			if arr := parsed.Array(); len(arr) > 0 {
-				timings = arr[len(arr)-1].Get("timings")
-			}
-		}
-
-		if usage.Exists() || timings.Exists() || responseMetrics.Exists() {
-			if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings, responseMetrics); err != nil {
-				mp.logger.Warnf("error parsing metrics: %v, path=%s, recording minimal metrics", err, r.URL.Path)
-			} else {
-				tm.Tokens = parsedMetrics.Tokens
-				tm.DurationMs = parsedMetrics.DurationMs
-			}
-		}
-	} else {
-		mp.logger.Warnf("metrics: invalid JSON in response body path=%s, recording minimal metrics", r.URL.Path)
+	if u, err := usage.Extract(upstream, r.URL.Path, recorder.Header().Get("Content-Type"), body, recorder.StartTime()); err != nil {
+		mp.logger.Warnf("metrics: %v, path=%s, recording minimal metrics", err, r.URL.Path)
+	} else if u.Found {
+		tm.Tokens = u.Tokens
+		tm.DurationMs = u.DurationMs
 	}
 
 	stored, ok := mp.queueMetrics(tm)
@@ -349,218 +338,6 @@ func failedErrorMessage(status int, body []byte, decErr error) string {
 		return fmt.Sprintf("%d %s", status, text)
 	}
 	return fmt.Sprintf("HTTP %d", status)
-}
-
-// usagePaths lists the JSON paths where a per-event usage object can live.
-var usagePaths = []string{"usage", "response.usage", "message.usage"}
-
-// extractUsageTokens reads input/output/cached token counts from a usage
-// gjson.Result, handling the field-name differences across endpoints.
-func extractUsageTokens(usage gjson.Result) (input, output, cached int64, ok bool) {
-	cached = -1
-	if !usage.Exists() {
-		return
-	}
-
-	if v := usage.Get("prompt_tokens"); v.Exists() {
-		input = v.Int()
-		ok = true
-	} else if v := usage.Get("input_tokens"); v.Exists() {
-		input = v.Int()
-		ok = true
-	}
-
-	if v := usage.Get("completion_tokens"); v.Exists() {
-		output = v.Int()
-		ok = true
-	} else if v := usage.Get("output_tokens"); v.Exists() {
-		output = v.Int()
-		ok = true
-	}
-
-	if v := usage.Get("cache_read_input_tokens"); v.Exists() {
-		cached = v.Int()
-		ok = true
-	} else if v := usage.Get("input_tokens_details.cached_tokens"); v.Exists() {
-		cached = v.Int()
-		ok = true
-	} else if v := usage.Get("prompt_tokens_details.cached_tokens"); v.Exists() {
-		cached = v.Int()
-		ok = true
-	}
-	return
-}
-
-func processStreamingResponse(modelID string, start time.Time, body []byte) (ActivityLogEntry, error) {
-	var (
-		inputTokens, outputTokens int64
-		cachedTokens              int64 = -1
-		hasAny                    bool
-		usage                     gjson.Result
-		timings                   gjson.Result
-		responseMetrics           gjson.Result
-	)
-
-	prefix := []byte("data:")
-	for offset := 0; offset < len(body); {
-		nl := bytes.IndexByte(body[offset:], '\n')
-		var line []byte
-		if nl == -1 {
-			line = body[offset:]
-			offset = len(body)
-		} else {
-			line = body[offset : offset+nl]
-			offset += nl + 1
-		}
-
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 || !bytes.HasPrefix(line, prefix) {
-			continue
-		}
-		data := bytes.TrimSpace(line[len(prefix):])
-		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
-			continue
-		}
-		if !gjson.ValidBytes(data) {
-			continue
-		}
-		parsed := gjson.ParseBytes(data)
-
-		for _, path := range usagePaths {
-			u := parsed.Get(path)
-			if !u.Exists() {
-				continue
-			}
-			i, o, c, ok := extractUsageTokens(u)
-			if !ok {
-				continue
-			}
-			hasAny = true
-			if i > 0 {
-				inputTokens = i
-			}
-			if o > 0 {
-				outputTokens = o
-			}
-			if c >= 0 {
-				cachedTokens = c
-			}
-			// Remember the last usage block so buildMetrics can read the
-			// backend rates it embeds there.
-			usage = u
-		}
-		if t := parsed.Get("timings"); t.Exists() {
-			timings = t
-			hasAny = true
-		}
-		if m := parsed.Get("metrics"); m.Exists() {
-			responseMetrics = m
-			hasAny = true
-		}
-	}
-
-	if !hasAny {
-		return ActivityLogEntry{}, fmt.Errorf("no valid JSON data found in stream")
-	}
-
-	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, usage, timings, responseMetrics), nil
-}
-
-func parseMetrics(modelID string, start time.Time, usage, timings, responseMetrics gjson.Result) (ActivityLogEntry, error) {
-	input, output, cached, _ := extractUsageTokens(usage)
-	return buildMetrics(modelID, start, input, output, cached, usage, timings, responseMetrics), nil
-}
-
-// buildMetrics composes an ActivityLogEntry from accumulated token counts and
-// optional llama-server timings (which override input/output and provide rates)
-// or vLLM response metrics (rates and speculative decoding counters). TabbyAPI
-// and oMLX embed rates in the usage block, which supplies base rates
-// when timings and metrics are absent.
-func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, usage, timings, responseMetrics gjson.Result) ActivityLogEntry {
-	wallDurationMs := int(time.Since(start).Milliseconds())
-	durationMs := wallDurationMs
-	tokensPerSecond := -1.0
-	promptPerSecond := -1.0
-	draftTokens := -1
-	draftAccTokens := -1
-
-	// TabbyAPI reports prompt/completion rates and total time inside its usage
-	// block. These are base values that llama-server timings and vLLM metrics
-	// override when present.
-	if usage.Exists() {
-		if v := usage.Get("prompt_tokens_per_sec"); v.Exists() && v.Type != gjson.Null {
-			promptPerSecond = v.Float()
-		} else if v := usage.Get("prompt_tokens_per_second"); v.Type == gjson.Number {
-			// oMLX reports prompt throughput using the long-form suffix.
-			promptPerSecond = v.Float()
-		}
-		if v := usage.Get("completion_tokens_per_sec"); v.Exists() && v.Type != gjson.Null {
-			tokensPerSecond = v.Float()
-		} else if v := usage.Get("generation_tokens_per_second"); v.Type == gjson.Number {
-			// oMLX calls completion throughput generation throughput.
-			tokensPerSecond = v.Float()
-		}
-		if v := usage.Get("total_time"); v.Exists() {
-			if totalTimeMs := int(v.Float() * 1000); totalTimeMs > durationMs {
-				durationMs = totalTimeMs
-			}
-		}
-	}
-
-	if timings.Exists() {
-		inputTokens = timings.Get("prompt_n").Int()
-		outputTokens = timings.Get("predicted_n").Int()
-		promptPerSecond = timings.Get("prompt_per_second").Float()
-		tokensPerSecond = timings.Get("predicted_per_second").Float()
-		timingsDurationMs := int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float())
-		if timingsDurationMs > durationMs {
-			durationMs = timingsDurationMs
-		}
-		if cachedValue := timings.Get("cache_n"); cachedValue.Exists() {
-			cachedTokens = cachedValue.Int()
-		}
-		if timings.Get("draft_n").Exists() && timings.Get("draft_n_accepted").Exists() {
-			draftTokens = int(timings.Get("draft_n").Int())
-			draftAccTokens = int(timings.Get("draft_n_accepted").Int())
-		}
-	}
-	// vLLM reports speculative decoding counts under metrics.speculative_decoding
-	// when started with --per-request-spec-decode-metrics (#1032). Both counters
-	// are required so the acceptance rate is never derived from a half-filled
-	// object.
-	if spec := responseMetrics.Get("speculative_decoding"); spec.Exists() {
-		drafted := spec.Get("num_draft_tokens")
-		accepted := spec.Get("num_accepted_draft_tokens")
-		if drafted.Exists() && accepted.Exists() {
-			draftTokens = int(drafted.Int())
-			draftAccTokens = int(accepted.Int())
-		}
-	}
-	if timeToFirstToken := responseMetrics.Get("time_to_first_token_ms"); timeToFirstToken.Exists() && timeToFirstToken.Float() > 0 {
-		cachedForRate := cachedTokens
-		if cachedForRate < 0 {
-			cachedForRate = 0
-		}
-		promptPerSecond = float64(inputTokens-cachedForRate) / (timeToFirstToken.Float() / 1000)
-	}
-	if meanInterTokenLatency := responseMetrics.Get("mean_itl_ms"); meanInterTokenLatency.Exists() && meanInterTokenLatency.Float() > 0 {
-		tokensPerSecond = 1000 / meanInterTokenLatency.Float()
-	}
-
-	return ActivityLogEntry{
-		Timestamp: time.Now(),
-		Model:     modelID,
-		Tokens: TokenMetrics{
-			CachedTokens:    int(cachedTokens),
-			DraftTokens:     draftTokens,
-			DraftAccTokens:  draftAccTokens,
-			InputTokens:     int(inputTokens),
-			OutputTokens:    int(outputTokens),
-			PromptPerSecond: promptPerSecond,
-			TokensPerSecond: tokensPerSecond,
-		},
-		DurationMs: durationMs,
-	}
 }
 
 // decompressBody decompresses the body based on the Content-Encoding header.

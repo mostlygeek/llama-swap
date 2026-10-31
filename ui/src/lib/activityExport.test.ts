@@ -150,6 +150,75 @@ describe("summarizeActivity", () => {
     expect(summary.tokensPerSecond).toBe(-1);
   });
 
+  it("weights the prompt speed by processed tokens, not cached ones", () => {
+    // 1000 prompt tokens, 900 cached: 100 processed at 100 t/s => 1s.
+    // 300 prompt tokens, none cached: 300 processed at 300 t/s => 1s.
+    const summary = summarizeActivity([
+      entry({
+        tokens: {
+          cache_tokens: 900,
+          draft_tokens: 0,
+          draft_acc_tokens: 0,
+          input_tokens: 1000,
+          output_tokens: 0,
+          prompt_per_second: 100,
+          tokens_per_second: -1,
+        },
+      }),
+      entry({
+        tokens: {
+          cache_tokens: -1,
+          draft_tokens: 0,
+          draft_acc_tokens: 0,
+          input_tokens: 300,
+          output_tokens: 0,
+          prompt_per_second: 300,
+          tokens_per_second: -1,
+        },
+      }),
+    ]);
+
+    expect(summary.promptPerSecond).toBeCloseTo(200, 6);
+  });
+
+  it("keeps older rows whose cached count exceeds input_tokens", () => {
+    // Before input_tokens included the cache, llama-server rows stored the
+    // processed count there; such a row is weighted by input_tokens.
+    const summary = summarizeActivity([
+      entry({
+        tokens: {
+          cache_tokens: 5000,
+          draft_tokens: 0,
+          draft_acc_tokens: 0,
+          input_tokens: 200,
+          output_tokens: 0,
+          prompt_per_second: 100,
+          tokens_per_second: -1,
+        },
+      }),
+    ]);
+
+    expect(summary.promptPerSecond).toBeCloseTo(100, 6);
+  });
+
+  it("leaves fully cached rows out of the prompt speed", () => {
+    const summary = summarizeActivity([
+      entry({
+        tokens: {
+          cache_tokens: 500,
+          draft_tokens: 0,
+          draft_acc_tokens: 0,
+          input_tokens: 500,
+          output_tokens: 0,
+          prompt_per_second: 999,
+          tokens_per_second: -1,
+        },
+      }),
+    ]);
+
+    expect(summary.promptPerSecond).toBe(-1);
+  });
+
   it("ignores rows with unreported speeds or no tokens", () => {
     const summary = summarizeActivity([
       entry({
@@ -185,6 +254,7 @@ describe("activityCellText", () => {
   const row = entry({
     id: 42,
     model: "llama-3",
+    task: "embedding",
     req_path: "/v1/embeddings",
     resp_status_code: 500,
     resp_content_type: "text/event-stream",
@@ -205,6 +275,7 @@ describe("activityCellText", () => {
     expect(activityCellText(row, "id")).toBe("42");
     expect(activityCellText(row, "time")).toBe("2026-06-25 12:34:56");
     expect(activityCellText(row, "model")).toBe("llama-3");
+    expect(activityCellText(row, "task")).toBe("embedding");
     expect(activityCellText(row, "req_path")).toBe("/v1/embeddings");
     expect(activityCellText(row, "resp_status_code")).toBe("500");
     expect(activityCellText(row, "resp_content_type")).toBe("text/event-stream");
@@ -220,6 +291,7 @@ describe("activityCellText", () => {
 
   it("renders dashes for empty values", () => {
     const empty = entry({ req_path: "", resp_content_type: "", resp_status_code: 0 });
+    expect(activityCellText(empty, "task")).toBe("-");
     expect(activityCellText(empty, "req_path")).toBe("-");
     expect(activityCellText(empty, "resp_content_type")).toBe("-");
     expect(activityCellText(empty, "resp_status_code")).toBe("-");
@@ -277,7 +349,7 @@ describe("summaryMarkdown", () => {
           cache_tokens: 12480,
           draft_tokens: 240,
           draft_acc_tokens: 148,
-          input_tokens: 5678,
+          input_tokens: 18158,
           output_tokens: 1904,
           prompt_per_second: 412.3,
           tokens_per_second: 48.15,
@@ -292,7 +364,7 @@ describe("summaryMarkdown", () => {
         "| Range | 2026-08-16 09:12:03 → 2026-08-16 09:12:03 |",
         "| Duration | 41.90s |",
         `| Cached | ${(12480).toLocaleString()} |`,
-        `| Prompt | ${(5678).toLocaleString()} (412.30 t/s) |`,
+        `| Prompt | ${(18158).toLocaleString()} (412.30 t/s) |`,
         `| Generated | ${(1904).toLocaleString()} (48.15 t/s) |`,
         "| Drafted | 61.7% 148/240 |",
       ].join("\n")

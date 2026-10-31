@@ -8,6 +8,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 )
 
 // llamaServerOwner is what llama-server and its forks report in /v1/models.
@@ -49,6 +50,8 @@ type llamaServerProber struct{}
 var _ Prober = llamaServerProber{}
 
 func (llamaServerProber) Name() string { return "llama-server" }
+
+func (llamaServerProber) Upstream(ModelsResponse) hint.Upstream { return hint.LlamaServer }
 
 func (llamaServerProber) Matches(models ModelsResponse) bool {
 	return strings.EqualFold(models.OwnedBy(), llamaServerOwner)

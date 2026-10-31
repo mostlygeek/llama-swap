@@ -81,9 +81,15 @@ export function summarizeActivity(rows: ActivityLogEntry[]): ActivitySummary {
     summary.draftTokens += row.tokens.draft_tokens;
     summary.draftAccTokens += row.tokens.draft_acc_tokens;
 
-    if (row.tokens.input_tokens > 0 && row.tokens.prompt_per_second > 0) {
-      promptTokens += row.tokens.input_tokens;
-      promptSeconds += row.tokens.input_tokens / row.tokens.prompt_per_second;
+    // prompt_per_second measures only the prompt tokens actually processed,
+    // so cached tokens are left out of the weighting. Rows recorded before
+    // input_tokens included the cache can have more cached than input
+    // tokens; those fall back to input_tokens rather than being dropped.
+    let processed = row.tokens.input_tokens - Math.max(row.tokens.cache_tokens, 0);
+    if (row.tokens.cache_tokens > row.tokens.input_tokens) processed = row.tokens.input_tokens;
+    if (processed > 0 && row.tokens.prompt_per_second > 0) {
+      promptTokens += processed;
+      promptSeconds += processed / row.tokens.prompt_per_second;
     }
     if (row.tokens.output_tokens > 0 && row.tokens.tokens_per_second > 0) {
       genTokens += row.tokens.output_tokens;
@@ -112,6 +118,8 @@ export function activityCellText(row: ActivityLogEntry, columnId: string): strin
       return row.model;
     case "src":
       return row.src || "-";
+    case "task":
+      return row.task || "-";
     case "req_path":
       return row.req_path || "-";
     case "resp_status_code":

@@ -6,23 +6,41 @@ import (
 	"time"
 )
 
-// TokenMetrics holds token usage and performance metrics.
+// TokenMetrics holds token usage and performance metrics. Every upstream's
+// numbers are normalized to the meanings below; -1 means not reported.
 type TokenMetrics struct {
-	CachedTokens    int     `json:"cache_tokens"`
-	DraftTokens     int     `json:"draft_tokens"`
-	DraftAccTokens  int     `json:"draft_acc_tokens"`
-	InputTokens     int     `json:"input_tokens"`
-	OutputTokens    int     `json:"output_tokens"`
+	// CachedTokens is the part of InputTokens served from the prompt cache
+	// instead of being processed.
+	CachedTokens int `json:"cache_tokens"`
+	// DraftTokens is the number of speculative tokens drafted and
+	// DraftAccTokens how many of them were accepted.
+	DraftTokens    int `json:"draft_tokens"`
+	DraftAccTokens int `json:"draft_acc_tokens"`
+	// InputTokens is the whole prompt, cached tokens included.
+	InputTokens int `json:"input_tokens"`
+	// OutputTokens is every generated token, reasoning included.
+	OutputTokens int `json:"output_tokens"`
+	// ReasoningTokens is the reasoning share of OutputTokens.
+	ReasoningTokens int `json:"reasoning_tokens"`
+	// PromptPerSecond is the prefill rate: uncached prompt tokens
+	// (InputTokens - CachedTokens) per second of prompt processing.
 	PromptPerSecond float64 `json:"prompt_per_second"`
+	// TokensPerSecond is the decode rate: OutputTokens per second of
+	// generation, prefill time excluded.
 	TokensPerSecond float64 `json:"tokens_per_second"`
 }
 
 // ActivityLogEntry represents parsed token statistics from llama-server logs.
 type ActivityLogEntry struct {
-	ID              int               `json:"id"`
-	Timestamp       time.Time         `json:"timestamp"`
-	Src             string            `json:"src"`
-	Model           string            `json:"model"`
+	ID        int       `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Src       string    `json:"src"`
+	Model     string    `json:"model"`
+	// Task is the kind of inference (chat, embedding, ...); see hint.Task.
+	Task string `json:"task,omitempty"`
+	// Route is "local" or "peer"; PeerID names the peer for peer requests.
+	Route           string            `json:"route,omitempty"`
+	PeerID          string            `json:"peer_id,omitempty"`
 	ReqPath         string            `json:"req_path"`
 	RespContentType string            `json:"resp_content_type"`
 	RespStatusCode  int               `json:"resp_status_code"`
@@ -77,6 +95,7 @@ var activitySortKeys = []string{
 	"time",
 	"model",
 	"src",
+	"task",
 	"req_path",
 	"resp_status_code",
 	"resp_content_type",

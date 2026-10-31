@@ -16,6 +16,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
 	"github.com/mostlygeek/llama-swap/internal/process"
@@ -23,6 +24,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/store/sqlite"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
+	"github.com/stretchr/testify/assert"
 )
 
 // stubRouter is a minimal router.LocalRouter for Server dispatch tests.
@@ -614,4 +616,36 @@ func TestProxy_ConfiguredVoicesOverrideUpstream(t *testing.T) {
 			t.Errorf("body = %q, want upstream", w.Body.String())
 		}
 	})
+}
+
+func TestServer_MeteredTask(t *testing.T) {
+	tests := []struct {
+		path    string
+		want    hint.Task
+		metered bool
+	}{
+		{"/v1/chat/completions", hint.TaskChat, true},
+		{"/v1/completions", hint.TaskChat, true},
+		{"/v1/messages", hint.TaskChat, true},
+		{"/infill", hint.TaskChat, true},
+		{"/v/chat/completions", hint.TaskChat, true},
+		{"/v1/embeddings", hint.TaskEmbedding, true},
+		{"/v1/rerank", hint.TaskRerank, true},
+		{"/v1/messages/count_tokens", hint.TaskTokenCount, true},
+		{"/v1/images/generations", hint.TaskImageGeneration, true},
+		{"/sdapi/v1/img2img", hint.TaskImageEdit, true},
+		{"/v1/audio/speech", hint.TaskSpeech, true},
+		{"/v1/audio/transcriptions", hint.TaskTranscription, true},
+		{"/v1/systemone", hint.TaskDecision, true},
+		{"/audioapi/v1/tasks/run", hint.TaskAudio, true},
+		// listing endpoints are not inference
+		{"/v1/audio/voices", "", false},
+		{"/v1/models", "", false},
+		{"/props", "", false},
+	}
+	for _, tt := range tests {
+		task, metered := meteredTask(tt.path)
+		assert.Equal(t, tt.metered, metered, "metered %s", tt.path)
+		assert.Equal(t, tt.want, task, "task %s", tt.path)
+	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
 
@@ -127,7 +128,7 @@ func TestCapcompat_DetectLlamaServer(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "model-a")
 	require.NoError(t, err)
 
-	assert.Equal(t, "llama-server", info.Upstream)
+	assert.Equal(t, hint.LlamaServer, info.Upstream)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 	assert.True(t, info.Capabilities.Tools)
@@ -200,7 +201,7 @@ func TestCapcompat_DetectLlamaServerCapture(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "gemma")
 	require.NoError(t, err)
 
-	assert.Equal(t, "llama-server", info.Upstream)
+	assert.Equal(t, hint.LlamaServer, info.Upstream)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, 220160, info.Capabilities.Context, "context comes from /props")
 }
@@ -276,7 +277,7 @@ func TestCapcompat_DetectLlamaServerNewBuildProps(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "model-a")
 	require.NoError(t, err)
 
-	assert.Equal(t, "llama-server", info.Upstream)
+	assert.Equal(t, hint.LlamaServer, info.Upstream)
 	assert.Equal(t, []string{"text", "image", "audio", "video"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 	assert.True(t, info.Capabilities.Tools, "caps report supports_tools and supports_tool_calls")
@@ -305,7 +306,7 @@ func TestCapcompat_DetectLlamaServerInvalidPropsJSON(t *testing.T) {
 			info, err := Detect(context.Background(), up.clientWithLogger(t, log), "model-a")
 			require.NoError(t, err)
 
-			assert.Equal(t, "llama-server", info.Upstream)
+			assert.Equal(t, hint.LlamaServer, info.Upstream)
 			assert.Equal(t, []string{"text"}, info.Capabilities.In)
 			assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 			assert.False(t, info.Capabilities.Tools)
@@ -380,7 +381,7 @@ func TestCapcompat_DetectVLLM(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "meta-llama/Llama-3.1-8B-Instruct")
 	require.NoError(t, err)
 
-	assert.Equal(t, "default", info.Upstream)
+	assert.Equal(t, hint.VLLM, info.Upstream)
 	assert.Equal(t, 131072, info.Capabilities.Context)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
@@ -400,7 +401,7 @@ func TestCapcompat_DetectVLLMCapture(t *testing.T) {
 		info, err := Detect(context.Background(), up.client(t), "qwen3-4b-vllm")
 		require.NoError(t, err)
 
-		assert.Equal(t, "default", info.Upstream)
+		assert.Equal(t, hint.VLLM, info.Upstream)
 		assert.Equal(t, 40960, info.Capabilities.Context)
 		assert.Equal(t, []string{"text"}, info.Capabilities.In)
 		assert.Equal(t, []string{"text"}, info.Capabilities.Out)
@@ -455,12 +456,26 @@ func TestCapcompat_DetectGufo(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "qwen3.8-flash-next-gufo")
 	require.NoError(t, err)
 
-	assert.Equal(t, "default", info.Upstream)
+	assert.Equal(t, hint.OpenAICompatible, info.Upstream)
 	assert.Equal(t, 262144, info.Capabilities.Context)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 	assert.False(t, info.Capabilities.Tools, "gufo exposes nothing about tool support in /v1/models")
 	assert.Equal(t, 0, up.hits["/props"], "gufo has no /props to read")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
+func TestCapcompat_DetectRadiance(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "radiance", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "qwen35")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.Radiance, info.Upstream)
+	assert.Equal(t, 200000, info.Capabilities.Context)
+	assert.Equal(t, 0, up.hits["/props"], "radiance has no /props to read")
 	require.NoError(t, info.Capabilities.Validate())
 }
 
@@ -472,7 +487,7 @@ func TestCapcompat_DetectYamz(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "qwen-3.8-next-kyojin")
 	require.NoError(t, err)
 
-	assert.Equal(t, "default", info.Upstream)
+	assert.Equal(t, hint.Kyojin, info.Upstream, "kyojin lists its models as owned_by yamz")
 	assert.Equal(t, 262144, info.Capabilities.Context)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
@@ -489,7 +504,7 @@ func TestCapcompat_DetectHalogen(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "halogen-qwen3.8-flash-next")
 	require.NoError(t, err)
 
-	assert.Equal(t, "halogen", info.Upstream)
+	assert.Equal(t, hint.Halogen, info.Upstream)
 	assert.Equal(t, []string{"text", "image"}, info.Capabilities.In, "this build has a vision tower")
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 	assert.True(t, info.Capabilities.Tools)

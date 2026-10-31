@@ -36,8 +36,8 @@ go build -o fake-model ./cmd/fake-model
 | `-listen` | `localhost:9898` | address to listen on |
 | `-tokens` | `1000` | completion (output) tokens in every reply |
 | `-tps` | `75` | completion (output) tokens per second; sets the decode pace |
-| `-prompt-tokens` | `100` | prompt (input) tokens reported (Prompt column, and Prefill) |
-| `-cache-tokens` | `0` | cached (cache-read) prompt tokens (Cached column) |
+| `-prompt-tokens` | `100` | whole prompt reported, cached tokens included (Prompt column, and Prefill) |
+| `-cache-tokens` | `0` | how many prompt tokens are cached; they take no prefill time (Cached column) |
 | `-prefill-tps` | `2000` | simulated prompt (prefill) tokens per second (Prefill column) |
 | `-draft-tokens` | `0` | speculative-decoding draft tokens (Drafted column; 0 omits it) |
 | `-draft-accepted` | `0` | speculative-decoding accepted draft tokens (Draft Accepted column) |
@@ -49,7 +49,7 @@ Endpoints:
 - `POST /v1/chat/completions`: streams server-sent events when the request has
   `"stream": true` (a role chunk, one word per tick, then a final chunk carrying
   the usage/timings, then `data: [DONE]`), otherwise waits
-  `prompt-tokens / prefill-tps + tokens / tps` seconds and returns one JSON
+  `(prompt-tokens - cache-tokens) / prefill-tps + tokens / tps` seconds and returns one JSON
   response. A request that arrives while the server is still loading waits
   until it is ready. Every other path returns 404.
 

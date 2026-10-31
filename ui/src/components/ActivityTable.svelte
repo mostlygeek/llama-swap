@@ -119,6 +119,7 @@
     if (withSource) cols.push({ id: "src", label: "Source/Caller", defaultVisible: true });
     if (withModel) cols.push({ id: "model", label: "Model", defaultVisible: true });
     cols.push(
+      { id: "task", label: "Task", defaultVisible: true },
       { id: "req_path", label: "Path", defaultVisible: false },
       { id: "resp_status_code", label: "Status", defaultVisible: true },
       { id: "resp_content_type", label: "Content-Type", defaultVisible: false },
@@ -401,6 +402,12 @@
 
     cols.push(
       {
+        id: "task",
+        accessorKey: "task",
+        header: "Task",
+        cell: ({ row }) => row.original.task || "-",
+      },
+      {
         id: "req_path",
         accessorKey: "req_path",
         header: "Path",
@@ -430,7 +437,7 @@
       {
         id: "prompt",
         accessorFn: (row) => row.tokens.input_tokens,
-        header: () => renderComponent(HeaderLabel, { label: "Prompt", tooltip: "new prompt tokens processed" }),
+        header: () => renderComponent(HeaderLabel, { label: "Prompt", tooltip: "whole prompt, cached tokens included" }),
         cell: ({ row }) => row.original.tokens.input_tokens.toLocaleString(),
       },
       {

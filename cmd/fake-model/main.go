@@ -33,8 +33,8 @@ var (
 	flagListen       = flag.String("listen", "localhost:9898", "listen address")
 	flagTokens       = flag.Int("tokens", 1000, "number of completion (output) tokens to return")
 	flagTPS          = flag.Float64("tps", 75, "completion (output) tokens per second")
-	flagPromptTokens = flag.Int("prompt-tokens", 100, "number of prompt (input) tokens to report")
-	flagCacheTokens  = flag.Int("cache-tokens", 0, "number of cached (cache-read) prompt tokens to report")
+	flagPromptTokens = flag.Int("prompt-tokens", 100, "number of prompt (input) tokens to report, cached tokens included")
+	flagCacheTokens  = flag.Int("cache-tokens", 0, "how many of the prompt tokens are cached (cache-read); they take no prefill time")
 	flagPrefillTPS   = flag.Float64("prefill-tps", 2000, "simulated prompt (prefill) tokens per second")
 	flagDraft        = flag.Int("draft-tokens", 0, "speculative decoding: draft tokens (0 omits the Drafted columns)")
 	flagDraftAcc     = flag.Int("draft-accepted", 0, "speculative decoding: accepted draft tokens")
@@ -114,10 +114,16 @@ type profile struct {
 	decodePerSec float64
 }
 
+// processedTokens is the part of the prompt that is not served from the
+// cache. Only these tokens take prefill time.
+func (p *profile) processedTokens() int {
+	return max(p.promptTokens-p.cacheTokens, 0)
+}
+
 func (p *profile) resolve() {
 	p.prefillMs, p.promptPerSec = 0, 0
-	if p.promptTokens > 0 && p.prefillTPS > 0 {
-		p.prefillMs = float64(p.promptTokens) / p.prefillTPS * 1000
+	if n := p.processedTokens(); n > 0 && p.prefillTPS > 0 {
+		p.prefillMs = float64(n) / p.prefillTPS * 1000
 		p.promptPerSec = p.prefillTPS
 	}
 	p.decodeMs, p.decodePerSec = 0, 0
@@ -148,7 +154,8 @@ func (p *profile) usageBlock() map[string]any {
 // the speculative-decoding (drafted / draft-accepted) columns.
 func (p *profile) timingsBlock() map[string]any {
 	t := map[string]any{
-		"prompt_n":             p.promptTokens,
+		"prompt_n": p.processedTokens(), // llama-server excludes cache_n
+
 		"predicted_n":          p.outputTokens,
 		"cache_n":              p.cacheTokens,
 		"prompt_per_second":    p.promptPerSec,
