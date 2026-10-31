@@ -18,13 +18,16 @@ func TestServer_UsageVLLM_ChatCompletion(t *testing.T) {
 }
 
 func TestServer_UsageVLLM_ChatCompletionStream(t *testing.T) {
-	// vLLM only emits the metrics object on the final streamed chunk.
+	// Captured from vLLM 0.29.1; the metrics object is only on the final
+	// streamed chunk, next to usage.
 	u := parseUsageFixture(t, hint.VLLM, "/v1/chat/completions", "vllm/chat_completion_stream.sse")
-	assert.Equal(t, 14, u.Tokens.InputTokens)
-	assert.Equal(t, 152, u.Tokens.OutputTokens)
-	assert.Equal(t, -1, u.Tokens.CachedTokens)
-	assert.InDelta(t, 200.0, u.Tokens.PromptPerSecond, 1e-9, "no cache count, so all 14 prompt tokens")
-	assert.Equal(t, 100.0, u.Tokens.TokensPerSecond)
+	assert.True(t, u.Found)
+	assert.Equal(t, 42, u.Tokens.InputTokens)
+	assert.Equal(t, 227, u.Tokens.OutputTokens)
+	assert.Equal(t, 0, u.Tokens.CachedTokens, "reported, nothing cached")
+	assert.InDelta(t, 42/(136.54924900038168/1000), u.Tokens.PromptPerSecond, 1e-9, "all 42 prompt tokens over time to first token")
+	assert.InDelta(t, 1000/5.561512570794202, u.Tokens.TokensPerSecond, 1e-9, "1000 / mean_itl_ms")
+	assert.Equal(t, -1, u.Tokens.DraftTokens)
 }
 
 func TestServer_UsageVLLM_SpeculativeDecoding(t *testing.T) {
