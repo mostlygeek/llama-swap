@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -38,13 +37,14 @@ func (e ActivityLogEvent) Type() uint32 {
 
 // metricsMonitor parses upstream responses for token statistics, stores
 // activity in a store, and (when captures are enabled) stores
-// zstd+CBOR-compressed request/response captures in a sized in-memory cache.
+// zstd+CBOR-compressed request/response captures in the store's capture
+// repository, bounded to maxCaptureBytes in total.
 type metricsMonitor struct {
-	store          store.Store
-	maxMetrics     int
-	logger         *logmon.Monitor
-	enableCaptures bool
-	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
+	store           store.Store
+	maxMetrics      int
+	logger          *logmon.Monitor
+	enableCaptures  bool
+	maxCaptureBytes int64
 }
 
 func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int, st store.Store) *metricsMonitor {
@@ -58,7 +58,14 @@ func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB i
 		enableCaptures: captureBufferMB > 0,
 	}
 	if captureBufferMB > 0 {
-		mm.captureCache = cache.New(captureBufferMB * 1024 * 1024)
+		mm.maxCaptureBytes = int64(captureBufferMB) * 1024 * 1024
+		// The store outlives a config reload, so apply a lowered
+		// captureBuffer now rather than on the next capture.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := st.Captures().Prune(ctx, mm.maxCaptureBytes); err != nil {
+			mm.warnf("failed to prune captures: %v", err)
+		}
 	}
 	return mm
 }
@@ -89,15 +96,24 @@ func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry) {
 	event.Emit(ActivityLogEvent{Metrics: metric})
 }
 
+// overlayCaptureState sets HasCapture on entries from the capture repository.
+// Stored captures are hidden while captures are disabled.
 func (mp *metricsMonitor) overlayCaptureState(entries []ActivityLogEntry) {
-	if mp.captureCache == nil {
+	var found map[int]bool
+	if mp.enableCaptures && len(entries) > 0 {
+		ids := make([]int, len(entries))
 		for i := range entries {
-			entries[i].HasCapture = false
+			ids[i] = entries[i].ID
 		}
-		return
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var err error
+		if found, err = mp.store.Captures().Has(ctx, ids); err != nil {
+			mp.warnf("failed to look up captures: %v", err)
+		}
 	}
 	for i := range entries {
-		entries[i].HasCapture = mp.captureCache.Has(entries[i].ID)
+		entries[i].HasCapture = found[entries[i].ID]
 	}
 }
 
@@ -210,7 +226,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		tm = stored
 		// Capture the request only; the failure is surfaced via ErrorMsg
 		// rather than storing the (possibly undisplayable) response body.
-		tm.HasCapture = mp.storeCapture(tm.ID, r, recorder, cf&^captureRespBody, reqBody, reqHeaders, nil)
+		tm.HasCapture = mp.storeCapture(tm, r, recorder, cf&^captureRespBody, reqBody, reqHeaders, nil)
 		mp.emitMetric(tm)
 		return
 	}
@@ -245,20 +261,20 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		return
 	}
 	tm = stored
-	tm.HasCapture = mp.storeCapture(tm.ID, r, recorder, cf, reqBody, reqHeaders, body)
+	tm.HasCapture = mp.storeCapture(tm, r, recorder, cf, reqBody, reqHeaders, body)
 	mp.emitMetric(tm)
 }
 
-// storeCapture assembles a ReqRespCapture for id, honoring the captureFields
+// storeCapture assembles a ReqRespCapture for the stored activity row tm, honoring the captureFields
 // mask, and stores it when captures are enabled. body is the response body to
 // capture (already decompressed by the caller); pass nil to omit it. Returns
 // true if a capture was stored.
-func (mp *metricsMonitor) storeCapture(id int, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string, body []byte) bool {
+func (mp *metricsMonitor) storeCapture(tm ActivityLogEntry, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string, body []byte) bool {
 	if !mp.enableCaptures {
 		return false
 	}
 	capture := ReqRespCapture{
-		ID:         id,
+		ID:         tm.ID,
 		ReqPath:    r.URL.Path,
 		ReqHeaders: reqHeaders,
 	}
@@ -273,7 +289,7 @@ func (mp *metricsMonitor) storeCapture(id int, r *http.Request, recorder *respon
 	if cf&captureRespBody != 0 {
 		capture.RespBody = body
 	}
-	return mp.addCapture(capture)
+	return mp.addCapture(capture, tm.Timestamp)
 }
 
 // decodeResponseBody returns the buffered response body, decompressing it when

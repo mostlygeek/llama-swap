@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -48,7 +49,7 @@ func TestServer_CaptureStoreAndRetrieve(t *testing.T) {
 	}
 
 	capture := ReqRespCapture{ID: 3, ReqPath: "/v1/chat/completions", ReqBody: []byte("hello")}
-	if !mm.addCapture(capture) {
+	if !mm.addCapture(capture, time.Time{}) {
 		t.Fatal("addCapture returned false")
 	}
 
@@ -61,12 +62,54 @@ func TestServer_CaptureStoreAndRetrieve(t *testing.T) {
 	}
 }
 
+func TestServer_CaptureBufferPrunesOldest(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 1)
+
+	// Random bodies do not compress, so each capture is a bit over 400 KB
+	// and only two fit in the 1 MB captureBuffer.
+	rng := rand.New(rand.NewSource(1))
+	for id := 1; id <= 4; id++ {
+		body := make([]byte, 400*1024)
+		rng.Read(body)
+		if !mm.addCapture(ReqRespCapture{ID: id, ReqBody: body}, time.Time{}) {
+			t.Fatalf("addCapture %d returned false", id)
+		}
+	}
+
+	if size := mm.store.Captures().Size(); size > mm.maxCaptureBytes {
+		t.Fatalf("captures size = %d, want <= %d", size, mm.maxCaptureBytes)
+	}
+	for id, want := range map[int]bool{1: false, 2: false, 3: true, 4: true} {
+		if got := mm.getCaptureByID(id) != nil; got != want {
+			t.Errorf("capture %d stored = %v, want %v", id, got, want)
+		}
+	}
+
+	entries := []ActivityLogEntry{{ID: 2}, {ID: 3}}
+	mm.overlayCaptureState(entries)
+	if entries[0].HasCapture || !entries[1].HasCapture {
+		t.Errorf("HasCapture = [%v %v], want [false true]", entries[0].HasCapture, entries[1].HasCapture)
+	}
+}
+
+func TestServer_CaptureTooLargeSkipped(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 1)
+	body := make([]byte, 2*1024*1024)
+	rand.New(rand.NewSource(1)).Read(body)
+	if mm.addCapture(ReqRespCapture{ID: 1, ReqBody: body}, time.Time{}) {
+		t.Fatal("addCapture should reject a capture larger than captureBuffer")
+	}
+	if mm.store.Captures().Size() != 0 {
+		t.Fatal("rejected capture should not be stored")
+	}
+}
+
 func TestServer_CaptureDisabled(t *testing.T) {
 	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 0)
 	if mm.enableCaptures {
 		t.Fatal("captures should be disabled with zero buffer")
 	}
-	if mm.addCapture(ReqRespCapture{ID: 1}) {
+	if mm.addCapture(ReqRespCapture{ID: 1}, time.Time{}) {
 		t.Fatal("addCapture should return false when disabled")
 	}
 	if mm.getCaptureByID(1) != nil {

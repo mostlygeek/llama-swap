@@ -282,7 +282,7 @@ func TestServer_HandleAPIUnloadModel(t *testing.T) {
 func TestServer_HandleAPICapture(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 	s.metrics = newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 5)
-	s.metrics.addCapture(ReqRespCapture{ID: 42, ReqPath: "/v1/chat/completions"})
+	s.metrics.addCapture(ReqRespCapture{ID: 42, ReqPath: "/v1/chat/completions"}, testClock)
 
 	t.Run("found", func(t *testing.T) {
 		w := httptest.NewRecorder()

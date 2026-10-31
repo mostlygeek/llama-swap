@@ -55,8 +55,15 @@ logToStdout: "proxy"
 # - optional, default: in-memory sqlite database capped by metricsMaxInMemory
 # - path is a sqlite database file path
 # - file-backed sqlite keeps activity logs across restarts
+# - captures: optional, a separate sqlite database file for request/response
+#   captures so they are kept across restarts
+#   - requires path, and must be a different file than path
+#   - total size is capped by captureBuffer; the oldest captures are deleted
+#   - llama-swap will not start if the captures file does not belong to the
+#     activity database in path
 # store:
 #   path: /path/to/file.sqlite
+#   captures: /path/to/captures.sqlite
 
 # metricsMaxInMemory: maximum number of metrics to keep in memory
 # - optional, default: 1000
@@ -65,9 +72,10 @@ logToStdout: "proxy"
 # - when persistent sqlite storage is defined in store.path this has no effect
 metricsMaxInMemory: 1000
 
-# captureBuffer: how many MBs to allocate for storing request/response captures
-# - optional, default: 10
+# captureBuffer: how many MBs of compressed request/response captures to keep
+# - optional, default: 5
 # - set to 0 to disable
+# - also caps the captures database file when store.captures is set
 captureBuffer: 15
 
 # ui.activity.session_id: ordered request headers used to identify sessions in

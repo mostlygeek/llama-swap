@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -101,7 +103,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	config.UI.Activity.SessionID = normalizeHeaderNames(config.UI.Activity.SessionID)
 
 	if config.Store != nil {
-		if err := validateStorePath(config.Store.Path); err != nil {
+		if err := validateStore(config.Store); err != nil {
 			return Config{}, err
 		}
 	}
@@ -379,4 +381,45 @@ func normalizeHeaderNames(names []string) []string {
 		normalized = append(normalized, name)
 	}
 	return normalized
+}
+
+// validateStore checks the store section. store.path is required. Captures
+// are keyed by activity ID, so a persistent store.captures also needs the
+// persistent activity database it refers to, and the two must not share a
+// database file.
+func validateStore(st *Store) error {
+	path := strings.TrimSpace(st.Path)
+	captures := strings.TrimSpace(st.Captures)
+	if path == "" {
+		if captures != "" {
+			return fmt.Errorf("store.captures requires store.path: captures are linked to activity rows by ID")
+		}
+		return fmt.Errorf("store.path must not be empty")
+	}
+	if err := validateStorePath("store.path", path); err != nil {
+		return err
+	}
+	if captures == "" {
+		return nil
+	}
+	if err := validateStorePath("store.captures", captures); err != nil {
+		return err
+	}
+	if sameStoreFile(path, captures) {
+		return fmt.Errorf("store.captures must be a different file than store.path")
+	}
+	return nil
+}
+
+// sameStoreFile reports whether a and b name the same file, comparing
+// cleaned absolute paths and, when both exist, the files themselves.
+func sameStoreFile(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil && errB == nil && absA == absB {
+		return true
+	}
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }

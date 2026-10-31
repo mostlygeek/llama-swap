@@ -183,7 +183,7 @@ models:
 	if err != nil {
 		t.Fatalf("LoadConfigFromReader: %v", err)
 	}
-	st, err := sqlite.New("")
+	st, err := sqlite.New("", "")
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)
 	}
@@ -215,7 +215,7 @@ models:
 	if err != nil {
 		t.Fatalf("LoadConfigFromReader: %v", err)
 	}
-	st, err := sqlite.New("")
+	st, err := sqlite.New("", "")
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)
 	}

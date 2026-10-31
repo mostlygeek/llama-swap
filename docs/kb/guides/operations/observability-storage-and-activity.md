@@ -3,8 +3,8 @@ title: Observability, storage and Activity
 summary: Use logs, metrics, captures and the Activity view to diagnose requests and retain useful history.
 category: guides
 tags: [operations, logs, metrics, activity, captures, stdout, http]
-config_keys: [logLevel, logToStdout, metricsMaxInMemory, captureBuffer]
-updated: 2026-09-25
+config_keys: [logLevel, logToStdout, metricsMaxInMemory, captureBuffer, store.path, store.captures]
+updated: 2026-10-31
 ---
 
 # Observability, storage and Activity
@@ -42,6 +42,39 @@ What goes wrong:
 - A value outside the list, like `true` or `"proxy,debug"`, fails config
   loading.
 - `logToStdout` is read at startup only. Restart llama-swap after changing it.
+
+## Keeping activity and captures across restarts
+
+By default activity rows and request/response captures are kept in memory and
+lost on restart. `store.path` keeps activity rows in a SQLite file.
+`store.captures` keeps captures in a second SQLite file:
+
+```yaml
+store:
+  path: /data/activity.db
+  captures: /data/captures.db
+captureBuffer: 2048 # MB of compressed captures to keep
+```
+
+`captureBuffer` limits both in-memory and on-disk captures. When a new
+capture pushes the total over the limit, the oldest captures are deleted.
+`captureBuffer: 0` turns captures off. Stored captures stay in the file but
+are hidden until captures are turned back on. SQLite reuses the space of
+deleted captures, so the file grows to about `captureBuffer` and then stays
+that size.
+
+What goes wrong:
+
+- `store.captures` without `store.path` fails config loading. Each capture is
+  linked to an activity row by ID, so the activity rows have to persist too.
+- `store.captures` set to the same file as `store.path` fails config loading.
+- llama-swap refuses to start when the captures file does not match the
+  activity file, for example after `store.path` was pointed at a new file or
+  the activity file was replaced. The error says the captures database is out
+  of sync. Point `store.captures` back at the file that was created with that
+  activity database, or move the captures file aside to start a new one.
+- A single capture larger than `captureBuffer` is skipped and logged as a
+  warning.
 
 Do not put secrets in captures or debug logs. Reduce retention after diagnosing
 an issue.

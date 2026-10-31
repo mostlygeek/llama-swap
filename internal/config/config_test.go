@@ -114,6 +114,53 @@ store:
 	})
 }
 
+func TestConfig_StoreCaptures(t *testing.T) {
+	t.Run("separate captures file accepted", func(t *testing.T) {
+		dir := t.TempDir()
+		storePath := filepath.Join(dir, "activity.db")
+		capturesPath := filepath.Join(dir, "captures.db")
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + storePath + `
+  captures: ` + capturesPath + `
+`))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Store)
+		assert.Equal(t, capturesPath, cfg.Store.Captures)
+	})
+
+	t.Run("requires store.path", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  captures: ` + filepath.Join(t.TempDir(), "captures.db") + `
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "store.captures requires store.path")
+	})
+
+	t.Run("same file as store.path rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		storePath := filepath.Join(dir, "llama-swap.db")
+		_, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + storePath + `
+  captures: ` + filepath.Join(dir, ".", "llama-swap.db") + `
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "store.captures must be a different file than store.path")
+	})
+
+	t.Run("non-existent directory rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + filepath.Join(t.TempDir(), "activity.db") + `
+  captures: /no/such/dir/captures.db
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "store.captures: directory")
+	})
+}
+
 func TestConfig_FindConfig(t *testing.T) {
 
 	// TODO?

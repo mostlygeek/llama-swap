@@ -1,13 +1,17 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/mostlygeek/llama-swap/internal/store"
 )
 
 // ReqRespCapture is a stored request/response pair for a single metered request.
@@ -126,9 +130,12 @@ func decompressCapture(data []byte) (*ReqRespCapture, error) {
 	return &capture, nil
 }
 
-// addCapture compresses and stores a capture in the cache. Returns true if the
+// addCapture compresses a capture and stores it under its activity ID, then
+// prunes the oldest captures to stay within the capture size limit. ts is the
+// activity row's timestamp, stored with the capture so the store can check the
+// captures database against the activity database. Returns true if the
 // capture was stored.
-func (mp *metricsMonitor) addCapture(capture ReqRespCapture) bool {
+func (mp *metricsMonitor) addCapture(capture ReqRespCapture, ts time.Time) bool {
 	if !mp.enableCaptures {
 		return false
 	}
@@ -139,9 +146,23 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture) bool {
 		return false
 	}
 
-	if err := mp.captureCache.Add(capture.ID, compressed); err != nil {
-		mp.logger.Warnf("capture %d too large (%d bytes), skipping: %v", capture.ID, len(compressed), err)
+	if int64(len(compressed)) > mp.maxCaptureBytes {
+		mp.logger.Warnf("capture %d too large (%d bytes), skipping: exceeds captureBuffer of %d bytes", capture.ID, len(compressed), mp.maxCaptureBytes)
 		return false
+	}
+
+	// Like queueMetrics, this runs after the handler returned, so it does not
+	// use the request context.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	captures := mp.store.Captures()
+	if err := captures.Put(ctx, store.CaptureEntry{ID: capture.ID, Timestamp: ts, Data: compressed}); err != nil {
+		mp.logger.Warnf("failed to store capture %d: %v", capture.ID, err)
+		return false
+	}
+	if err := captures.Prune(ctx, mp.maxCaptureBytes); err != nil {
+		mp.logger.Warnf("failed to prune captures: %v", err)
 	}
 
 	compressionRatio := (1 - float64(len(compressed))/float64(uncompressedBytes)) * 100
@@ -150,16 +171,22 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture) bool {
 }
 
 // getCaptureByID decompresses and unmarshals a capture by ID. Returns nil if
-// the capture is not found or decompression fails.
+// captures are disabled, the capture is not found, or decompression fails.
 func (mp *metricsMonitor) getCaptureByID(id int) *ReqRespCapture {
-	if mp.captureCache == nil {
+	if !mp.enableCaptures {
 		return nil
 	}
-	data, err := mp.captureCache.Get(id)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	entry, found, err := mp.store.Captures().Get(ctx, id)
 	if err != nil {
+		mp.logger.Warnf("failed to read capture %d: %v", id, err)
 		return nil
 	}
-	capture, err := decompressCapture(data)
+	if !found {
+		return nil
+	}
+	capture, err := decompressCapture(entry.Data)
 	if err != nil {
 		mp.logger.Warnf("failed to decompress capture %d: %v", id, err)
 		return nil
