@@ -1,4 +1,4 @@
-package server
+package usage
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestServer_UsageOMLX_ChatCompletion(t *testing.T) {
+func TestUsage_OMLX_ChatCompletion(t *testing.T) {
 	for _, file := range []string{"omlx/chat_completion.json", "omlx/chat_completion_stream.sse"} {
 		t.Run(file, func(t *testing.T) {
 			u := parseUsageFixture(t, hint.OMLX, "/v1/chat/completions", file)
@@ -20,7 +20,7 @@ func TestServer_UsageOMLX_ChatCompletion(t *testing.T) {
 	}
 }
 
-func TestServer_UsageOMLX_RateValues(t *testing.T) {
+func TestUsage_OMLX_RateValues(t *testing.T) {
 	tests := []struct {
 		name       string
 		rates      string
@@ -44,7 +44,7 @@ func TestServer_UsageOMLX_RateValues(t *testing.T) {
 	}
 }
 
-func TestServer_UsageOMLX_IgnoresTabbyAPIFields(t *testing.T) {
+func TestUsage_OMLX_IgnoresTabbyAPIFields(t *testing.T) {
 	u := parseUsageFixture(t, hint.OMLX, "/v1/chat/completions", "tabbyapi/chat_completion.json")
 	assert.Equal(t, 83, u.Tokens.InputTokens, "usage block is still read")
 	assert.Equal(t, -1.0, u.Tokens.PromptPerSecond)

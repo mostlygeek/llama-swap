@@ -10,7 +10,7 @@ Three packages are involved:
 | --- | --- | --- |
 | hints | `internal/hint` | Shared names: `Upstream`, `Task`, per-request `Request` |
 | capcompat | `internal/capcompat` | Detect the upstream from `/v1/models`, probe capabilities |
-| usage extraction | `internal/server` (`usage*.go`) | Turn a response body into a normalized `Usage` |
+| usage extraction | `internal/server/usage` | Turn a response body into a normalized `Usage` |
 
 ## Request flow
 
@@ -26,7 +26,7 @@ Three packages are involved:
    `internal/router/peer.go` sets `Route`, `PeerID` and the `Upstream`
    guessed from the peer's proxy host with `hint.ForURL`.
 4. After the handler returns, `metricsMonitor.record`
-   (`internal/server/metrics.go`) calls `extractUsage` with the hinted
+   (`internal/server/metrics.go`) calls `usage.Extract` with the hinted
    upstream, which picks an extractor with `extractorFor`.
 
 ## Hints (`internal/hint`)
@@ -80,9 +80,9 @@ Tests: put real captures in `testdata/<server>/` (`v1_models.json` plus any
 extra endpoints) and add `TestCapcompat_Detect<Server>` in
 `capcompat_test.go` using `newUpstream` and `fixture`.
 
-## Usage extraction (`internal/server`)
+## Usage extraction (`internal/server/usage`)
 
-Each upstream has an extractor in `usage_<upstream>.go` implementing
+Each upstream has an extractor in `<upstream>.go` implementing
 `usageExtractor`. A parser receives every JSON event (each SSE `data:` line,
 or the whole body once) and returns a `Usage` at the end.
 
@@ -105,10 +105,10 @@ Adding an extractor:
 
 1. If the server adds nothing to the standard usage block, add it to the
    `apiExtractor` case in `extractorFor`. Otherwise create
-   `usage_<upstream>.go`. Reuse an existing parser when the format is the
+   `<upstream>.go`. Reuse an existing parser when the format is the
    same (`halogenExtractor` reuses llama-server's), and keep server-specific
    fields in the server's own file.
-2. Add the case to `extractorFor` and to `TestServer_Usage_ExtractorFor`.
+2. Add the case to `extractorFor` and to `TestUsage_ExtractorFor`.
 3. Normalize to the field meanings below. Convert in the extractor, not in
    the UI.
 
@@ -133,15 +133,15 @@ and say so in the extractor's doc comment.
 
 ### Tests
 
-- Put real captures in `testdata/usage/<upstream>/` as `.json` (one body)
-  or `.sse` (a stream). Name them after the endpoint, e.g.
+- Put real captures in `internal/server/usage/testdata/<upstream>/` as
+  `.json` (one body) or `.sse` (a stream). Name them after the endpoint, e.g.
   `chat_completion_stream.sse`, `messages_stream.sse`,
   `responses_stream.sse`.
-- One test file per extractor, `usage_<upstream>_test.go`, with tests named
-  `TestServer_Usage<Upstream>_<Case>`. Load fixtures with
+- One test file per extractor, `<upstream>_test.go`, with tests named
+  `TestUsage_<Upstream>_<Case>`. Load fixtures with
   `parseUsageFixture`; use `parseUsageJSON` / `parseUsageStream` for small
   synthetic edge cases.
-- Add each new fixture to `TestServer_UsageAuto_ReadsEachServer` so auto
+- Add each new fixture to `TestUsage_Auto_ReadsEachServer` so auto
   gives the same result as the dedicated extractor.
 - Assert every normalized field the fixture carries, with a message when the
   value is derived (e.g. `"prompt_n + cache_n"`).

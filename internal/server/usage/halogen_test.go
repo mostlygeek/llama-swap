@@ -1,4 +1,4 @@
-package server
+package usage
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestServer_UsageHalogen_ChatCompletionStream(t *testing.T) {
+func TestUsage_Halogen_ChatCompletionStream(t *testing.T) {
 	u := parseUsageFixture(t, hint.Halogen, "/v1/chat/completions", "halogen/chat_completion_stream.sse")
 	assert.True(t, u.Found)
 	assert.Equal(t, 5900, u.Tokens.InputTokens, "prompt_n + cache_n, same as usage.prompt_tokens")

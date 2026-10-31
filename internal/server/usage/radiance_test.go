@@ -1,4 +1,4 @@
-package server
+package usage
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestServer_UsageRadiance_ChatCompletionStream(t *testing.T) {
+func TestUsage_Radiance_ChatCompletionStream(t *testing.T) {
 	u := parseUsageFixture(t, hint.Radiance, "/v1/chat/completions", "radiance/chat_completion_stream.sse")
 	assert.True(t, u.Found)
 	assert.Equal(t, 56, u.Tokens.InputTokens)
@@ -21,13 +21,13 @@ func TestServer_UsageRadiance_ChatCompletionStream(t *testing.T) {
 	assert.Equal(t, 237, u.DurationMs, "total_ms, longer than prompt_ms + predicted_ms")
 }
 
-func TestServer_UsageRadiance_WithoutTotal(t *testing.T) {
+func TestUsage_Radiance_WithoutTotal(t *testing.T) {
 	u := parseUsageJSON(t, hint.Radiance, "/v1/chat/completions",
 		`{"usage":{"prompt_tokens":1,"completion_tokens":1},"timings":{"prompt_n":1,"predicted_n":1,"prompt_ms":100,"predicted_ms":200}}`)
 	assert.Equal(t, 300, u.DurationMs, "falls back to prompt_ms + predicted_ms")
 }
 
-func TestServer_UsageRadiance_MessagesStream(t *testing.T) {
+func TestUsage_Radiance_MessagesStream(t *testing.T) {
 	// Radiance reports input_tokens in message_delta, where Anthropic puts
 	// it in message_start.
 	u := parseUsageFixture(t, hint.Radiance, "/v1/messages", "radiance/messages_stream.sse")
@@ -39,7 +39,7 @@ func TestServer_UsageRadiance_MessagesStream(t *testing.T) {
 	assert.Equal(t, -1.0, u.Tokens.TokensPerSecond, "no timings on /v1/messages")
 }
 
-func TestServer_UsageRadiance_ResponsesStream(t *testing.T) {
+func TestUsage_Radiance_ResponsesStream(t *testing.T) {
 	u := parseUsageFixture(t, hint.Radiance, "/v1/responses", "radiance/responses_stream.sse")
 	assert.True(t, u.Found)
 	assert.Equal(t, 85, u.Tokens.InputTokens)

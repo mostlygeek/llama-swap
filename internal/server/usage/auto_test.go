@@ -1,4 +1,4 @@
-package server
+package usage
 
 import (
 	"testing"
@@ -11,7 +11,7 @@ import (
 // order it applies them in when more than one appears: oMLX rates, then
 // TabbyAPI rates, then llama-server timings, then vLLM metrics.
 
-func TestServer_UsageAuto_ReadsEachServer(t *testing.T) {
+func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 	// Every server's fixture gives the same result through auto as through
 	// its own extractor.
 	tests := []struct {
@@ -44,7 +44,7 @@ func TestServer_UsageAuto_ReadsEachServer(t *testing.T) {
 	}
 }
 
-func TestServer_UsageAuto_Precedence(t *testing.T) {
+func TestUsage_Auto_Precedence(t *testing.T) {
 	const omlx = `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`
 	const timings = `,"timings":{"prompt_n":40,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40}`
 	const metrics = `,"metrics":{"time_to_first_token_ms":200,"mean_itl_ms":10}`
@@ -79,7 +79,7 @@ func TestServer_UsageAuto_Precedence(t *testing.T) {
 	}
 }
 
-func TestServer_UsageAuto_TimingsDraftTokensSurviveEmptyMetrics(t *testing.T) {
+func TestUsage_Auto_TimingsDraftTokensSurviveEmptyMetrics(t *testing.T) {
 	// An empty speculative_decoding object must not clobber timings' counts.
 	u := parseUsageJSON(t, hint.Unknown, "/v1/chat/completions",
 		`{"timings":{"prompt_n":20,"predicted_n":50,"draft_n":30,"draft_n_accepted":12},"metrics":{"speculative_decoding":{}}}`)

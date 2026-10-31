@@ -1,4 +1,8 @@
-package server
+// Package usage reads token usage from inference server responses and
+// normalizes it to store.TokenMetrics. Each upstream has an extractor in
+// <upstream>.go; Extract picks one from the request's hint.Upstream. See
+// docs/development/upstream-compat.md.
+package usage
 
 import (
 	"bytes"
@@ -7,23 +11,21 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/hint"
+	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/tidwall/gjson"
 )
 
 // Usage is the normalized usage record every extractor produces. Token
-// fields the upstream did not report are -1 (see TokenMetrics).
+// fields the upstream did not report are -1 (see store.TokenMetrics).
 type Usage struct {
 	// Found reports whether the response carried any usage data at all.
-	Found bool
-	// Task is the kind of inference, set from the endpoint path by the
-	// middleware; extractors do not set it.
-	Task       hint.Task
-	Tokens     TokenMetrics
+	Found      bool
+	Tokens     store.TokenMetrics
 	DurationMs int
 }
 
 // usageExtractor knows how one kind of upstream reports usage. Each
-// implementation lives in its own usage_<upstream>.go file.
+// implementation lives in its own <upstream>.go file.
 type usageExtractor interface {
 	// newParser returns per-request state. path is the endpoint path the
 	// middleware meters, e.g. /v1/chat/completions or /infill. start is when
@@ -65,10 +67,10 @@ func extractorFor(u hint.Upstream) usageExtractor {
 	}
 }
 
-// extractUsage runs a decoded (already decompressed) response body through
+// Extract runs a decoded (already decompressed) response body through
 // the extractor for u. A server-sent event stream is fed one data: line at a
 // time; anything else is parsed as one JSON document.
-func extractUsage(u hint.Upstream, path, contentType string, body []byte, start time.Time) (Usage, error) {
+func Extract(u hint.Upstream, path, contentType string, body []byte, start time.Time) (Usage, error) {
 	p := extractorFor(u).newParser(path, start)
 
 	if strings.Contains(contentType, "text/event-stream") {
@@ -126,7 +128,7 @@ func forEachSSEData(body []byte, fn func(data []byte)) {
 }
 
 // apiUsage holds the token counts read from an API usage block. Each wire
-// format has its own reader (usage_openai.go, usage_anthropic.go); servers
+// format has its own reader (openai.go, anthropic.go); servers
 // add their own fields on top.
 type apiUsage struct {
 	input, output     int
@@ -165,7 +167,7 @@ func (a apiUsage) toUsage(start time.Time) Usage {
 	}
 	return Usage{
 		Found: a.found,
-		Tokens: TokenMetrics{
+		Tokens: store.TokenMetrics{
 			InputTokens:     input,
 			OutputTokens:    a.output,
 			CachedTokens:    a.cached,

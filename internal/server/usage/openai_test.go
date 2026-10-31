@@ -1,4 +1,4 @@
-package server
+package usage
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestServer_UsageOpenAI_ChatCompletion(t *testing.T) {
+func TestUsage_OpenAI_ChatCompletion(t *testing.T) {
 	u := parseUsageFixture(t, hint.OpenAI, "/v1/chat/completions", "openai/chat_completion.json")
 	assert.True(t, u.Found)
 	assert.Equal(t, 12, u.Tokens.InputTokens)
@@ -19,7 +19,7 @@ func TestServer_UsageOpenAI_ChatCompletion(t *testing.T) {
 	assert.Equal(t, -1, u.Tokens.DraftTokens)
 }
 
-func TestServer_UsageOpenAI_ChatCompletionStream(t *testing.T) {
+func TestUsage_OpenAI_ChatCompletionStream(t *testing.T) {
 	// Chunks before the last carry "usage":null.
 	u := parseUsageFixture(t, hint.OpenAI, "/v1/chat/completions", "openai/chat_completion_stream.sse")
 	assert.Equal(t, 15, u.Tokens.InputTokens)
@@ -28,13 +28,13 @@ func TestServer_UsageOpenAI_ChatCompletionStream(t *testing.T) {
 	assert.Equal(t, -1, u.Tokens.ReasoningTokens)
 }
 
-func TestServer_UsageOpenAI_ChatCompletionReasoning(t *testing.T) {
+func TestUsage_OpenAI_ChatCompletionReasoning(t *testing.T) {
 	u := parseUsageFixture(t, hint.OpenAI, "/v1/chat/completions", "openai/chat_completion_reasoning.json")
 	assert.Equal(t, 9, u.Tokens.OutputTokens)
 	assert.Equal(t, 7, u.Tokens.ReasoningTokens)
 }
 
-func TestServer_UsageOpenAI_Responses(t *testing.T) {
+func TestUsage_OpenAI_Responses(t *testing.T) {
 	u := parseUsageFixture(t, hint.OpenAI, "/v1/responses", "openai/responses.json")
 	assert.Equal(t, 11, u.Tokens.InputTokens)
 	assert.Equal(t, 5, u.Tokens.OutputTokens)
@@ -42,7 +42,7 @@ func TestServer_UsageOpenAI_Responses(t *testing.T) {
 	assert.Equal(t, 2, u.Tokens.ReasoningTokens)
 }
 
-func TestServer_UsageOpenAI_ResponsesStream(t *testing.T) {
+func TestUsage_OpenAI_ResponsesStream(t *testing.T) {
 	// response.created has "usage":null; response.completed carries it.
 	u := parseUsageFixture(t, hint.OpenAI, "/v1/responses", "openai/responses_stream.sse")
 	assert.Equal(t, 11, u.Tokens.InputTokens)
@@ -51,13 +51,13 @@ func TestServer_UsageOpenAI_ResponsesStream(t *testing.T) {
 	assert.Equal(t, 2, u.Tokens.ReasoningTokens)
 }
 
-func TestServer_UsageOpenAI_Embeddings(t *testing.T) {
+func TestUsage_OpenAI_Embeddings(t *testing.T) {
 	u := parseUsageFixture(t, hint.OpenAI, "/v1/embeddings", "openai/embeddings.json")
 	assert.Equal(t, 8, u.Tokens.InputTokens)
 	assert.Equal(t, 0, u.Tokens.OutputTokens)
 }
 
-func TestServer_UsageOpenAI_LaterZeroCountsKeepEarlierValues(t *testing.T) {
+func TestUsage_OpenAI_LaterZeroCountsKeepEarlierValues(t *testing.T) {
 	u := parseUsageStream(t, hint.OpenAI, "/v1/chat/completions",
 		`{"usage":{"prompt_tokens":15,"completion_tokens":33}}`,
 		`{"usage":{"prompt_tokens":0,"completion_tokens":0}}`)
@@ -65,7 +65,7 @@ func TestServer_UsageOpenAI_LaterZeroCountsKeepEarlierValues(t *testing.T) {
 	assert.Equal(t, 33, u.Tokens.OutputTokens)
 }
 
-func TestServer_UsageOpenAI_ReasoningTokenValues(t *testing.T) {
+func TestUsage_OpenAI_ReasoningTokenValues(t *testing.T) {
 	tests := []struct {
 		name    string
 		details string
@@ -84,7 +84,7 @@ func TestServer_UsageOpenAI_ReasoningTokenValues(t *testing.T) {
 	}
 }
 
-func TestServer_UsageOpenAI_IgnoresOtherServersFields(t *testing.T) {
+func TestUsage_OpenAI_IgnoresOtherServersFields(t *testing.T) {
 	// TabbyAPI rates, llama-server timings and vLLM metrics are not part of
 	// the OpenAI format, so the API extractor leaves them alone.
 	for _, file := range []string{

@@ -1,4 +1,4 @@
-package server
+package usage
 
 import "github.com/tidwall/gjson"
 

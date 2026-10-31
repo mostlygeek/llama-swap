@@ -17,6 +17,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/server/usage"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
@@ -232,11 +233,11 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		body = decoded
 	}
 
-	if usage, err := extractUsage(upstream, r.URL.Path, recorder.Header().Get("Content-Type"), body, recorder.StartTime()); err != nil {
+	if u, err := usage.Extract(upstream, r.URL.Path, recorder.Header().Get("Content-Type"), body, recorder.StartTime()); err != nil {
 		mp.logger.Warnf("metrics: %v, path=%s, recording minimal metrics", err, r.URL.Path)
-	} else if usage.Found {
-		tm.Tokens = usage.Tokens
-		tm.DurationMs = usage.DurationMs
+	} else if u.Found {
+		tm.Tokens = u.Tokens
+		tm.DurationMs = u.DurationMs
 	}
 
 	stored, ok := mp.queueMetrics(tm)

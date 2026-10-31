@@ -21,9 +21,9 @@ Rules:
 - A missing or empty hint is valid. Consumers fall back to a best guess.
 - This package imports nothing from llama-swap, so any package can use it.
   Keep it to types and small helpers; usage parsing lives in
-  `internal/server`.
+  `internal/server/usage`.
 
 Adding an upstream: add an `Upstream` constant, a detection rule (a capcompat
 `owned_by` match for local servers or a `hostUpstreams` entry for remote
 providers), and, if it reports usage differently, an extractor in
-`internal/server`.
+`internal/server/usage`. See `docs/development/upstream-compat.md`.

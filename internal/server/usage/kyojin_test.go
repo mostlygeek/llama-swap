@@ -1,4 +1,4 @@
-package server
+package usage
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestServer_UsageKyojin_ChatCompletionStream(t *testing.T) {
+func TestUsage_Kyojin_ChatCompletionStream(t *testing.T) {
 	u := parseUsageFixture(t, hint.Kyojin, "/v1/chat/completions", "kyojin/chat_completion_stream.sse")
 	assert.True(t, u.Found)
 	assert.Equal(t, 97, u.Tokens.InputTokens)
@@ -20,14 +20,14 @@ func TestServer_UsageKyojin_ChatCompletionStream(t *testing.T) {
 	assert.Equal(t, 15, u.Tokens.DraftAccTokens)
 }
 
-func TestServer_UsageKyojin_DraftsNeedBothCounters(t *testing.T) {
+func TestUsage_Kyojin_DraftsNeedBothCounters(t *testing.T) {
 	u := parseUsageJSON(t, hint.Kyojin, "/v1/chat/completions",
 		`{"usage":{"prompt_tokens":1,"completion_tokens":1},"timings":{"prompt_n":1,"predicted_n":1,"accepted_draft_tokens":15}}`)
 	assert.Equal(t, -1, u.Tokens.DraftTokens)
 	assert.Equal(t, -1, u.Tokens.DraftAccTokens)
 }
 
-func TestServer_UsageKyojin_NotSpeculative(t *testing.T) {
+func TestUsage_Kyojin_NotSpeculative(t *testing.T) {
 	u := parseUsageJSON(t, hint.Kyojin, "/v1/chat/completions",
 		`{"usage":{"prompt_tokens":1,"completion_tokens":1},"timings":{"prompt_n":1,"predicted_n":1,"speculative":false}}`)
 	assert.Equal(t, -1, u.Tokens.DraftTokens)

@@ -1,4 +1,4 @@
-package server
+package usage
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestServer_UsageTabbyAPI_ChatCompletion(t *testing.T) {
+func TestUsage_TabbyAPI_ChatCompletion(t *testing.T) {
 	u := parseUsageFixture(t, hint.TabbyAPI, "/v1/chat/completions", "tabbyapi/chat_completion.json")
 	assert.Equal(t, 83, u.Tokens.InputTokens)
 	assert.Equal(t, 192, u.Tokens.OutputTokens)
@@ -16,7 +16,7 @@ func TestServer_UsageTabbyAPI_ChatCompletion(t *testing.T) {
 	assert.Equal(t, 13630, u.DurationMs, "total_time in seconds")
 }
 
-func TestServer_UsageTabbyAPI_ChatCompletionStream(t *testing.T) {
+func TestUsage_TabbyAPI_ChatCompletionStream(t *testing.T) {
 	u := parseUsageFixture(t, hint.TabbyAPI, "/v1/chat/completions", "tabbyapi/chat_completion_stream.sse")
 	assert.Equal(t, 83, u.Tokens.InputTokens)
 	assert.InDelta(t, 35.17, u.Tokens.PromptPerSecond, 1e-9)
@@ -24,7 +24,7 @@ func TestServer_UsageTabbyAPI_ChatCompletionStream(t *testing.T) {
 	assert.Equal(t, 13630, u.DurationMs)
 }
 
-func TestServer_UsageTabbyAPI_RateValues(t *testing.T) {
+func TestUsage_TabbyAPI_RateValues(t *testing.T) {
 	tests := []struct {
 		name       string
 		rates      string
@@ -46,7 +46,7 @@ func TestServer_UsageTabbyAPI_RateValues(t *testing.T) {
 	}
 }
 
-func TestServer_UsageTabbyAPI_IgnoresOtherServersFields(t *testing.T) {
+func TestUsage_TabbyAPI_IgnoresOtherServersFields(t *testing.T) {
 	llama := parseUsageFixture(t, hint.TabbyAPI, "/v1/chat/completions", "llama-server/chat_completion.json")
 	assert.Equal(t, -1.0, llama.Tokens.TokensPerSecond, "timings are llama-server's")
 	omlx := parseUsageFixture(t, hint.TabbyAPI, "/v1/chat/completions", "omlx/chat_completion.json")
