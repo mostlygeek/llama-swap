@@ -49,7 +49,15 @@
   let message = $derived(loadingMessage(model));
 </script>
 
-<div class="flex min-h-full flex-col gap-3 p-0 sm:gap-4 sm:p-2">
+<!--
+  h-full, not min-h-full: the Logs tab sizes itself with `h-full` all the way
+  down to the scrolling <pre>, and a percentage height only resolves against a
+  definite height. When this box was min-h-full the log text grew it instead,
+  so the page-level scroller in App.svelte scrolled and the log panel never
+  got its own scrollbar. overflow-y-auto here keeps the taller Activity and
+  Details tabs scrollable without moving the page.
+-->
+<div class="flex h-full flex-col gap-3 overflow-y-auto p-0 sm:gap-4 sm:p-2">
   {#if !model}
     <Card.Root class="shrink-0 p-6">
       <p class="text-muted-foreground">Model “{modelId}” not found.</p>
