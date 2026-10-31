@@ -26,11 +26,11 @@ func TestServer_ExtractorFor(t *testing.T) {
 		{hint.VLLM, vllmExtractor{}},
 		{hint.TabbyAPI, tabbyAPIExtractor{}},
 		{hint.OMLX, omlxExtractor{}},
-		{hint.Anthropic, anthropicExtractor{}},
-		{hint.OpenAI, openaiExtractor{}},
-		{hint.OpenRouter, openaiExtractor{}},
-		{hint.OpenAICompatible, openaiExtractor{}},
-		{hint.Halogen, openaiExtractor{}},
+		{hint.Anthropic, apiExtractor{}},
+		{hint.OpenAI, apiExtractor{}},
+		{hint.OpenRouter, apiExtractor{}},
+		{hint.OpenAICompatible, apiExtractor{}},
+		{hint.Halogen, apiExtractor{}},
 		{hint.LlamaSwap, autoExtractor{}},
 		{hint.Unknown, autoExtractor{}},
 	}
@@ -170,4 +170,91 @@ func TestMetricsMonitor_RecordWithoutHint(t *testing.T) {
 	assert.Equal(t, "chat", entries[0].Task)
 	assert.Empty(t, entries[0].Route)
 	assert.Empty(t, entries[0].PeerID)
+}
+
+func TestServer_ExtractUsage_AnthropicStream(t *testing.T) {
+	body := []byte(`event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":25,"cache_read_input_tokens":10,"output_tokens":1}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}
+
+event: message_delta
+data: {"type":"message_delta","usage":{"output_tokens":42}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`)
+	for _, upstream := range []hint.Upstream{hint.Anthropic, hint.LlamaServer, hint.VLLM, hint.Unknown} {
+		t.Run(string(upstream), func(t *testing.T) {
+			u, err := extractUsage(upstream, "/v1/messages", "text/event-stream", body, time.Now())
+			require.NoError(t, err)
+			assert.Equal(t, 25, u.Tokens.InputTokens)
+			assert.Equal(t, 42, u.Tokens.OutputTokens)
+			assert.Equal(t, 10, u.Tokens.CachedTokens)
+			assert.Equal(t, -1, u.Tokens.ReasoningTokens, "anthropic does not report reasoning separately")
+		})
+	}
+}
+
+func TestServer_ExtractUsage_AnthropicJSON(t *testing.T) {
+	body := `{"type":"message","usage":{"input_tokens":7,"output_tokens":3,"cache_read_input_tokens":0}}`
+	u, err := extractUsage(hint.Anthropic, "/v1/messages", "application/json", []byte(body), time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 7, u.Tokens.InputTokens)
+	assert.Equal(t, 3, u.Tokens.OutputTokens)
+	assert.Equal(t, 0, u.Tokens.CachedTokens)
+}
+
+func TestServer_ExtractUsage_ResponsesStream(t *testing.T) {
+	body := []byte(`data: {"type":"response.output_text.delta","delta":"hi"}
+
+data: {"type":"response.completed","response":{"usage":{"input_tokens":11,"output_tokens":5,"input_tokens_details":{"cached_tokens":3},"output_tokens_details":{"reasoning_tokens":2}}}}
+`)
+	u, err := extractUsage(hint.OpenAI, "/v1/responses", "text/event-stream", body, time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 11, u.Tokens.InputTokens)
+	assert.Equal(t, 5, u.Tokens.OutputTokens)
+	assert.Equal(t, 3, u.Tokens.CachedTokens)
+	assert.Equal(t, 2, u.Tokens.ReasoningTokens)
+}
+
+func TestServer_ExtractUsage_APIExtractorIgnoresServerFields(t *testing.T) {
+	body := `{"usage":{"prompt_tokens":4,"completion_tokens":6,"prompt_tokens_per_sec":9,"total_time":99},` +
+		`"timings":{"prompt_n":40,"predicted_n":60,"predicted_per_second":5}}`
+	start := time.Now()
+	u, err := extractUsage(hint.OpenAI, "/v1/chat/completions", "application/json", []byte(body), start)
+	require.NoError(t, err)
+	assert.Equal(t, 4, u.Tokens.InputTokens, "timings are llama-server's, not OpenAI's")
+	assert.Equal(t, 6, u.Tokens.OutputTokens)
+	assert.Equal(t, -1.0, u.Tokens.PromptPerSecond, "rates in usage are TabbyAPI's")
+	assert.Less(t, u.DurationMs, 99000, "total_time is TabbyAPI's")
+}
+
+func TestServer_ExtractUsage_TabbyAPI(t *testing.T) {
+	body := `{"usage":{"prompt_tokens":4,"completion_tokens":6,"prompt_tokens_per_sec":9,"completion_tokens_per_sec":3,"total_time":2.5},` +
+		`"timings":{"prompt_n":40,"predicted_n":60,"predicted_per_second":5}}`
+	u, err := extractUsage(hint.TabbyAPI, "/v1/chat/completions", "application/json", []byte(body), time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 4, u.Tokens.InputTokens, "TabbyAPI ignores timings")
+	assert.Equal(t, 9.0, u.Tokens.PromptPerSecond)
+	assert.Equal(t, 3.0, u.Tokens.TokensPerSecond)
+	assert.Equal(t, 2500, u.DurationMs)
+}
+
+func TestServer_ExtractUsage_OMLX(t *testing.T) {
+	body := `{"usage":{"prompt_tokens":4,"completion_tokens":6,"prompt_tokens_per_second":12,"generation_tokens_per_second":8,"prompt_tokens_per_sec":99}}`
+	u, err := extractUsage(hint.OMLX, "/v1/chat/completions", "application/json", []byte(body), time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 12.0, u.Tokens.PromptPerSecond, "oMLX ignores TabbyAPI's field names")
+	assert.Equal(t, 8.0, u.Tokens.TokensPerSecond)
+}
+
+func TestServer_ExtractUsage_LlamaServerInfill(t *testing.T) {
+	body := `[{"content":"a"},{"content":"b","timings":{"prompt_n":9,"predicted_n":4,"prompt_per_second":30,"predicted_per_second":20}}]`
+	u, err := extractUsage(hint.LlamaServer, "/infill", "application/json", []byte(body), time.Now())
+	require.NoError(t, err)
+	assert.True(t, u.Found)
+	assert.Equal(t, 9, u.Tokens.InputTokens)
+	assert.Equal(t, 20.0, u.Tokens.TokensPerSecond)
 }
