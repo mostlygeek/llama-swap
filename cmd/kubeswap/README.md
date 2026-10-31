@@ -573,6 +573,7 @@ in-cluster config else standard kubeconfig rules):
 | `--node-selector` | — | `key=value`, repeatable |
 | `--toleration` | — | `key:operator:value:effect` (operator Equal or Exists, default Equal; effect NoSchedule/PreferNoSchedule/NoExecute or empty for any effect; value must be empty with Exists; key must not be empty with Equal), repeatable |
 | `--label` | — | extra pod label `K=V`, repeatable; `llama-swap.io/managed-by`, `llama-swap.io/model`, `llama-swap.io/deployment` and `app.kubernetes.io/name` are reserved |
+| `--annotation` | — | extra pod annotation `K=V`, repeatable; the value may contain `=`; `llama-swap.io/model-id` is reserved; keys in the `kubernetes.io`/`k8s.io` domains are ignored by `--strict` (reserved for Kubernetes, e.g. the rollout controller's `deployment.kubernetes.io/revision`) |
 | `--volume` | — | `pvc:name:path[:ro]`, `emptydir:name:path[:ro]` or `hostpath:nodePath:mountPath[:ro]` or `nfs:server/export:mountPath[:ro]`, repeatable |
 | `--pvc-size` | `1Gi` | size for PVCs kubeswap must create |
 | `--pvc-class` | cluster default | StorageClass for created PVCs |

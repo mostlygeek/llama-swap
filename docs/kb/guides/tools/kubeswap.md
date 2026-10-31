@@ -84,6 +84,14 @@ Key flags:
   device.
 - `--service-port name:port` — extra container and Service ports
   (e.g. a metrics port).
+- `--annotation K=V` — arbitrary annotations on the pod and its
+  Deployment, repeatable (e.g. `prometheus.io/scrape: "true"`); the
+  value may contain `=`. `llama-swap.io/model-id` is reserved — kubeswap
+  uses it to find the objects it manages. Keys in the `kubernetes.io`
+  and `k8s.io` domains are ignored by `--strict` (reserved for
+  Kubernetes, e.g. the rollout controller's
+  `deployment.kubernetes.io/revision`), so an annotation with such a key
+  is applied but never drift-checked.
 - `--volume pvc:name:/mount[:ro]` and `--volume emptydir:/mount` — model
   cache, scratch, slot state.
 - `--volume nfs:server/export:/mount[:ro]` — mounts an NFS export straight

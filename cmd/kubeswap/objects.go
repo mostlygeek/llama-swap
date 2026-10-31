@@ -30,17 +30,18 @@ type serveConfig struct {
 	// StartupTimeout bounds model loading: the startup probe tolerates this
 	// much time before the pod is restarted, and gates readiness/liveness
 	// until it succeeds.
-	StartupTimeout int64 // seconds
-	ServicePorts   []servicePortSpec
-	Requests       map[string]string // resource name -> quantity
-	Limits         map[string]string // resource name -> quantity
-	Env            []envVar
-	GPUs           map[string]string   // resource name -> quantity (requests AND limits)
-	ResourceClaims []resourceClaimSpec // existing DRA ResourceClaims attached to the pod
-	NodeSel        map[string]string
-	Tolerations    []toleration
-	Volumes        []volumeSpec
-	ExtraLabels    map[string]string
+	StartupTimeout   int64 // seconds
+	ServicePorts     []servicePortSpec
+	Requests         map[string]string // resource name -> quantity
+	Limits           map[string]string // resource name -> quantity
+	Env              []envVar
+	GPUs             map[string]string   // resource name -> quantity (requests AND limits)
+	ResourceClaims   []resourceClaimSpec // existing DRA ResourceClaims attached to the pod
+	NodeSel          map[string]string
+	Tolerations      []toleration
+	Volumes          []volumeSpec
+	ExtraLabels      map[string]string
+	ExtraAnnotations map[string]string
 
 	// PVC defaults, used when a --volume pvc:<name> does not exist yet.
 	PVCSize       string
@@ -123,7 +124,16 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 	}
 	grace := c.GraceSeconds
 
-	annotations := map[string]string{annotationModelID: c.Model}
+	// Separate copies: the Deployment's and the pod template's
+	// annotations are independent objects (same rule as the labels above).
+	depAnnotations := map[string]string{annotationModelID: c.Model}
+	for k, v := range c.ExtraAnnotations {
+		depAnnotations[k] = v
+	}
+	podAnnotations := map[string]string{annotationModelID: c.Model}
+	for k, v := range c.ExtraAnnotations {
+		podAnnotations[k] = v
+	}
 	recreate := appsv1.RecreateDeploymentStrategyType
 	replicas := int32(1)
 
@@ -132,7 +142,7 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 			Name:        c.DepName,
 			Namespace:   c.Namespace,
 			Labels:      depLabels,
-			Annotations: annotations,
+			Annotations: depAnnotations,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
@@ -141,7 +151,7 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      podTemplateLabels,
-					Annotations: map[string]string{annotationModelID: c.Model},
+					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
 					Containers:                    []corev1.Container{container},
@@ -395,18 +405,31 @@ func strPtr(s string) *string {
 
 // deploymentSpecMatches reports whether an existing deployment matches the
 // desired one (used by --strict adoption). Every configuration-owned field
-// is compared — the deployment's labels (which carry the extra --label
-// entries), and in the pod template the image, command, args, env, ports,
-// volumes, resource claims, node selector, tolerations, grace period,
-// probes and resources — so strict mode replaces the Deployment whenever
-// any of them drifted.
+// is compared — the deployment's labels, and its annotations with keys in
+// domains reserved for use by Kubernetes ignored (see
+// systemOwnedAnnotation), and in the pod template the image, command,
+// args, env, ports, volumes, resource claims, node selector, tolerations,
+// grace period, probes and resources — so strict mode replaces the
+// Deployment whenever any of them drifted.
 func deploymentSpecMatches(have *appsv1.Deployment, want *appsv1.Deployment) bool {
 	if have == nil || want == nil {
 		return false
 	}
-	// The API server adds nothing to a Deployment's labels, so the label
-	// sets must be exactly the rendered ones (managed + extra --label).
+	// The API server and controllers add nothing to a Deployment's labels,
+	// so those must be exactly the rendered ones (managed + extra
+	// --label). Annotations are compared after ignoring keys in domains
+	// reserved for use by Kubernetes — e.g. deployment.kubernetes.io/
+	// revision, which the rollout controller adds to the Deployment's own
+	// annotations after every rollout — while kubeswap-owned keys
+	// (llama-swap.io/* and --annotation entries) are still compared
+	// exactly.
 	if !stringMapEqual(have.Labels, want.Labels) {
+		return false
+	}
+	if !annotationsEqualIgnoringSystemKeys(have.Annotations, want.Annotations) {
+		return false
+	}
+	if !stringMapEqual(have.Spec.Template.Annotations, want.Spec.Template.Annotations) {
 		return false
 	}
 	hs, ws := have.Spec.Template.Spec, want.Spec.Template.Spec
@@ -602,6 +625,41 @@ func stringMapEqual(a, b map[string]string) bool {
 	for k, v := range a {
 		bv, ok := b[k]
 		if !ok || bv != v {
+			return false
+		}
+	}
+	return true
+}
+
+// systemOwnedAnnotation reports whether an annotation key is in a domain
+// reserved for use by Kubernetes. The rollout controller adds
+// deployment.kubernetes.io/revision to a Deployment's own annotations
+// after each rollout, and kubectl apply adds
+// kubectl.kubernetes.io/last-applied-configuration; neither is a setting
+// kubeswap owns. kubeswap's keys are llama-swap.io/*, so ignoring keys
+// in the kubernetes.io and k8s.io domains still checks every
+// kubeswap-owned annotation exactly.
+func systemOwnedAnnotation(key string) bool {
+	return strings.Contains(key, "kubernetes.io/") || strings.Contains(key, "k8s.io/")
+}
+
+// annotationsEqualIgnoringSystemKeys compares annotation maps, skipping
+// keys in domains reserved for Kubernetes (see systemOwnedAnnotation) so
+// controller- or tool-written annotations never count as drift.
+func annotationsEqualIgnoringSystemKeys(have, want map[string]string) bool {
+	for k, v := range have {
+		if systemOwnedAnnotation(k) {
+			continue
+		}
+		if w, ok := want[k]; !ok || w != v {
+			return false
+		}
+	}
+	for k := range want {
+		if systemOwnedAnnotation(k) {
+			continue
+		}
+		if _, ok := have[k]; !ok {
 			return false
 		}
 	}

@@ -96,6 +96,23 @@ func TestKubeswap_ToConfigRejectsReservedLabels(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ToConfigRejectsReservedAnnotations Verifies the managed
+// model-id annotation key is rejected as an extra annotation.
+func TestKubeswap_ToConfigRejectsReservedAnnotations(t *testing.T) {
+	f := &serveFlags{model: "m", annotations: stringList{annotationModelID + "=other"}}
+	if _, err := f.toConfig(); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Errorf("got %v, want reserved-key error", err)
+	}
+	f = &serveFlags{model: "m", annotations: stringList{"team=ml", "note=dev"}}
+	cfg, err := f.toConfig()
+	if err != nil {
+		t.Fatalf("non-reserved annotations should pass: %v", err)
+	}
+	if cfg.ExtraAnnotations["team"] != "ml" || cfg.ExtraAnnotations["note"] != "dev" {
+		t.Errorf("got %v", cfg.ExtraAnnotations)
+	}
+}
+
 // TestKubeswap_ToConfigResourceClaims Verifies --resource-claim reaches the config and invalid entries fail at parse time.
 func TestKubeswap_ToConfigResourceClaims(t *testing.T) {
 	f := &serveFlags{model: "m", resourceClaims: stringList{"gpu=pro2000"}}

@@ -507,6 +507,79 @@ func TestKubeswap_DeploymentSpecMatchesLabels(t *testing.T) {
 	}
 }
 
+// TestKubeswap_RenderDeploymentExtraAnnotations Verifies extra --annotation
+// entries land on both the Deployment and the pod template, alongside the
+// managed model-id annotation (which the extra entries must not override).
+func TestKubeswap_RenderDeploymentExtraAnnotations(t *testing.T) {
+	cfg := testConfig()
+	cfg.ExtraAnnotations = map[string]string{
+		"prometheus.io/scrape": "true",
+		"note":                 "v=free form",
+	}
+	dep, err := cfg.renderDeployment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, anns := range []map[string]string{dep.Annotations, dep.Spec.Template.Annotations} {
+		if anns["prometheus.io/scrape"] != "true" || anns["note"] != "v=free form" {
+			t.Errorf("extra annotations missing: %v", anns)
+		}
+		if anns[annotationModelID] != "author/model:tag" {
+			t.Errorf("model-id annotation must survive: %v", anns)
+		}
+	}
+	// A second render must not share maps with the first.
+	dep2, _ := cfg.renderDeployment()
+	dep2.Annotations["extra"] = "added"
+	if _, ok := dep.Annotations["extra"]; ok {
+		t.Error("rendered annotations must be independent copies")
+	}
+}
+
+// TestKubeswap_DeploymentSpecMatches Verifies the spec comparison detects drift in the rendered annotations (the extra --annotation entries land on the Deployment and the pod template, so a change must trigger a --strict replacement).
+func TestKubeswap_DeploymentSpecMatchesAnnotations(t *testing.T) {
+	cfg := testConfig()
+	cfg.ExtraAnnotations = map[string]string{"team": "inference"}
+	dep, err := cfg.renderDeployment()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Same annotations match.
+	dep2, _ := cfg.renderDeployment()
+	if !deploymentSpecMatches(dep, dep2) {
+		t.Error("identical annotations should match")
+	}
+
+	// An added deployment-level annotation is drift.
+	dep2, _ = cfg.renderDeployment()
+	dep2.Annotations["extra"] = "annotation"
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("added annotation should not match")
+	}
+
+	// A changed value is drift.
+	dep2, _ = cfg.renderDeployment()
+	dep2.Annotations["team"] = "other"
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("changed annotation value should not match")
+	}
+
+	// A removed annotation is drift.
+	dep2, _ = cfg.renderDeployment()
+	delete(dep2.Annotations, "team")
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("removed annotation should not match")
+	}
+
+	// A pod-template annotation change is drift too.
+	dep2, _ = cfg.renderDeployment()
+	dep2.Spec.Template.Annotations["team"] = "other"
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("changed pod template annotation should not match")
+	}
+}
+
 // TestKubeswap_DeploymentSpecMatchesNodeSelector Verifies the spec comparison detects node-selector drift.
 func TestKubeswap_DeploymentSpecMatchesNodeSelector(t *testing.T) {
 	cfg := testConfig()
@@ -515,6 +588,24 @@ func TestKubeswap_DeploymentSpecMatchesNodeSelector(t *testing.T) {
 	dep2.Spec.Template.Spec.NodeSelector["other.node.kubernetes.io/label"] = "yes"
 	if deploymentSpecMatches(dep, dep2) {
 		t.Error("node selector drift should not match")
+	}
+}
+
+// TestKubeswap_DeploymentSpecMatchesRevisionAnnotation Verifies that the
+// rollout controller's own annotations (deployment.kubernetes.io/revision,
+// written to the Deployment after a rollout) do not count as drift, while
+// kubeswap-owned annotations are still compared.
+func TestKubeswap_DeploymentSpecMatchesRevisionAnnotation(t *testing.T) {
+	cfg := testConfig()
+	dep, _ := cfg.renderDeployment()
+	dep2, _ := cfg.renderDeployment()
+	dep2.Annotations["deployment.kubernetes.io/revision"] = "3"
+	if !deploymentSpecMatches(dep, dep2) {
+		t.Error("controller-written revision annotation should not count as drift")
+	}
+	dep2.Annotations[annotationModelID] = "other-model"
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("drift in a kubeswap-owned annotation should not match")
 	}
 }
 
