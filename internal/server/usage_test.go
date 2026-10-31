@@ -79,7 +79,7 @@ func TestServer_Usage_ExtractorFor(t *testing.T) {
 		{hint.Anthropic, apiExtractor{}},
 		{hint.OpenRouter, apiExtractor{}},
 		{hint.OpenAICompatible, apiExtractor{}},
-		{hint.Halogen, apiExtractor{}},
+		{hint.Halogen, halogenExtractor{}},
 		{hint.LlamaSwap, autoExtractor{}},
 		{hint.Unknown, autoExtractor{}},
 	}

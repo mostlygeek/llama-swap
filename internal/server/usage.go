@@ -56,7 +56,9 @@ func extractorFor(u hint.Upstream) usageExtractor {
 		return kyojinExtractor{}
 	case hint.Radiance:
 		return radianceExtractor{}
-	case hint.OpenAI, hint.Anthropic, hint.OpenRouter, hint.OpenAICompatible, hint.Halogen:
+	case hint.Halogen:
+		return halogenExtractor{}
+	case hint.OpenAI, hint.Anthropic, hint.OpenRouter, hint.OpenAICompatible:
 		return apiExtractor{}
 	default:
 		return autoExtractor{}
@@ -191,8 +193,8 @@ func setReported(dst *int, v gjson.Result) bool {
 }
 
 // apiExtractor reads only the API usage block. It serves hosted APIs
-// (OpenAI, Anthropic, OpenRouter) and local servers that add nothing to it
-// (halogen, other OpenAI-compatible servers).
+// (OpenAI, Anthropic, OpenRouter) and OpenAI-compatible servers that add
+// nothing to it.
 type apiExtractor struct{}
 
 func (apiExtractor) newParser(path string, start time.Time) usageParser {

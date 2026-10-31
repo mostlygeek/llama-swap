@@ -30,6 +30,7 @@ func TestServer_UsageAuto_ReadsEachServer(t *testing.T) {
 		{hint.OMLX, "/v1/chat/completions", "omlx/chat_completion.json"},
 		{hint.Kyojin, "/v1/chat/completions", "kyojin/chat_completion_stream.sse"},
 		{hint.Radiance, "/v1/chat/completions", "radiance/chat_completion_stream.sse"},
+		{hint.Halogen, "/v1/chat/completions", "halogen/chat_completion_stream.sse"},
 		{hint.Radiance, "/v1/messages", "radiance/messages_stream.sse"},
 		{hint.Radiance, "/v1/responses", "radiance/responses_stream.sse"},
 	}
