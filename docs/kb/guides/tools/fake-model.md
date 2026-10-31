@@ -27,8 +27,8 @@ go build -o fake-model ./cmd/fake-model
 | `-listen` | `localhost:9898` | address to listen on |
 | `-tokens` | `1000` | completion (output) tokens in every reply |
 | `-tps` | `75` | completion (output) tokens per second (decode) |
-| `-prompt-tokens` | `100` | prompt (input) tokens reported (Prompt, and Prefill) |
-| `-cache-tokens` | `0` | cached (cache-read) prompt tokens (Cached) |
+| `-prompt-tokens` | `100` | whole prompt reported, cached tokens included (Prompt, and Prefill) |
+| `-cache-tokens` | `0` | how many prompt tokens are cached; they take no prefill time (Cached) |
 | `-prefill-tps` | `2000` | simulated prompt (prefill) tokens per second (Prefill) |
 | `-draft-tokens` | `0` | speculative-decoding draft tokens (Drafted; 0 omits it) |
 | `-draft-accepted` | `0` | speculative-decoding accepted draft tokens (Draft Accepted) |
@@ -57,7 +57,7 @@ the model as loading for that long. Choose `-load` larger than
 
 - Streams (`"stream": true`) a role chunk, one word per tick, then a final chunk
   carrying the usage/timings, then `data: [DONE]`. Without streaming it waits
-  `prompt-tokens / prefill-tps + tokens / tps` seconds and returns a single JSON
+  `(prompt-tokens - cache-tokens) / prefill-tps + tokens / tps` seconds and returns a single JSON
   response.
 - A request that arrives during loading waits until the load finishes.
 - Only `/health` and `/v1/chat/completions` exist. Anything else returns 404, so

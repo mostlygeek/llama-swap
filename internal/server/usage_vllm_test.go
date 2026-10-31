@@ -12,8 +12,9 @@ func TestServer_UsageVLLM_ChatCompletion(t *testing.T) {
 	assert.Equal(t, 42, u.Tokens.InputTokens)
 	assert.Equal(t, 128, u.Tokens.OutputTokens)
 	assert.Equal(t, 20, u.Tokens.CachedTokens)
-	// The prompt rate counts only uncached tokens over time to first token.
-	assert.InDelta(t, float64(42-20)/(85.2/1000), u.Tokens.PromptPerSecond, 1e-9)
+	// The prompt rate counts only uncached tokens over the prefill time:
+	// time to first token minus time spent queued.
+	assert.InDelta(t, float64(42-20)/((85.2-12.3)/1000), u.Tokens.PromptPerSecond, 1e-9)
 	assert.InDelta(t, 1000/9.1, u.Tokens.TokensPerSecond, 1e-9, "1000 / mean_itl_ms")
 }
 
@@ -25,7 +26,7 @@ func TestServer_UsageVLLM_ChatCompletionStream(t *testing.T) {
 	assert.Equal(t, 42, u.Tokens.InputTokens)
 	assert.Equal(t, 227, u.Tokens.OutputTokens)
 	assert.Equal(t, 0, u.Tokens.CachedTokens, "reported, nothing cached")
-	assert.InDelta(t, 42/(136.54924900038168/1000), u.Tokens.PromptPerSecond, 1e-9, "all 42 prompt tokens over time to first token")
+	assert.InDelta(t, 42/((136.54924900038168-0.021259002096485347)/1000), u.Tokens.PromptPerSecond, 1e-9, "all 42 prompt tokens over prefill time")
 	assert.InDelta(t, 1000/5.561512570794202, u.Tokens.TokensPerSecond, 1e-9, "1000 / mean_itl_ms")
 	assert.Equal(t, -1, u.Tokens.DraftTokens)
 }
@@ -52,7 +53,7 @@ func TestServer_UsageVLLM_SpeculativeDecodingNeedsBothCounters(t *testing.T) {
 
 func TestServer_UsageVLLM_IgnoresTimings(t *testing.T) {
 	u := parseUsageFixture(t, hint.VLLM, "/v1/chat/completions", "llama-server/chat_completion.json")
-	assert.Equal(t, 20, u.Tokens.InputTokens, "usage block is still read")
+	assert.Equal(t, 28, u.Tokens.InputTokens, "usage block is still read")
 	assert.Equal(t, -1, u.Tokens.CachedTokens, "cache_n is llama-server's")
 	assert.Equal(t, -1.0, u.Tokens.TokensPerSecond)
 }

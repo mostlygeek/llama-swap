@@ -46,7 +46,7 @@ func TestServer_UsageAuto_ReadsEachServer(t *testing.T) {
 
 func TestServer_UsageAuto_Precedence(t *testing.T) {
 	const omlx = `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`
-	const timings = `,"timings":{"prompt_n":56,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40}`
+	const timings = `,"timings":{"prompt_n":40,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40}`
 	const metrics = `,"metrics":{"time_to_first_token_ms":200,"mean_itl_ms":10}`
 	tests := []struct {
 		name       string

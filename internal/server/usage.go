@@ -132,6 +132,11 @@ type apiUsage struct {
 	input, output     int
 	cached, reasoning int // -1 when not reported
 	found             bool
+	// inputExcludesCache is set by formats (Anthropic) whose input count
+	// leaves out cache reads and writes; cacheWrite is the cache write
+	// count. toUsage adds both back so input is always the whole prompt.
+	inputExcludesCache bool
+	cacheWrite         int
 }
 
 func newAPIUsage() apiUsage { return apiUsage{cached: -1, reasoning: -1} }
@@ -154,10 +159,14 @@ func apiReaderFor(path string) apiReader {
 // toUsage turns the counts into a Usage with every server-reported field
 // (rates, draft counts) unknown and the duration measured from start.
 func (a apiUsage) toUsage(start time.Time) Usage {
+	input := a.input
+	if a.inputExcludesCache {
+		input += max(a.cached, 0) + a.cacheWrite
+	}
 	return Usage{
 		Found: a.found,
 		Tokens: TokenMetrics{
-			InputTokens:     a.input,
+			InputTokens:     input,
 			OutputTokens:    a.output,
 			CachedTokens:    a.cached,
 			ReasoningTokens: a.reasoning,

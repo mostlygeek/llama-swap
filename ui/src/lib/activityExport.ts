@@ -81,9 +81,12 @@ export function summarizeActivity(rows: ActivityLogEntry[]): ActivitySummary {
     summary.draftTokens += row.tokens.draft_tokens;
     summary.draftAccTokens += row.tokens.draft_acc_tokens;
 
-    if (row.tokens.input_tokens > 0 && row.tokens.prompt_per_second > 0) {
-      promptTokens += row.tokens.input_tokens;
-      promptSeconds += row.tokens.input_tokens / row.tokens.prompt_per_second;
+    // prompt_per_second measures only the prompt tokens actually processed,
+    // so cached tokens are left out of the weighting.
+    const processed = row.tokens.input_tokens - Math.max(row.tokens.cache_tokens, 0);
+    if (processed > 0 && row.tokens.prompt_per_second > 0) {
+      promptTokens += processed;
+      promptSeconds += processed / row.tokens.prompt_per_second;
     }
     if (row.tokens.output_tokens > 0 && row.tokens.tokens_per_second > 0) {
       genTokens += row.tokens.output_tokens;

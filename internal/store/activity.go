@@ -6,17 +6,27 @@ import (
 	"time"
 )
 
-// TokenMetrics holds token usage and performance metrics.
+// TokenMetrics holds token usage and performance metrics. Every upstream's
+// numbers are normalized to the meanings below; -1 means not reported.
 type TokenMetrics struct {
-	CachedTokens   int `json:"cache_tokens"`
+	// CachedTokens is the part of InputTokens served from the prompt cache
+	// instead of being processed.
+	CachedTokens int `json:"cache_tokens"`
+	// DraftTokens is the number of speculative tokens drafted and
+	// DraftAccTokens how many of them were accepted.
 	DraftTokens    int `json:"draft_tokens"`
 	DraftAccTokens int `json:"draft_acc_tokens"`
-	InputTokens    int `json:"input_tokens"`
-	OutputTokens   int `json:"output_tokens"`
-	// ReasoningTokens is the reasoning share of OutputTokens, -1 when the
-	// upstream does not report it.
-	ReasoningTokens int     `json:"reasoning_tokens"`
+	// InputTokens is the whole prompt, cached tokens included.
+	InputTokens int `json:"input_tokens"`
+	// OutputTokens is every generated token, reasoning included.
+	OutputTokens int `json:"output_tokens"`
+	// ReasoningTokens is the reasoning share of OutputTokens.
+	ReasoningTokens int `json:"reasoning_tokens"`
+	// PromptPerSecond is the prefill rate: uncached prompt tokens
+	// (InputTokens - CachedTokens) per second of prompt processing.
 	PromptPerSecond float64 `json:"prompt_per_second"`
+	// TokensPerSecond is the decode rate: OutputTokens per second of
+	// generation, prefill time excluded.
 	TokensPerSecond float64 `json:"tokens_per_second"`
 }
 

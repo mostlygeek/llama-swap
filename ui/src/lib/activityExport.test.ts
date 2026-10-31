@@ -150,6 +150,37 @@ describe("summarizeActivity", () => {
     expect(summary.tokensPerSecond).toBe(-1);
   });
 
+  it("weights the prompt speed by processed tokens, not cached ones", () => {
+    // 1000 prompt tokens, 900 cached: 100 processed at 100 t/s => 1s.
+    // 300 prompt tokens, none cached: 300 processed at 300 t/s => 1s.
+    const summary = summarizeActivity([
+      entry({
+        tokens: {
+          cache_tokens: 900,
+          draft_tokens: 0,
+          draft_acc_tokens: 0,
+          input_tokens: 1000,
+          output_tokens: 0,
+          prompt_per_second: 100,
+          tokens_per_second: -1,
+        },
+      }),
+      entry({
+        tokens: {
+          cache_tokens: -1,
+          draft_tokens: 0,
+          draft_acc_tokens: 0,
+          input_tokens: 300,
+          output_tokens: 0,
+          prompt_per_second: 300,
+          tokens_per_second: -1,
+        },
+      }),
+    ]);
+
+    expect(summary.promptPerSecond).toBeCloseTo(200, 6);
+  });
+
   it("ignores rows with unreported speeds or no tokens", () => {
     const summary = summarizeActivity([
       entry({
@@ -280,7 +311,7 @@ describe("summaryMarkdown", () => {
           cache_tokens: 12480,
           draft_tokens: 240,
           draft_acc_tokens: 148,
-          input_tokens: 5678,
+          input_tokens: 18158,
           output_tokens: 1904,
           prompt_per_second: 412.3,
           tokens_per_second: 48.15,
@@ -295,7 +326,7 @@ describe("summaryMarkdown", () => {
         "| Range | 2026-08-16 09:12:03 → 2026-08-16 09:12:03 |",
         "| Duration | 41.90s |",
         `| Cached | ${(12480).toLocaleString()} |`,
-        `| Prompt | ${(5678).toLocaleString()} (412.30 t/s) |`,
+        `| Prompt | ${(18158).toLocaleString()} (412.30 t/s) |`,
         `| Generated | ${(1904).toLocaleString()} (48.15 t/s) |`,
         "| Drafted | 61.7% 148/240 |",
       ].join("\n")

@@ -48,25 +48,28 @@ func lastArrayElement(ev gjson.Result) gjson.Result {
 	return arr[len(arr)-1]
 }
 
-// applyTimings applies a llama-server timings block: prompt_n and
-// predicted_n replace the token counts, prompt_per_second and
-// predicted_per_second give the rates, prompt_ms + predicted_ms the
-// duration (when longer than wall time), cache_n the cached count, and
-// draft_n / draft_n_accepted the speculative decoding counters.
+// applyTimings applies a llama-server timings block. prompt_n counts only
+// the prompt tokens processed and cache_n the ones reused from the cache, so
+// the whole prompt is prompt_n + cache_n (the same number usage.prompt_tokens
+// reports). predicted_n is the output count, prompt_per_second and
+// predicted_per_second the rates, prompt_ms + predicted_ms the duration
+// (when longer than wall time), and draft_n / draft_n_accepted the
+// speculative decoding counters.
 func applyTimings(u *Usage, timings gjson.Result) {
 	if !timings.Exists() {
 		return
 	}
 	u.Found = true
-	u.Tokens.InputTokens = int(timings.Get("prompt_n").Int())
+	cached := timings.Get("cache_n")
+	u.Tokens.InputTokens = int(timings.Get("prompt_n").Int() + cached.Int())
 	u.Tokens.OutputTokens = int(timings.Get("predicted_n").Int())
 	u.Tokens.PromptPerSecond = timings.Get("prompt_per_second").Float()
 	u.Tokens.TokensPerSecond = timings.Get("predicted_per_second").Float()
 	if ms := int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float()); ms > u.DurationMs {
 		u.DurationMs = ms
 	}
-	if v := timings.Get("cache_n"); v.Exists() {
-		u.Tokens.CachedTokens = int(v.Int())
+	if cached.Exists() {
+		u.Tokens.CachedTokens = int(cached.Int())
 	}
 	if drafted, accepted := timings.Get("draft_n"), timings.Get("draft_n_accepted"); drafted.Exists() && accepted.Exists() {
 		u.Tokens.DraftTokens = int(drafted.Int())

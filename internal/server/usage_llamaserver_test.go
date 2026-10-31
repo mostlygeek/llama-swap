@@ -10,7 +10,7 @@ import (
 func TestServer_UsageLlamaServer_ChatCompletion(t *testing.T) {
 	u := parseUsageFixture(t, hint.LlamaServer, "/v1/chat/completions", "llama-server/chat_completion.json")
 	assert.True(t, u.Found)
-	assert.Equal(t, 20, u.Tokens.InputTokens)
+	assert.Equal(t, 28, u.Tokens.InputTokens, "prompt_n + cache_n")
 	assert.Equal(t, 50, u.Tokens.OutputTokens)
 	assert.Equal(t, 8, u.Tokens.CachedTokens, "cache_n")
 	assert.Equal(t, 100.0, u.Tokens.PromptPerSecond)
@@ -20,7 +20,7 @@ func TestServer_UsageLlamaServer_ChatCompletion(t *testing.T) {
 
 func TestServer_UsageLlamaServer_ChatCompletionStream(t *testing.T) {
 	u := parseUsageFixture(t, hint.LlamaServer, "/v1/chat/completions", "llama-server/chat_completion_stream.sse")
-	assert.Equal(t, 20, u.Tokens.InputTokens)
+	assert.Equal(t, 28, u.Tokens.InputTokens)
 	assert.Equal(t, 50, u.Tokens.OutputTokens)
 	assert.Equal(t, 40.0, u.Tokens.TokensPerSecond)
 }
@@ -44,7 +44,7 @@ func TestServer_UsageLlamaServer_TimingsOverrideUsage(t *testing.T) {
 	u := parseUsageJSON(t, hint.LlamaServer, "/v1/chat/completions",
 		`{"usage":{"prompt_tokens":1,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":0}},`+
 			`"timings":{"prompt_n":20,"predicted_n":50,"cache_n":8}}`)
-	assert.Equal(t, 20, u.Tokens.InputTokens)
+	assert.Equal(t, 28, u.Tokens.InputTokens, "prompt_n counts only processed tokens")
 	assert.Equal(t, 50, u.Tokens.OutputTokens)
 	assert.Equal(t, 8, u.Tokens.CachedTokens)
 }

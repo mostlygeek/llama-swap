@@ -34,7 +34,9 @@ func (p *vllmParser) usage() Usage {
 }
 
 // applyVLLMMetrics applies a vLLM response metrics block. The prompt rate
-// is the uncached prompt tokens over time_to_first_token_ms, the generation
+// is the uncached prompt tokens over the prefill time, which is
+// time_to_first_token_ms minus queue_time_ms (vLLM measures time to first
+// token from arrival, so it includes time spent queued), the generation
 // rate is 1000 / mean_itl_ms, and speculative_decoding carries draft counts
 // when vLLM runs with --per-request-spec-decode-metrics (#1032). Both draft
 // counters are required so the acceptance rate is never derived from a
@@ -52,8 +54,12 @@ func applyVLLMMetrics(u *Usage, metrics gjson.Result) {
 		}
 	}
 	if ttft := metrics.Get("time_to_first_token_ms").Float(); ttft > 0 {
+		prefill := ttft
+		if queued := metrics.Get("queue_time_ms").Float(); queued > 0 && queued < ttft {
+			prefill -= queued
+		}
 		cached := max(u.Tokens.CachedTokens, 0)
-		u.Tokens.PromptPerSecond = float64(u.Tokens.InputTokens-cached) / (ttft / 1000)
+		u.Tokens.PromptPerSecond = float64(u.Tokens.InputTokens-cached) / (prefill / 1000)
 	}
 	if itl := metrics.Get("mean_itl_ms").Float(); itl > 0 {
 		u.Tokens.TokensPerSecond = 1000 / itl
