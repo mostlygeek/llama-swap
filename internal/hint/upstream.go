@@ -28,6 +28,17 @@ const (
 	OpenRouter Upstream = "openrouter"
 )
 
+// Known reports whether u is one of the constants above. Unknown itself is
+// not known.
+func (u Upstream) Known() bool {
+	switch u {
+	case LlamaServer, VLLM, TabbyAPI, OMLX, Halogen, OpenAICompatible,
+		LlamaSwap, OpenAI, Anthropic, OpenRouter:
+		return true
+	}
+	return false
+}
+
 // hostUpstreams maps a peer's proxy host to the provider behind it. Matching
 // is on the exact host or any subdomain of it.
 var hostUpstreams = []struct {

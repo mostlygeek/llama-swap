@@ -260,6 +260,12 @@ func (s *Service) read(ctx context.Context, key string) (Info, bool, error) {
 	if info.Capabilities.Empty() {
 		return Info{}, false, nil
 	}
+	// Rows written before Info.Upstream was a hint.Upstream hold prober
+	// names such as "default". Treat any value llama-swap does not know as
+	// undetected rather than publish it.
+	if !info.Upstream.Known() {
+		info.Upstream = hint.Unknown
+	}
 	return info, true, nil
 }
 

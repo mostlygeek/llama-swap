@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/store"
 )
 
@@ -423,4 +424,21 @@ func mustJSON(t *testing.T, v any) []byte {
 	data, err := json.Marshal(v)
 	require.NoError(t, err)
 	return data
+}
+
+func TestCapcompat_UpstreamDropsLegacyProberName(t *testing.T) {
+	// Rows written before Info.Upstream was a hint.Upstream hold prober
+	// names such as "default"; they must not be published.
+	cache := newCountingCache()
+	legacy := []byte(`{"upstream":"default","capabilities":{"context":4096}}`)
+	require.NoError(t, cache.Set(context.Background(), store.CacheEntry{Key: "legacy", Data: legacy}))
+	current := Info{Upstream: hint.VLLM, Capabilities: config.ModelCapConfig{Context: 4096}}
+	require.NoError(t, cache.Set(context.Background(), store.CacheEntry{Key: "current", Data: mustJSON(t, current)}))
+
+	svc := New(cache, nil)
+	assert.Equal(t, hint.Unknown, svc.Upstream(context.Background(), "legacy"))
+	caps, found := svc.Lookup(context.Background(), "legacy")
+	assert.True(t, found, "the capabilities in a legacy row are still good")
+	assert.Equal(t, 4096, caps.Context)
+	assert.Equal(t, hint.VLLM, svc.Upstream(context.Background(), "current"))
 }

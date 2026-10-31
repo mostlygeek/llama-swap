@@ -55,3 +55,16 @@ func TestHint_ForURL(t *testing.T) {
 		t.Fatalf("ForURL(nil) = %q", got)
 	}
 }
+
+func TestHint_UpstreamKnown(t *testing.T) {
+	for _, u := range []Upstream{LlamaServer, VLLM, TabbyAPI, OMLX, Halogen, OpenAICompatible, LlamaSwap, OpenAI, Anthropic, OpenRouter} {
+		if !u.Known() {
+			t.Errorf("%q should be known", u)
+		}
+	}
+	for _, u := range []Upstream{Unknown, "default", "something-else"} {
+		if u.Known() {
+			t.Errorf("%q should not be known", u)
+		}
+	}
+}
