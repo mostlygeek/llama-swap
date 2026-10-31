@@ -235,6 +235,25 @@ func TestServer_ParseMetrics_TabbyAPINotOverwrittenByTimings(t *testing.T) {
 	}
 }
 
+// Embedding and rerank requests generate no output tokens and carry no
+// backend rates; the wall-clock fallback must supply the prompt rate so
+// Activity shows a prefill speed instead of "unknown".
+func TestServer_BuildMetrics_EmbeddingsWallClockFallback(t *testing.T) {
+	start := time.Now().Add(-200 * time.Millisecond)
+	entry := buildMetrics("embedding", start, 700, 0, 0, gjson.Result{}, gjson.Result{}, gjson.Result{})
+	if entry.Tokens.PromptPerSecond <= 0 {
+		t.Fatalf("PromptPerSecond = %v, want > 0 (wall-clock fallback)", entry.Tokens.PromptPerSecond)
+	}
+	// 700 tokens over ~200 ms ≈ 3500 tok/s; the bound keeps a very slow (or
+	// fast) clock from passing silently.
+	if got := entry.Tokens.PromptPerSecond; got < 3000 || got > 5000 {
+		t.Fatalf("PromptPerSecond = %v, want ~3500 (700 tok / ~200 ms)", got)
+	}
+	if entry.Tokens.TokensPerSecond != -1 {
+		t.Fatalf("TokensPerSecond = %v, want -1 (no generation)", entry.Tokens.TokensPerSecond)
+	}
+}
+
 func TestServer_ProcessStreamingResponse_TabbyAPI(t *testing.T) {
 	body := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
 		"data: {\"id\":\"chatcmpl-131b9995cd0c40c99e2ce958083ee406\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":83,\"prompt_time\":2.36,\"prompt_tokens_per_sec\":35.17,\"completion_tokens\":192,\"completion_time\":11.22,\"completion_tokens_per_sec\":17.11,\"total_tokens\":275,\"total_time\":13.63},\"model\":\"SC_6.00bpw_H6_V6\"}\n\n" +
