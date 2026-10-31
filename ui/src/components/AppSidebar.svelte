@@ -9,7 +9,8 @@
   import { playgroundActivity, docsAgentStreaming } from "../stores/playgroundActivity";
   import { performanceEnabled, models, tailcatStatus, helpAgentEnabled } from "../stores/api";
   import { showUnlistedModels } from "../stores/modelDisplay";
-  import { modelsMenuOpen } from "../stores/sidebar";
+  import { modelsMenuOpen, modelsGroupsCollapsed } from "../stores/sidebar";
+  import { groupModelsByClass, modelClassLabels, sectionStatusDotColor } from "../lib/modelClasses";
   import type { Model } from "../lib/types";
   import { isComposingKey } from "../lib/ime";
   import ConnectionStatus from "./ConnectionStatus.svelte";
@@ -44,6 +45,27 @@
   let visiblePeerModels = $derived(
     $models.filter((model) => model.peerID && ($showUnlistedModels || !model.unlisted)),
   );
+  // Category groups for the Models sub-menu, non-empty ones only, in
+  // MODEL_CLASS_ORDER - the same grouping the Models dashboard uses.
+  let localClassGroups = $derived(
+    groupModelsByClass(visibleLocalModels).filter((group) => group.models.length > 0),
+  );
+
+  function isGroupCollapsed(classId: string): boolean {
+    return $modelsGroupsCollapsed[classId] === true;
+  }
+
+  function toggleGroup(classId: string): void {
+    modelsGroupsCollapsed.update((groups) => {
+      const next = { ...groups };
+      if (next[classId]) {
+        delete next[classId];
+      } else {
+        next[classId] = true;
+      }
+      return next;
+    });
+  }
 
   type DotColor = "grey" | "yellow" | "green";
   function statusDotColor(model: Model): DotColor {
@@ -72,6 +94,38 @@
       {/snippet}
     </Sidebar.MenuSubButton>
   </Sidebar.MenuSubItem>
+{/snippet}
+
+{#snippet categoryGroupItem(classId: string, label: string, groupModels: Model[])}
+  {@const open = !isGroupCollapsed(classId)}
+  <li>
+    <Collapsible.Root open={open} class="gap-0">
+      <button
+        type="button"
+        class="flex h-7 w-full cursor-pointer min-w-0 items-center gap-2 rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        onclick={() => toggleGroup(classId)}
+        aria-expanded={open}
+      >
+        <span class="flex size-4 shrink-0 items-center justify-center">
+          <span
+            class={`size-2 rounded-full ${sectionStatusDotColor(groupModels)}`}
+            role="img"
+            aria-label={`${groupModels.filter((m) => m.state === "ready").length} of ${groupModels.length} ready`}
+          ></span>
+        </span>
+        <span class="flex-1 truncate text-left">{label}</span>
+        <span class="text-sidebar-foreground/50 tabular-nums">{groupModels.length}</span>
+        <ChevronRight class={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden="true" />
+      </button>
+      <Collapsible.Content>
+        <Sidebar.MenuSub class="my-0.5">
+          {#each groupModels as model (model.id)}
+            {@render modelMenuItem(model)}
+          {/each}
+        </Sidebar.MenuSub>
+      </Collapsible.Content>
+    </Collapsible.Root>
+  </li>
 {/snippet}
 
 <!-- Sits below the inference-paused banner; see --banner-h in App.svelte. -->
@@ -169,19 +223,25 @@
                 {/snippet}
               </Sidebar.MenuButton>
               <Collapsible.Content>
-                <Sidebar.MenuSub>
-                  {#each visibleLocalModels as model (model.id)}
-                    {@render modelMenuItem(model)}
+                <ul class="m-0 flex min-w-0 flex-col gap-0.5 p-0">
+                  {#each localClassGroups as group (group.class)}
+                    {@render categoryGroupItem(group.class, modelClassLabels[group.class], group.models)}
                   {/each}
                   {#if visiblePeerModels.length > 0}
-                    <li class="text-sidebar-foreground/70 px-2 pt-2 pb-1 text-xs font-medium">
-                      Peers
+                    <li>
+                      <div class="flex h-7 min-w-0 items-center gap-2 rounded-md px-2 pt-1 text-xs font-medium text-sidebar-foreground/70">
+                        <span class="size-4 shrink-0"></span>
+                        <span class="flex-1 truncate">Peers</span>
+                        <span class="text-sidebar-foreground/50 tabular-nums">{visiblePeerModels.length}</span>
+                      </div>
+                      <Sidebar.MenuSub class="my-0.5">
+                        {#each visiblePeerModels as model (model.id)}
+                          {@render modelMenuItem(model)}
+                        {/each}
+                      </Sidebar.MenuSub>
                     </li>
-                    {#each visiblePeerModels as model (model.id)}
-                      {@render modelMenuItem(model)}
-                    {/each}
                   {/if}
-                </Sidebar.MenuSub>
+                </ul>
               </Collapsible.Content>
             </Collapsible.Root>
           </Sidebar.MenuItem>
