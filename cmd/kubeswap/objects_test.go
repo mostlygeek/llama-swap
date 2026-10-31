@@ -580,6 +580,47 @@ func TestKubeswap_DeploymentSpecMatchesAnnotations(t *testing.T) {
 	}
 }
 
+// TestKubeswap_RenderDeploymentServiceAccount Verifies --service-account
+// lands on the pod spec, and the pod runs with the namespace default when
+// the flag is unset.
+func TestKubeswap_RenderDeploymentServiceAccount(t *testing.T) {
+	cfg := testConfig()
+	dep, err := cfg.renderDeployment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dep.Spec.Template.Spec.ServiceAccountName; got != "" {
+		t.Errorf("unset --service-account should render empty (namespace default), got %q", got)
+	}
+	cfg.ServiceAccount = "my-backend"
+	dep2, err := cfg.renderDeployment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dep2.Spec.Template.Spec.ServiceAccountName; got != "my-backend" {
+		t.Errorf("service account: got %q", got)
+	}
+}
+
+// TestKubeswap_DeploymentSpecMatchesServiceAccount Verifies the spec
+// comparison detects a --service-account change (a drift that must trigger
+// a --strict replacement).
+func TestKubeswap_DeploymentSpecMatchesServiceAccount(t *testing.T) {
+	cfg := testConfig()
+	dep, err := cfg.renderDeployment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ServiceAccount = "my-backend"
+	dep2, err := cfg.renderDeployment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("service account drift should not match")
+	}
+}
+
 // TestKubeswap_DeploymentSpecMatchesNodeSelector Verifies the spec comparison detects node-selector drift.
 func TestKubeswap_DeploymentSpecMatchesNodeSelector(t *testing.T) {
 	cfg := testConfig()

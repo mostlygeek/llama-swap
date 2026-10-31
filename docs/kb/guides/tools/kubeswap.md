@@ -92,6 +92,9 @@ Key flags:
   Kubernetes, e.g. the rollout controller's
   `deployment.kubernetes.io/revision`), so an annotation with such a key
   is applied but never drift-checked.
+- `--service-account name` — run the backend pod under a service account
+  other than the namespace default (e.g. to read Secrets). The name is
+  checked with the API server's object-name rule at flag parse.
 - `--volume pvc:name:/mount[:ro]` and `--volume emptydir:/mount` — model
   cache, scratch, slot state.
 - `--volume nfs:server/export:/mount[:ro]` — mounts an NFS export straight

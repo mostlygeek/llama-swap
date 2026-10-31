@@ -42,6 +42,7 @@ type serveConfig struct {
 	Volumes          []volumeSpec
 	ExtraLabels      map[string]string
 	ExtraAnnotations map[string]string
+	ServiceAccount   string // pod spec serviceAccountName ("" = namespace default)
 
 	// PVC defaults, used when a --volume pvc:<name> does not exist yet.
 	PVCSize       string
@@ -155,6 +156,7 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 				},
 				Spec: corev1.PodSpec{
 					Containers:                    []corev1.Container{container},
+					ServiceAccountName:            c.ServiceAccount,
 					ResourceClaims:                c.renderResourceClaims(),
 					Volumes:                       volumes,
 					NodeSelector:                  nodeSel,
@@ -409,8 +411,8 @@ func strPtr(s string) *string {
 // domains reserved for use by Kubernetes ignored (see
 // systemOwnedAnnotation), and in the pod template the image, command,
 // args, env, ports, volumes, resource claims, node selector, tolerations,
-// grace period, probes and resources — so strict mode replaces the
-// Deployment whenever any of them drifted.
+// service account, grace period, probes and resources — so strict mode
+// replaces the Deployment whenever any of them drifted.
 func deploymentSpecMatches(have *appsv1.Deployment, want *appsv1.Deployment) bool {
 	if have == nil || want == nil {
 		return false
@@ -437,6 +439,9 @@ func deploymentSpecMatches(have *appsv1.Deployment, want *appsv1.Deployment) boo
 		return false
 	}
 	if !tolerationsEqual(hs.Tolerations, ws.Tolerations) {
+		return false
+	}
+	if hs.ServiceAccountName != ws.ServiceAccountName {
 		return false
 	}
 	if !volumesEqual(hs.Volumes, ws.Volumes) {

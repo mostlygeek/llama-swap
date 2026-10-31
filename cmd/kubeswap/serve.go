@@ -25,6 +25,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -337,6 +338,7 @@ type serveFlags struct {
 	volumes              stringList
 	extraLbls            stringList
 	annotations          stringList
+	serviceAccount       string
 	pvcSize              string
 	pvcClass             string
 	pvcMode              string
@@ -472,6 +474,7 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 		Volumes:          volumes,
 		ExtraLabels:      extra,
 		ExtraAnnotations: extraAnn,
+		ServiceAccount:   f.serviceAccount,
 		PVCSize:          f.pvcSize,
 		PVCClass:         f.pvcClass,
 		PVCAccessMode:    f.pvcMode,
@@ -504,6 +507,7 @@ func addServeFlags(fs *flag.FlagSet, f *serveFlags) {
 	fs.Var(&f.volumes, "volume", "volume pvc|emptydir|hostpath|nfs:name:path[:ro] (repeatable)")
 	fs.Var(&f.extraLbls, "label", "extra pod label K=V (repeatable)")
 	fs.Var(&f.annotations, "annotation", "extra pod annotation K=V (repeatable; the value may contain '=')")
+	fs.StringVar(&f.serviceAccount, "service-account", "", "service account for the backend pod (default: the namespace's default)")
 	fs.StringVar(&f.pvcSize, "pvc-size", "1Gi", "size used when kubeswap must create a missing PVC")
 	fs.StringVar(&f.pvcClass, "pvc-class", "", "storage class for created PVCs (default: cluster default)")
 	fs.StringVar(&f.pvcMode, "pvc-access-mode", "rwo", "access mode for created PVCs: rwo or rwx")
@@ -527,6 +531,13 @@ func (f *serveFlags) validateServeFlags() error {
 	}
 	if f.port < 1 || f.port > 65535 {
 		return fmt.Errorf("invalid --port %d (want 1-65535)", f.port)
+	}
+	if f.serviceAccount != "" {
+		// The API server's own object-name rule (DNS-1123 subdomain):
+		// a bad name must fail at flag parse, not at Deployment creation.
+		if errs := kvalidation.IsDNS1123Subdomain(f.serviceAccount); len(errs) > 0 {
+			return fmt.Errorf("invalid --service-account %q: %v", f.serviceAccount, errs)
+		}
 	}
 	return nil
 }

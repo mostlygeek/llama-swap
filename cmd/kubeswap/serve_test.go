@@ -76,6 +76,16 @@ func TestKubeswap_ServeFlagsValidation(t *testing.T) {
 	if err := badPath.validateServeFlags(); err == nil || !strings.Contains(err.Error(), "must start with /") {
 		t.Errorf("bad path: %v", err)
 	}
+	badSA := *base
+	badSA.serviceAccount = "BAD SA"
+	if err := badSA.validateServeFlags(); err == nil || !strings.Contains(err.Error(), "invalid --service-account") {
+		t.Errorf("bad service account: %v", err)
+	}
+	goodSA := *base
+	goodSA.serviceAccount = "my-sa"
+	if err := goodSA.validateServeFlags(); err != nil {
+		t.Errorf("valid service account: %v", err)
+	}
 }
 
 // TestKubeswap_ToConfigRejectsReservedLabels Verifies managed label keys are rejected as extra labels.
