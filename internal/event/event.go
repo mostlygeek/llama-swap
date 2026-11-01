@@ -55,7 +55,15 @@ func NewDispatcherConfig(maxQueue int) *Dispatcher {
 
 // Close closes the dispatcher
 func (d *Dispatcher) Close() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.isClosed() {
+		return nil
+	}
 	close(d.done)
+	for _, grp := range d.subs.Load().grps {
+		grp.(interface{ Close() }).Close()
+	}
 	return nil
 }
 
@@ -100,12 +108,12 @@ func Subscribe[T Event](broker *Dispatcher, handler func(T)) context.CancelFunc 
 
 // SubscribeTo subscribes to an event with the specified event type.
 func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T)) context.CancelFunc {
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+
 	if broker.isClosed() {
 		panic(errClosed)
 	}
-
-	broker.mu.Lock()
-	defer broker.mu.Unlock()
 
 	// Check if group already exists
 	if existing := broker.findGroup(eventType); existing != nil {
@@ -179,41 +187,65 @@ func groupOf[T Event](eventType uint32, subs any) *group[T] {
 
 // ------------------------------------- Subscriber -------------------------------------
 
-// consumer represents a consumer with a message queue
+// consumer represents a consumer with a message queue. It owns both delivery
+// buffers, so a shutdown can release every event that has not been handed to a
+// callback yet. The group's condition lock guards queue and stop. deliveryMu
+// guards pending; when both are needed, the group lock comes first.
 type consumer[T Event] struct {
-	queue []T  // Current work queue
-	stop  bool // Stop signal
+	queue      []T
+	stop       bool
+	deliveryMu sync.Mutex
+	pending    []T
 }
 
-// Listen listens to the event queue and processes events
-func (s *consumer[T]) Listen(c *sync.Cond, fn func(T)) {
-	pending := make([]T, 0, 128)
+// Listen listens to the event queue and processes events. It owns the pending
+// batch: exactly one event is popped under the lock at a time and its slot
+// reference is cleared, so only the callback that is currently running can
+// outlive a group shutdown. Every other undelivered event lives in a field the
+// group can drop. The listener removes itself from the group's live registry
+// once it returns.
+func (s *consumer[T]) Listen(g *group[T], c *sync.Cond, fn func(T)) {
+	defer g.detach(s)
 
 	for {
 		c.L.Lock()
-		for len(s.queue) == 0 {
-			switch {
-			case s.stop:
-				c.L.Unlock()
-				return
-			default:
-				c.Wait()
-			}
-		}
 
-		// Swap buffers and reset the current queue
-		temp := s.queue
-		s.queue = pending[:0]
-		pending = temp
+		// Wait for work, then swap the two reusable buffers. The previous
+		// delivery buffer is fully drained here, so its capacity is recycled.
+		for len(s.queue) == 0 && !s.stop {
+			c.Wait()
+		}
+		if len(s.queue) == 0 {
+			c.L.Unlock()
+			return
+		}
+		s.deliveryMu.Lock()
+		drained := s.pending
+		s.pending = s.queue
+		s.queue = drained[:0]
+		s.deliveryMu.Unlock()
+		// Only backpressured publishers need a wakeup when a batch is taken.
+		if g.maxLen >= g.maxQueue {
+			c.Broadcast()
+		}
 		c.L.Unlock()
 
-		// Outside of the critical section, process the work
-		for _, event := range pending {
-			fn(event)
-		}
+		for i := 0; ; i++ {
+			// Consumers do not contend with each other or publishers while
+			// claiming events, but Close can still discard the pending batch.
+			s.deliveryMu.Lock()
+			if i >= len(s.pending) {
+				s.deliveryMu.Unlock()
+				break
+			}
+			ev := s.pending[i]
+			var zero T
+			s.pending[i] = zero
+			s.deliveryMu.Unlock()
 
-		// Notify potential publishers waiting due to backpressure
-		c.Broadcast()
+			// Callbacks may publish, cancel, or close their dispatcher.
+			fn(ev)
+		}
 	}
 }
 
@@ -222,9 +254,11 @@ func (s *consumer[T]) Listen(c *sync.Cond, fn func(T)) {
 // group represents a consumer group
 type group[T Event] struct {
 	cond     *sync.Cond
-	subs     []*consumer[T]
-	maxQueue int // Maximum queue size per consumer
-	maxLen   int // Current maximum queue length across all consumers
+	subs     []*consumer[T] // Active publish targets
+	live     []*consumer[T] // Every listener, until it returns (ownership)
+	maxQueue int            // Maximum queue size per consumer
+	maxLen   int            // Current maximum queue length across all consumers
+	closed   bool
 }
 
 // Broadcast sends an event to all consumers
@@ -241,7 +275,7 @@ func (s *group[T]) Broadcast(ev T) {
 	}
 
 	// Backpressure: wait if queues are full
-	for s.maxLen >= s.maxQueue {
+	for s.maxLen >= s.maxQueue && !s.closed {
 		s.cond.Wait()
 
 		// Recalculate after wakeup
@@ -251,6 +285,9 @@ func (s *group[T]) Broadcast(ev T) {
 				s.maxLen = len(sub.queue)
 			}
 		}
+	}
+	if s.closed {
+		return
 	}
 
 	// Add event to all queues and track new maximum
@@ -271,17 +308,22 @@ func (s *group[T]) Add(handler func(T)) *consumer[T] {
 		queue: make([]T, 0, 64),
 	}
 
-	// Add the consumer to the list of active consumers
+	// Register the consumer as a publish target and as a live listener. The
+	// live entry outlives a cancellation so a shutdown can still release the
+	// events a draining consumer has not delivered yet.
 	s.cond.L.Lock()
 	s.subs = append(s.subs, sub)
+	s.live = append(s.live, sub)
 	s.cond.L.Unlock()
 
 	// Start listening
-	go sub.Listen(s.cond, handler)
+	go sub.Listen(s, s.cond, handler)
 	return sub
 }
 
-// Del removes a subscriber from the list
+// Del removes a subscriber from the publish targets. It is a cancellation, not
+// a shutdown: the queued and pending events are kept and the listener drains
+// them before it returns and removes itself from the live registry.
 func (s *group[T]) Del(sub *consumer[T]) {
 	s.cond.L.Lock()
 	defer s.cond.L.Unlock()
@@ -291,10 +333,51 @@ func (s *group[T]) Del(sub *consumer[T]) {
 	for i, v := range s.subs {
 		if v == sub {
 			copy(s.subs[i:], s.subs[i+1:])
+			s.subs[len(s.subs)-1] = nil
 			s.subs = s.subs[:len(s.subs)-1]
 			break
 		}
 	}
+	s.cond.Broadcast()
+}
+
+// detach drops a listener that has returned. It runs once per subscription.
+func (s *group[T]) detach(sub *consumer[T]) {
+	s.cond.L.Lock()
+	defer s.cond.L.Unlock()
+	sub.queue = nil
+	sub.deliveryMu.Lock()
+	sub.pending = nil
+	sub.deliveryMu.Unlock()
+
+	for i, v := range s.live {
+		if v == sub {
+			s.live[i] = s.live[len(s.live)-1]
+			s.live[len(s.live)-1] = nil
+			s.live = s.live[:len(s.live)-1]
+			break
+		}
+	}
+	s.cond.Broadcast()
+}
+
+// Close releases queued events and wakes listeners and backpressured publishers.
+// A callback already running is allowed to return without blocking Close; every
+// other undelivered event, including the ones held by a cancelled consumer that
+// is still draining, is dropped here.
+func (s *group[T]) Close() {
+	s.cond.L.Lock()
+	defer s.cond.L.Unlock()
+	s.closed = true
+	for _, sub := range s.live {
+		sub.stop = true
+		sub.queue = nil
+		sub.deliveryMu.Lock()
+		sub.pending = nil
+		sub.deliveryMu.Unlock()
+	}
+	s.subs = nil
+	s.cond.Broadcast()
 }
 
 // ------------------------------------- Debugging -------------------------------------

@@ -5,6 +5,7 @@ package event
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -99,6 +100,281 @@ func TestCloseDispatcher(t *testing.T) {
 	assert.Panics(t, func() {
 		SubscribeTo(d, TypeEvent1, func(ev MyEvent2) {})
 	})
+}
+
+func TestCloseDispatcher_Backpressure(t *testing.T) {
+	d := NewDispatcherConfig(1)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	cancel := Subscribe(d, func(MyEvent1) {
+		once.Do(func() { close(entered) })
+		<-release
+	})
+	defer cancel()
+	defer close(release)
+	Publish(d, MyEvent1{})
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("subscriber did not start")
+	}
+	Publish(d, MyEvent1{}) // fill the queue while the callback is blocked
+	started, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		close(started)
+		Publish(d, MyEvent1{})
+		close(done)
+	}()
+	<-started
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not release publisher")
+	}
+	if d.count(TypeEvent1) != 0 {
+		t.Fatal("Close retained subscribers")
+	}
+}
+
+// TestUnsubscribe_DrainsQueuedEvents pins the cancellation contract: cancelling
+// a subscription stops new deliveries but must still deliver the events already
+// queued behind the in-flight callback. The first callback is blocked on a
+// channel, the second event is queued while it runs, and every step is awaited
+// through channels so the test never sleeps.
+func TestUnsubscribe_DrainsQueuedEvents(t *testing.T) {
+	d := NewDispatcherConfig(10)
+	firstEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	second := make(chan MyEvent1, 1)
+
+	var once sync.Once
+	cancel := Subscribe(d, func(ev MyEvent1) {
+		if ev.Number == 1 {
+			once.Do(func() { close(firstEntered) })
+			<-releaseFirst
+			return
+		}
+		second <- ev
+	})
+	defer cancel()
+
+	Publish(d, MyEvent1{Number: 1})
+	select {
+	case <-firstEntered:
+	case <-time.After(time.Second):
+		t.Fatal("first callback did not start")
+	}
+
+	Publish(d, MyEvent1{Number: 2}) // queued behind the blocked callback
+	cancel()
+	close(releaseFirst)
+
+	select {
+	case ev := <-second:
+		if ev.Number != 2 {
+			t.Fatalf("delivered %d, want 2", ev.Number)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancel dropped an already queued event")
+	}
+
+	// Once drained and removed, the subscriber is detached: publishing again
+	// enqueues nothing for it. This is a structural check, not a timing one.
+	if got := d.count(TypeEvent1); got != 0 {
+		t.Fatalf("subscriber count = %d, want 0", got)
+	}
+	Publish(d, MyEvent1{Number: 3})
+	select {
+	case ev := <-second:
+		t.Fatalf("cancelled subscriber received %d", ev.Number)
+	default:
+	}
+}
+
+// awaitLive waits until the group owns no listener any more, i.e. every
+// consumer goroutine has returned and released its buffers. Waiting on the
+// ownership registry is what makes the "no callback ran after Close" assertion
+// below sound: a bounded silence window could not tell a dropped event from a
+// slow one.
+func awaitLive(t *testing.T, grp *group[MyEvent1]) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		grp.cond.L.Lock()
+		live := len(grp.live)
+		grp.cond.L.Unlock()
+		if live == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d listeners still live", live)
+		}
+		runtime.Gosched()
+	}
+}
+
+// TestGroup_LiveConsumerOwnership covers the two registries: subs holds the
+// publish targets, live holds every listener until it returns. A cancelled
+// consumer leaves subs immediately but stays in live while it drains, and it
+// leaves live once the listener goroutine is done.
+func TestGroup_LiveConsumerOwnership(t *testing.T) {
+	d := NewDispatcherConfig(10)
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var enterOnce, doneOnce sync.Once
+	cancel := Subscribe(d, func(MyEvent1) {
+		enterOnce.Do(func() {
+			close(entered)
+			<-release
+		})
+		doneOnce.Do(func() { close(done) })
+	})
+
+	grp := groupOf[MyEvent1](TypeEvent1, d.findGroup(TypeEvent1))
+	counts := func() (subs, live int) {
+		grp.cond.L.Lock()
+		defer grp.cond.L.Unlock()
+		return len(grp.subs), len(grp.live)
+	}
+	awaitCounts := func(wantSubs, wantLive int) {
+		deadline := time.Now().Add(time.Second)
+		for {
+			subs, live := counts()
+			if subs == wantSubs && live == wantLive {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("subs=%d live=%d, want subs=%d live=%d", subs, live, wantSubs, wantLive)
+			}
+			runtime.Gosched()
+		}
+	}
+
+	awaitCounts(1, 1) // add
+	Publish(d, MyEvent1{})
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("callback did not start")
+	}
+	cancel()
+	awaitCounts(0, 1) // cancel: still owned while draining
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("listener did not finish draining")
+	}
+	awaitCounts(0, 0) // finish
+
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCloseDispatcher_DropsDetachedQueue pins the ownership split: a cancelled
+// consumer is no longer a publish target, so Close reaches it through the live
+// registry instead — it may still own queued events while it drains, and those
+// must be released rather than leaked.
+func TestCloseDispatcher_DropsDetachedQueue(t *testing.T) {
+	d := NewDispatcherConfig(10)
+	entered, release := make(chan struct{}), make(chan struct{})
+	cancel := Subscribe(d, func(ev MyEvent1) {
+		if ev.Number == 1 {
+			close(entered)
+			<-release
+		}
+	})
+	defer cancel()
+	defer close(release)
+
+	grp := groupOf[MyEvent1](TypeEvent1, d.findGroup(TypeEvent1))
+	grp.cond.L.Lock()
+	sub := grp.subs[0]
+	grp.cond.L.Unlock()
+
+	Publish(d, MyEvent1{Number: 1})
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first callback did not start")
+	}
+	Publish(d, MyEvent1{Number: 2}) // queued behind the blocked callback
+	cancel()
+
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	grp.cond.L.Lock()
+	sub.deliveryMu.Lock()
+	queued, pending := len(sub.queue), len(sub.pending)
+	sub.deliveryMu.Unlock()
+	grp.cond.L.Unlock()
+	if queued != 0 || pending != 0 {
+		t.Fatalf("Close retained %d queued and %d pending events in cancelled consumer", queued, pending)
+	}
+}
+
+// TestCloseDispatcher_DropsPendingBatch pins the delivery half of the contract:
+// the pending batch belongs to the consumer, so Close clears the events whose
+// callback has not started. Only the callback already running may finish, and
+// the absence of a late callback is asserted after the listener has exited.
+func TestCloseDispatcher_DropsPendingBatch(t *testing.T) {
+	d := NewDispatcherConfig(10)
+	entered1, release1 := make(chan struct{}), make(chan struct{})
+	entered2, release2 := make(chan struct{}), make(chan struct{})
+	delivered3 := make(chan struct{})
+	cancel := Subscribe(d, func(ev MyEvent1) {
+		switch ev.Number {
+		case 1:
+			close(entered1)
+			<-release1
+		case 2:
+			close(entered2)
+			<-release2
+		case 3:
+			close(delivered3)
+		}
+	})
+	defer cancel()
+
+	grp := groupOf[MyEvent1](TypeEvent1, d.findGroup(TypeEvent1))
+	Publish(d, MyEvent1{Number: 1})
+	select {
+	case <-entered1:
+	case <-time.After(time.Second):
+		t.Fatal("first callback did not start")
+	}
+	Publish(d, MyEvent1{Number: 2})
+	Publish(d, MyEvent1{Number: 3}) // queued behind the blocked callback
+	close(release1)
+	select {
+	case <-entered2:
+	case <-time.After(time.Second):
+		t.Fatal("second callback did not start")
+	}
+
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	close(release2)
+	awaitLive(t, grp)
+
+	select {
+	case <-delivered3:
+		t.Fatal("Close still delivered an unstarted callback from the pending batch")
+	default:
+	}
 }
 
 func TestMatrix(t *testing.T) {

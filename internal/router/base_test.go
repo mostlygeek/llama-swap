@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -20,6 +21,86 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
+
+func TestBaseRouter_ReloadReleasesProcessMonitors(t *testing.T) {
+	for _, kind := range []string{"group", "matrix", "capacity"} {
+		t.Run(kind, func(t *testing.T) {
+			logs := logmon.NewGroup(io.Discard, true, true, true)
+			defer func() {
+				for _, m := range []*logmon.Monitor{logs.ProxyLogs, logs.UpstreamLogs, logs.HttpLogs, logs.MuxLogs} {
+					if closer, ok := any(m).(io.Closer); ok {
+						closer.Close()
+					}
+				}
+			}()
+			conf, err := config.LoadConfigFromReader(strings.NewReader("models:\n  a:\n    cmd: echo ${PORT}\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "matrix" {
+				conf.Routing.Router.Use = "matrix"
+				conf.Routing.Router.Settings.Matrix = &config.MatrixConfig{Sets: config.OrderedSets{{Name: "a", DSL: "a"}}}
+			}
+			if kind == "capacity" {
+				conf.Routing.Router.Use = "capacity"
+				conf.Routing.Router.Settings.Capacity = &config.CapacityConfig{Pools: map[string]int64{"ram": 1}}
+				model := conf.Models["a"]
+				model.Capacities = map[string]int64{"ram": 1}
+				conf.Models["a"] = model
+			}
+			before := runtime.NumGoroutine()
+			for i := 0; i < 100; i++ {
+				var rt interface {
+					Shutdown(time.Duration) error
+					Unload(time.Duration, ...string)
+					ProcessLogger(string) (*logmon.Monitor, bool)
+				}
+				if kind == "group" {
+					rt, err = NewGroup(conf, logs)
+				} else if kind == "matrix" {
+					rt, err = NewMatrix(conf, logs)
+				} else {
+					rt, err = NewCapacity(conf, logs)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				monitor, ok := rt.ProcessLogger("a")
+				if !ok {
+					t.Fatal("missing process logger")
+				}
+				monitor.Write([]byte("reload log"))
+				rt.Unload(time.Second, "a")
+				if len(monitor.GetHistory()) == 0 {
+					t.Fatal("Unload closed the process monitor")
+				}
+				if err := rt.Shutdown(time.Second); err != nil {
+					t.Fatal(err)
+				}
+				deadline := time.Now().Add(time.Second)
+				for len(monitor.GetHistory()) > 0 && time.Now().Before(deadline) {
+					runtime.Gosched()
+				}
+				if len(monitor.GetHistory()) > 0 {
+					t.Fatal("Shutdown retained process log history")
+				}
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
+				runtime.Gosched()
+			}
+			after := runtime.NumGoroutine()
+			t.Logf("100 router replacements: goroutines before=%d after=%d", before, after)
+			if after > before {
+				t.Fatalf("goroutines leaked: before=%d after=%d", before, after)
+			}
+			logs.ProxyLogs.Write([]byte("still active"))
+			if len(logs.ProxyLogs.GetHistory()) == 0 {
+				t.Fatal("Shutdown closed shared logs")
+			}
+		})
+	}
+}
 
 // These tests cover baseRouter's own machinery — the run loop, process
 // lifecycle (doSwap), grant/ServeHTTP plumbing, Unload, and Shutdown. The
