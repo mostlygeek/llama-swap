@@ -609,6 +609,9 @@ models:
       # context: the maximum token context length supported
       # - default: 0
       # - must be an integer > 0
+      # - when unset, llama-swap asks the upstream server once the model is
+      #   ready; a llama-server entry that states -c/--ctx-size in its cmd
+      #   also reports that window while the model is not loaded
       context: 32000
 
       # voices: list of voice names for a speech model
