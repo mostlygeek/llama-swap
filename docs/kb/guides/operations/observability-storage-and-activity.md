@@ -3,7 +3,7 @@ title: Observability, storage and Activity
 summary: Use logs, metrics, captures and the Activity view to diagnose requests and retain useful history.
 category: guides
 tags: [operations, logs, metrics, activity, captures, stdout, http]
-config_keys: [logLevel, logToStdout, metricsMaxInMemory, captureBuffer, store.path, store.captures]
+config_keys: [logLevel, logToStdout, metricsMaxInMemory, captureBuffer, store.path, store.persistCaptures]
 updated: 2026-10-31
 ---
 
@@ -47,35 +47,33 @@ What goes wrong:
 
 By default activity rows and request/response captures are kept in memory and
 lost on restart. `store.path` keeps activity rows in a SQLite file.
-`store.captures` keeps captures in a second SQLite file. Each can be set
-without the other.
+`store.persistCaptures: true` also keeps captures, in a second SQLite file
+next to it named with `_captures` added to the base name:
 
 ```yaml
 store:
-  path: /data/activity.db
-  captures: /data/captures.db
+  path: /data/metrics.db # captures go in /data/metrics_captures.db
+  persistCaptures: true
 captureBuffer: 2048 # MB of compressed captures to keep
 ```
 
-Each activity row records the ID of its capture, such as `26103120-a7Kq`:
-the UTC hour (yymmddhh) and four random characters. The captures file only
-holds captures, so the two files do not have to match: a row whose capture
-was pruned, or lives in a captures file that was moved aside, just shows no
-capture.
+Captures live in their own file so large blobs do not slow down the activity
+log. Each activity row records the ID of its capture, such as
+`26103120-a7Kq`: the UTC hour (yymmddhh) and four random characters. A row
+whose capture was pruned shows no capture.
 
-`captureBuffer` limits both in-memory and on-disk captures. When a new
-capture pushes the total over the limit, the oldest captures are deleted.
-`captureBuffer: 0` turns captures off. Stored captures stay in the file but
-are hidden until captures are turned back on. SQLite reuses the space of
-deleted captures, so the file grows to about `captureBuffer` and then stays
-that size.
+`captureBuffer` limits both in-memory and on-disk captures by their
+compressed size. When a new capture pushes the total over the limit, the
+oldest captures are deleted in the background. `captureBuffer: 0` turns
+captures off. Stored captures stay in the file but are hidden until captures
+are turned back on. SQLite reuses the space of deleted captures, so the file
+grows to about `captureBuffer` and then stays that size.
 
 What goes wrong:
 
-- `store.captures` set to the same file as `store.path` fails config loading.
-- With `store.captures` set but not `store.path`, activity rows are lost on
-  restart while their captures stay in the file until `captureBuffer`
-  pushes them out. They take up space but no row links to them.
+- `persistCaptures` without `store.path` fails config loading.
+- Moving or renaming only one of the two files breaks the pair. Move both, or
+  change `store.path` and rename `metrics_captures.db` to match.
 - A single capture larger than `captureBuffer` is skipped and logged as a
   warning.
 - At very high request rates two requests in the same hour can draw the

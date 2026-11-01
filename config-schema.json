@@ -231,7 +231,7 @@
             "type": "integer",
             "minimum": 0,
             "default": 5,
-            "description": "Maximum size in megabytes of compressed request/response captures, in memory or in the store.captures database. The oldest captures are deleted first. Set to 0 to disable captures."
+            "description": "Maximum size in megabytes of compressed request/response captures, in memory or in the database file used when store.persistCaptures is true. The oldest captures are deleted first. Set to 0 to disable captures."
         },
         "store": {
             "type": "object",
@@ -241,23 +241,14 @@
                     "minLength": 1,
                     "description": "SQLite database file path for persistent activity logs."
                 },
-                "captures": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Separate SQLite database file path for persistent request/response captures. Must be a different file than path. Total size is capped by captureBuffer."
+                "persistCaptures": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Keep request/response captures in a second SQLite file next to path, named with _captures added to its base name (metrics.db stores captures in metrics_captures.db). Total size is capped by captureBuffer."
                 }
             },
-            "anyOf": [
-                {
-                    "required": [
-                        "path"
-                    ]
-                },
-                {
-                    "required": [
-                        "captures"
-                    ]
-                }
+            "required": [
+                "path"
             ],
             "additionalProperties": false,
             "description": "Store configuration for durable llama-swap state."

@@ -55,15 +55,15 @@ logToStdout: "proxy"
 # - optional, default: in-memory sqlite database capped by metricsMaxInMemory
 # - path is a sqlite database file path
 # - file-backed sqlite keeps activity logs across restarts
-# - captures: optional, a separate sqlite database file for request/response
-#   captures so they are kept across restarts
-#   - must be a different file than path
+# - persistCaptures: keep request/response captures in a second sqlite file
+#   next to path, named with _captures added to the base name, so
+#   /path/to/file.sqlite stores captures in /path/to/file_captures.sqlite
+#   - optional, default: false (captures are kept in memory)
 #   - total size is capped by captureBuffer; the oldest captures are deleted
-#   - activity rows refer to captures by capture ID; a row whose capture was
-#     deleted shows no capture
+#   - keep or move the two files together
 # store:
 #   path: /path/to/file.sqlite
-#   captures: /path/to/captures.sqlite
+#   persistCaptures: true
 
 # metricsMaxInMemory: maximum number of metrics to keep in memory
 # - optional, default: 1000
@@ -75,7 +75,7 @@ metricsMaxInMemory: 1000
 # captureBuffer: how many MBs of compressed request/response captures to keep
 # - optional, default: 5
 # - set to 0 to disable
-# - also caps the captures database file when store.captures is set
+# - also caps the captures database file when store.persistCaptures is true
 captureBuffer: 15
 
 # ui.activity.session_id: ordered request headers used to identify sessions in

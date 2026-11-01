@@ -114,54 +114,71 @@ store:
 	})
 }
 
-func TestConfig_StoreCaptures(t *testing.T) {
-	t.Run("separate captures file accepted", func(t *testing.T) {
+func TestConfig_StorePersistCaptures(t *testing.T) {
+	t.Run("captures file derived from store.path", func(t *testing.T) {
 		dir := t.TempDir()
-		storePath := filepath.Join(dir, "activity.db")
-		capturesPath := filepath.Join(dir, "captures.db")
+		storePath := filepath.Join(dir, "metrics.db")
 		cfg, err := LoadConfigFromReader(strings.NewReader(`
 store:
   path: ` + storePath + `
-  captures: ` + capturesPath + `
+  persistCaptures: true
 `))
 		require.NoError(t, err)
 		require.NotNil(t, cfg.Store)
-		assert.Equal(t, capturesPath, cfg.Store.Captures)
+		assert.True(t, cfg.Store.PersistCaptures)
+		assert.Equal(t, filepath.Join(dir, "metrics_captures.db"), cfg.Store.CapturesPath())
 	})
 
-	t.Run("captures without store.path accepted", func(t *testing.T) {
-		capturesPath := filepath.Join(t.TempDir(), "captures.db")
+	t.Run("in memory when not set", func(t *testing.T) {
 		cfg, err := LoadConfigFromReader(strings.NewReader(`
 store:
-  captures: ` + capturesPath + `
+  path: ` + filepath.Join(t.TempDir(), "metrics.db") + `
 `))
 		require.NoError(t, err)
-		require.NotNil(t, cfg.Store)
-		assert.Empty(t, cfg.Store.Path)
-		assert.Equal(t, capturesPath, cfg.Store.Captures)
+		assert.Empty(t, cfg.Store.CapturesPath())
 	})
 
-	t.Run("same file as store.path rejected", func(t *testing.T) {
+	t.Run("requires store.path", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  persistCaptures: true
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "store.path must not be empty")
+	})
+
+	t.Run("captures path must be a file", func(t *testing.T) {
 		dir := t.TempDir()
-		storePath := filepath.Join(dir, "llama-swap.db")
+		require.NoError(t, os.Mkdir(filepath.Join(dir, "metrics_captures.db"), 0o755))
 		_, err := LoadConfigFromReader(strings.NewReader(`
 store:
-  path: ` + storePath + `
-  captures: ` + filepath.Join(dir, ".", "llama-swap.db") + `
+  path: ` + filepath.Join(dir, "metrics.db") + `
+  persistCaptures: true
 `))
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "store.captures must be a different file than store.path")
+		assert.Contains(t, err.Error(), "store.persistCaptures:")
+		assert.Contains(t, err.Error(), "is a directory")
 	})
+}
 
-	t.Run("non-existent directory rejected", func(t *testing.T) {
-		_, err := LoadConfigFromReader(strings.NewReader(`
-store:
-  path: ` + filepath.Join(t.TempDir(), "activity.db") + `
-  captures: /no/such/dir/captures.db
-`))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "store.captures: directory")
-	})
+func TestConfig_StoreCapturesPath(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{"/path/to/metrics.db", "/path/to/metrics_captures.db"},
+		{"/path/to/metrics", "/path/to/metrics_captures"},
+		{"/path/to/llama.swap.sqlite", "/path/to/llama.swap_captures.sqlite"},
+		{"/path.d/metrics", "/path.d/metrics_captures"},
+		{"metrics.db", "metrics_captures.db"},
+		{"  /path/to/metrics.db  ", "/path/to/metrics_captures.db"},
+	} {
+		st := &Store{Path: tc.path, PersistCaptures: true}
+		assert.Equal(t, tc.want, st.CapturesPath(), tc.path)
+	}
+
+	assert.Empty(t, (&Store{Path: "/path/to/metrics.db"}).CapturesPath(), "not persisted")
+	assert.Empty(t, (*Store)(nil).CapturesPath(), "no store section")
 }
 
 func TestConfig_FindConfig(t *testing.T) {

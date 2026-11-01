@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -383,40 +381,17 @@ func normalizeHeaderNames(names []string) []string {
 	return normalized
 }
 
-// validateStore checks the store section. Each set path must be a writable
-// file location, at least one must be set, and activity and captures must
-// not share a database file.
+// validateStore checks the store section: store.path must be a writable file
+// location, and so must the captures file derived from it when captures are
+// persisted.
 func validateStore(st *Store) error {
-	path := strings.TrimSpace(st.Path)
-	captures := strings.TrimSpace(st.Captures)
-	if path == "" && captures == "" {
-		return fmt.Errorf("store.path must not be empty")
+	if err := validateStorePath("store.path", strings.TrimSpace(st.Path)); err != nil {
+		return err
 	}
-	if path != "" {
-		if err := validateStorePath("store.path", path); err != nil {
+	if capturesPath := st.CapturesPath(); capturesPath != "" {
+		if err := validateStorePath("store.persistCaptures", capturesPath); err != nil {
 			return err
 		}
-	}
-	if captures != "" {
-		if err := validateStorePath("store.captures", captures); err != nil {
-			return err
-		}
-	}
-	if path != "" && captures != "" && sameStoreFile(path, captures) {
-		return fmt.Errorf("store.captures must be a different file than store.path")
 	}
 	return nil
-}
-
-// sameStoreFile reports whether a and b name the same file, comparing
-// cleaned absolute paths and, when both exist, the files themselves.
-func sameStoreFile(a, b string) bool {
-	absA, errA := filepath.Abs(a)
-	absB, errB := filepath.Abs(b)
-	if errA == nil && errB == nil && absA == absB {
-		return true
-	}
-	infoA, errA := os.Stat(a)
-	infoB, errB := os.Stat(b)
-	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }

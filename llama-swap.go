@@ -81,7 +81,7 @@ func configStorePaths(cfg config.Config) storePaths {
 	}
 	return storePaths{
 		activity: strings.TrimSpace(cfg.Store.Path),
-		captures: strings.TrimSpace(cfg.Store.Captures),
+		captures: cfg.Store.CapturesPath(),
 	}
 }
 
