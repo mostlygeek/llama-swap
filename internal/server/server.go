@@ -694,5 +694,14 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 	}
 
 	wg.Wait()
+
+	// Stop the capture prune goroutine before the caller closes the store.
+	// A request still finishing can store a capture after this; its prune
+	// request is dropped and the next server's pruner catches up.
+	if s.metrics != nil {
+		if err := s.metrics.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return errors.Join(errs...)
 }

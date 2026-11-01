@@ -6,11 +6,13 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/event"
@@ -39,13 +41,31 @@ func (e ActivityLogEvent) Type() uint32 {
 // activity in a store, and (when captures are enabled) stores
 // zstd+CBOR-compressed request/response captures in the store's capture
 // repository, bounded to maxCaptureBytes in total.
+//
+// Captures are written on the request path, but pruning them back under
+// maxCaptureBytes runs on a background goroutine so a request never waits for
+// old captures to be deleted. The total can briefly exceed maxCaptureBytes
+// while a prune is pending.
 type metricsMonitor struct {
 	store           store.Store
 	maxMetrics      int
 	logger          *logmon.Monitor
 	enableCaptures  bool
 	maxCaptureBytes int64
+
+	// pruneCh wakes the prune goroutine. It holds one pending request, so
+	// many captures written while a prune runs cause one more prune, not
+	// one each. Nil when captures are disabled.
+	pruneCh   chan struct{}
+	pruneStop context.CancelFunc
+	pruneDone chan struct{}
+	closeOnce sync.Once
 }
+
+// capturePruneTimeout bounds one background prune. A prune after
+// captureBuffer is lowered can delete a lot; one that times out is resumed
+// by the next capture.
+const capturePruneTimeout = 5 * time.Minute
 
 func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int, st store.Store) *metricsMonitor {
 	if maxMetrics <= 0 {
@@ -59,15 +79,50 @@ func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB i
 	}
 	if captureBufferMB > 0 {
 		mm.maxCaptureBytes = int64(captureBufferMB) * 1024 * 1024
+		mm.startCapturePruner()
 		// The store outlives a config reload, so apply a lowered
 		// captureBuffer now rather than on the next capture.
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := st.Captures().Prune(ctx, mm.maxCaptureBytes); err != nil {
-			mm.warnf("failed to prune captures: %v", err)
-		}
+		mm.requestCapturePrune()
 	}
 	return mm
+}
+
+// startCapturePruner starts the goroutine that prunes captures. Close stops
+// it.
+func (mp *metricsMonitor) startCapturePruner() {
+	ctx, cancel := context.WithCancel(context.Background())
+	mp.pruneCh = make(chan struct{}, 1)
+	mp.pruneStop = cancel
+	mp.pruneDone = make(chan struct{})
+	go func() {
+		defer close(mp.pruneDone)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-mp.pruneCh:
+				mp.pruneCaptures(ctx)
+			}
+		}
+	}()
+}
+
+// requestCapturePrune asks the prune goroutine to bring captures back under
+// maxCaptureBytes. It never blocks: if a request is already pending, this one
+// is folded into it.
+func (mp *metricsMonitor) requestCapturePrune() {
+	select {
+	case mp.pruneCh <- struct{}{}:
+	default:
+	}
+}
+
+func (mp *metricsMonitor) pruneCaptures(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, capturePruneTimeout)
+	defer cancel()
+	if err := mp.store.Captures().Prune(ctx, mp.maxCaptureBytes); err != nil && !errors.Is(err, context.Canceled) {
+		mp.warnf("failed to prune captures: %v", err)
+	}
 }
 
 // queueMetrics persists a metric and returns the store-assigned row. It
@@ -145,7 +200,16 @@ func (mp *metricsMonitor) debugf(format string, args ...any) {
 	}
 }
 
+// Close stops the capture prune goroutine, cancelling a prune in progress,
+// and waits for it to exit so the store can be closed after it. It is safe to
+// call more than once.
 func (mp *metricsMonitor) Close() error {
+	mp.closeOnce.Do(func() {
+		if mp.pruneStop != nil {
+			mp.pruneStop()
+			<-mp.pruneDone
+		}
+	})
 	return nil
 }
 

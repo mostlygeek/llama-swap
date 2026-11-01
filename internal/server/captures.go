@@ -131,9 +131,9 @@ func decompressCapture(data []byte) (*ReqRespCapture, error) {
 	return &capture, nil
 }
 
-// addCapture compresses a capture and stores it under captureID, then prunes
-// the oldest captures to stay within the capture size limit. Returns true if
-// the capture was stored.
+// addCapture compresses a capture and stores it under captureID, then asks the
+// background pruner to delete the oldest captures if the total is now over
+// the capture size limit. Returns true if the capture was stored.
 func (mp *metricsMonitor) addCapture(captureID string, capture ReqRespCapture) bool {
 	if !mp.enableCaptures {
 		return false
@@ -160,9 +160,7 @@ func (mp *metricsMonitor) addCapture(captureID string, capture ReqRespCapture) b
 		mp.logger.Warnf("failed to store capture %s: %v", captureID, err)
 		return false
 	}
-	if err := captures.Prune(ctx, mp.maxCaptureBytes); err != nil {
-		mp.logger.Warnf("failed to prune captures: %v", err)
-	}
+	mp.requestCapturePrune()
 
 	compressionRatio := (1 - float64(len(compressed))/float64(uncompressedBytes)) * 100
 	mp.logger.Debugf("Capture %s compressed and saved: %d bytes -> %d bytes (%.1f%% compression)", captureID, uncompressedBytes, len(compressed), compressionRatio)

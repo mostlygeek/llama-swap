@@ -117,6 +117,35 @@ func TestStore_CapturePruneDropsOldestBySize(t *testing.T) {
 	assert.Equal(t, map[string]bool{"b": true, "a": true}, found)
 }
 
+// A prune larger than one batch deletes in several steps and still stops at
+// the limit.
+func TestStore_CapturePruneAcrossBatches(t *testing.T) {
+	ctx := context.Background()
+	_, captures := newCaptureStore(t)
+
+	n := pruneBatchRows*3 + 5
+	for i := range n {
+		require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: fmt.Sprintf("c%04d", i), Data: make([]byte, 10)}))
+	}
+	require.NoError(t, captures.Prune(ctx, 100))
+	assert.EqualValues(t, 100, captures.Size())
+
+	found, err := captures.Has(ctx, []string{fmt.Sprintf("c%04d", n-11), fmt.Sprintf("c%04d", n-10), fmt.Sprintf("c%04d", n-1)})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{fmt.Sprintf("c%04d", n-10): true, fmt.Sprintf("c%04d", n-1): true}, found)
+}
+
+// A cancelled context stops a prune between batches.
+func TestStore_CapturePruneCancelled(t *testing.T) {
+	_, captures := newCaptureStore(t)
+	for i := range pruneBatchRows * 2 {
+		require.NoError(t, captures.Put(context.Background(), store.CaptureEntry{ID: fmt.Sprintf("c%04d", i), Data: make([]byte, 10)}))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, captures.Prune(ctx, 10), context.Canceled)
+}
+
 func TestStore_CapturesPersistAcrossReopen(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

@@ -153,7 +153,11 @@ func newTestMetricsMonitor(t *testing.T, logger *logmon.Monitor, maxMetrics int,
 			t.Errorf("store.Close: %v", err)
 		}
 	})
-	return newMetricsMonitor(logger, maxMetrics, captureBufferMB, st)
+	mm := newMetricsMonitor(logger, maxMetrics, captureBufferMB, st)
+	// Cleanups run last-in first-out, so the pruner stops before the store
+	// closes.
+	t.Cleanup(func() { mm.Close() })
+	return mm
 }
 
 func metricsEntries(t *testing.T, mm *metricsMonitor) []ActivityLogEntry {

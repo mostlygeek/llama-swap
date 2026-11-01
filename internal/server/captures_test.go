@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/store/sqlite"
 )
 
 func TestServer_CaptureCompressRoundtrip(t *testing.T) {
@@ -76,9 +79,8 @@ func TestServer_CaptureBufferPrunesOldest(t *testing.T) {
 		}
 	}
 
-	if size := mm.store.Captures().Size(); size > mm.maxCaptureBytes {
-		t.Fatalf("captures size = %d, want <= %d", size, mm.maxCaptureBytes)
-	}
+	// Pruning runs in the background.
+	waitForCaptureSize(t, mm, mm.maxCaptureBytes)
 	for id, want := range map[int]bool{1: false, 2: false, 3: true, 4: true} {
 		if got := mm.getCaptureByID(fmt.Sprintf("cap-%d", id)) != nil; got != want {
 			t.Errorf("capture %d stored = %v, want %v", id, got, want)
@@ -91,6 +93,74 @@ func TestServer_CaptureBufferPrunesOldest(t *testing.T) {
 	mm.overlayCaptureState(entries)
 	if entries[0].HasCapture || !entries[1].HasCapture || entries[2].HasCapture {
 		t.Errorf("HasCapture = [%v %v %v], want [false true false]", entries[0].HasCapture, entries[1].HasCapture, entries[2].HasCapture)
+	}
+}
+
+// waitForCaptureSize waits for the background pruner to bring the stored
+// captures down to at most maxBytes.
+func waitForCaptureSize(t *testing.T, mm *metricsMonitor, maxBytes int64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for mm.store.Captures().Size() > maxBytes {
+		if time.Now().After(deadline) {
+			t.Fatalf("captures size = %d, want <= %d", mm.store.Captures().Size(), maxBytes)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A lowered captureBuffer is applied when the monitor is built, as on a
+// config reload that keeps the same store.
+func TestServer_CapturePruneOnNewMonitor(t *testing.T) {
+	st, err := sqlite.New("", "")
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	ctx := context.Background()
+	for i := range 3 {
+		data := make([]byte, 700*1024)
+		if err := st.Captures().Put(ctx, store.CaptureEntry{ID: fmt.Sprintf("cap-%d", i), Data: data}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+	}
+
+	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 100, 1, st)
+	t.Cleanup(func() { mm.Close() })
+	waitForCaptureSize(t, mm, 1024*1024)
+
+	found, err := st.Captures().Has(ctx, []string{"cap-0", "cap-1", "cap-2"})
+	if err != nil {
+		t.Fatalf("Has: %v", err)
+	}
+	if found["cap-0"] || found["cap-1"] || !found["cap-2"] {
+		t.Errorf("kept captures = %v, want only cap-2", found)
+	}
+}
+
+func TestServer_CapturePrunerClose(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 1)
+	if err := mm.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case <-mm.pruneDone:
+	default:
+		t.Fatal("prune goroutine still running after Close")
+	}
+	if err := mm.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	// Requests finishing after Close must not block on the pruner.
+	for range 3 {
+		mm.requestCapturePrune()
+	}
+
+	disabled := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 0)
+	disabled.requestCapturePrune()
+	if err := disabled.Close(); err != nil {
+		t.Fatalf("Close with captures disabled: %v", err)
 	}
 }
 

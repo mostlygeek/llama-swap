@@ -129,24 +129,44 @@ func (r *captureRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// pruneBatchRows bounds how many captures one Prune step deletes. Each step
+// holds the repository lock, so a large prune (after captureBuffer is
+// lowered) lets Put run between steps instead of waiting for all of it.
+const pruneBatchRows = 64
+
 func (r *captureRepository) Prune(ctx context.Context, maxBytes int64) error {
 	if maxBytes <= 0 {
 		return nil
 	}
+	for {
+		done, err := r.pruneStep(ctx, maxBytes)
+		if err != nil || done {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("prune captures: %w", err)
+		}
+	}
+}
+
+// pruneStep deletes up to pruneBatchRows of the oldest written captures, as
+// many as are needed to bring the total down to maxBytes. done is true once
+// the total is within maxBytes or nothing is left to delete.
+func (r *captureRepository) pruneStep(ctx context.Context, maxBytes int64) (done bool, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	excess := r.total - maxBytes
 	if excess <= 0 {
-		return nil
+		return true, nil
 	}
 
 	// Walk from the oldest written capture, summing sizes until enough
 	// would be freed. This reads only the rows that are about to be deleted.
 	// rowid is insertion order.
-	rows, err := r.db.QueryContext(ctx, `SELECT rowid, size FROM captures ORDER BY rowid ASC`)
+	rows, err := r.db.QueryContext(ctx, `SELECT rowid, size FROM captures ORDER BY rowid ASC LIMIT ?`, pruneBatchRows)
 	if err != nil {
-		return fmt.Errorf("prune captures: %w", err)
+		return false, fmt.Errorf("prune captures: %w", err)
 	}
 	var (
 		cutoff int64
@@ -156,24 +176,24 @@ func (r *captureRepository) Prune(ctx context.Context, maxBytes int64) error {
 		var size int64
 		if err := rows.Scan(&cutoff, &size); err != nil {
 			rows.Close()
-			return fmt.Errorf("prune captures: %w", err)
+			return false, fmt.Errorf("prune captures: %w", err)
 		}
 		freed += size
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return fmt.Errorf("prune captures: %w", err)
+		return false, fmt.Errorf("prune captures: %w", err)
 	}
 	if freed == 0 {
-		return nil
+		return true, nil
 	}
 
 	if _, err := r.db.ExecContext(ctx, `DELETE FROM captures WHERE rowid <= ?`, cutoff); err != nil {
-		return fmt.Errorf("prune captures: %w", err)
+		return false, fmt.Errorf("prune captures: %w", err)
 	}
 	r.total -= freed
-	return nil
+	return r.total <= maxBytes, nil
 }
 
 func (r *captureRepository) Size() int64 {
