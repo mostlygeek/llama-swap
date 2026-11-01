@@ -179,6 +179,9 @@ func (p *ProcessCommand) Logger() *logmon.Monitor { return p.processLogger }
 // callers through a single serialization point so the state machine never
 // observes a race.
 func (p *ProcessCommand) run() {
+	// The monitor has the same lifetime as this process, across unloads and
+	// restarts. Release it only when the parent router discards the process.
+	defer p.processLogger.Close()
 	// Mutable state — only read/written from this goroutine. ServeHTTP reads
 	// p.handler concurrently, which is why handler is an atomic.Pointer.
 	// p.status mirrors `state` so State() can observe transitions; setState
