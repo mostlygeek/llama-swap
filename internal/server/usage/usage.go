@@ -62,6 +62,8 @@ func extractorFor(u hint.Upstream) usageExtractor {
 		return radianceExtractor{}
 	case hint.Halogen:
 		return halogenExtractor{}
+	case hint.Hipfire:
+		return hipfireExtractor{}
 	case hint.OpenAI, hint.Anthropic, hint.OpenRouter:
 		return apiExtractor{}
 	default:

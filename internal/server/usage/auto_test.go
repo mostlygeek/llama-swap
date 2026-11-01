@@ -72,6 +72,8 @@ func TestUsage_Auto_Precedence(t *testing.T) {
 		{"per field: TabbyAPI prompt, oMLX generation", `,"prompt_tokens_per_sec":35.17` + omlx, "", 35.17, 66.38},
 		{"per field: oMLX prompt, TabbyAPI generation", `,"completion_tokens_per_sec":17.11` + omlx, "", 63.74, 17.11},
 		{"timings over usage rates", omlx, timings, 100, 40},
+		{"Hipfire timings over usage rates", omlx, `,"timings":{"prefill_tok_s":200,"decode_tok_s":50}`, 200, 50},
+		{"Hipfire null preserves usage rates", omlx, `,"timings":{"prefill_tok_s":null,"decode_tok_s":null}`, 63.74, 66.38},
 		{"vLLM metrics over usage rates", omlx, metrics, 200, 100},
 		{"vLLM metrics over timings", omlx, timings + metrics, 200, 100},
 	}

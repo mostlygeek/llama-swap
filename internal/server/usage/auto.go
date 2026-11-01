@@ -11,7 +11,8 @@ import (
 // the API usage block and then applies every server's extra fields it finds,
 // in the order oMLX rates, TabbyAPI rates, llama-server timings (plus the
 // kyojin and radiance fields kept in the same block), vLLM metrics, so a more
-// precise source overrides a less precise one.
+// precise source overrides a less precise one. Hipfire's explicit prefill
+// and decode rates are applied after generic timings and before vLLM metrics.
 type autoExtractor struct{}
 
 func (autoExtractor) newParser(path string, start time.Time) usageParser {
@@ -48,6 +49,7 @@ func (p *autoParser) usage() Usage {
 	applyTimings(&u, p.timings)
 	applyKyojinDrafts(&u, p.timings)
 	applyRadianceTotal(&u, p.timings)
+	applyHipfireTimings(&u, p.timings)
 	applyVLLMMetrics(&u, p.metrics)
 	return u
 }

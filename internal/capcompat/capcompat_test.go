@@ -479,6 +479,22 @@ func TestCapcompat_DetectRadiance(t *testing.T) {
 	require.NoError(t, info.Capabilities.Validate())
 }
 
+func TestCapcompat_DetectHipfire(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "hipfire", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "deepseek-v4-flash-mtp.mq2lloyd")
+	require.NoError(t, err)
+	assert.Equal(t, hint.Hipfire, info.Upstream)
+	assert.Zero(t, info.Capabilities.Context, "Hipfire does not publish the loaded context")
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools, "tool support is not advertised by the listing")
+	assert.Len(t, up.hits, 1, "only /v1/models is needed")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
 func TestCapcompat_DetectYamz(t *testing.T) {
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "yamz", "v1_models.json"),

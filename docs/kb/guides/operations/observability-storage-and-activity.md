@@ -21,6 +21,20 @@ metricsMaxInMemory: 1000
 captureBuffer: 100
 ```
 
+## Hipfire request metrics
+
+Hipfire is detected automatically from `owned_by: hipfire` in `/v1/models`.
+No metrics configuration is needed: JSON and streaming responses use the API
+usage counts and `timings.prefill_tok_s` / `timings.decode_tok_s` for the
+Activity view's Prefill and Decode columns. Cached prompt tokens are included
+in the input count, not added a second time.
+
+If Hipfire reports no decode rate (for example on a multi-slot route), Decode
+stays unknown. `hipfire.tok_s` includes prefill time and is not used as a decode
+fallback. `tau` and `cycles` are not draft/accepted token counters, so those
+columns stay unknown too. Hipfire's model listing does not report context
+length or tool/vision capabilities; configure those manually when needed.
+
 ## Log streams
 
 llama-swap keeps three log streams. Each has its own tab on the UI's Logs page

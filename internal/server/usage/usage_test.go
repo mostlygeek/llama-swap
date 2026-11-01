@@ -80,6 +80,7 @@ func TestUsage_ExtractorFor(t *testing.T) {
 		{hint.OpenRouter, apiExtractor{}},
 		{hint.OpenAICompatible, autoExtractor{}},
 		{hint.Halogen, halogenExtractor{}},
+		{hint.Hipfire, hipfireExtractor{}},
 		{hint.LlamaSwap, autoExtractor{}},
 		{hint.Unknown, autoExtractor{}},
 	}

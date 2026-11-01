@@ -481,6 +481,37 @@ func TestMetricsMonitor_RecordStoresHint(t *testing.T) {
 	assert.Equal(t, -1, e.Tokens.ReasoningTokens)
 }
 
+func TestMetricsMonitor_RecordHipfire(t *testing.T) {
+	for _, upstream := range []hint.Upstream{hint.Hipfire, hint.Unknown} {
+		for _, streaming := range []bool{false, true} {
+			mm := newTestMetricsMonitor(t, nil, 10, 0)
+			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			ctx, h := hint.New(r.Context())
+			h.Upstream = upstream
+			r = r.WithContext(ctx)
+			body := `{"usage":{"prompt_tokens":12,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":4}},"timings":{"prefill_tok_s":200,"decode_tok_s":40}}`
+			copier := newBodyCopier(httptest.NewRecorder())
+			if streaming {
+				copier.Header().Set("Content-Type", "text/event-stream")
+				body = "data: " + body + "\n\ndata: [DONE]\n\n"
+			} else {
+				copier.Header().Set("Content-Type", "application/json")
+			}
+			copier.WriteHeader(http.StatusOK)
+			copier.Write([]byte(body))
+			mm.record("hipfire", hint.TaskChat, r, copier, 0, nil, nil)
+			entries := metricsEntries(t, mm)
+			require.Len(t, entries, 1)
+			tokens := entries[0].Tokens
+			assert.Equal(t, 12, tokens.InputTokens)
+			assert.Equal(t, 7, tokens.OutputTokens)
+			assert.Equal(t, 4, tokens.CachedTokens)
+			assert.Equal(t, 200.0, tokens.PromptPerSecond)
+			assert.Equal(t, 40.0, tokens.TokensPerSecond)
+		}
+	}
+}
+
 func TestMetricsMonitor_RecordWithoutHint(t *testing.T) {
 	mm := newTestMetricsMonitor(t, nil, 10, 0)
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)

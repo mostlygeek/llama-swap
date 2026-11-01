@@ -51,6 +51,7 @@ Three packages are involved:
 | --- | --- | --- |
 | `llamaServerProber` | `owned_by` `llamacpp` | `/v1/models`, `/props` |
 | `halogenProber` | `owned_by` `halogen` | `/v1/models`, `/health` |
+| `hipfireProber` | `owned_by` `hipfire` | `/v1/models` (no context length reported) |
 | `defaultProber` | any entry with a context length | `/v1/models` only |
 
 Pick the smallest change that works:
@@ -71,7 +72,8 @@ Rules:
   `n_ctx_train`). Add new context field names to `ModelEntry` and
   `ContextTokens()`.
 - `defaultProber.Matches` needs at least one entry with a context length.
-  A listing without one returns `ErrUnsupportedUpstream`, which is expected
+  A listing without one needs a dedicated owner-matching prober (as Hipfire
+  does), or returns `ErrUnsupportedUpstream`, which is expected
   for image, speech and transcription servers.
 - Cached `Info` outlives upgrades. `Service.read` maps unknown cached
   upstream values to `hint.Unknown`, so renaming a constant is safe.
@@ -96,7 +98,8 @@ Building blocks in `usage.go`:
   to -1 and the duration set to wall time.
 - Server extras are small `apply*` functions: `applyTimings`
   (llama-server style `timings`), `applyVLLMMetrics`, `applyTabbyAPIRates`,
-  `applyOMLXRates`, `applyKyojinDrafts`, `applyRadianceTotal`.
+  `applyOMLXRates`, `applyKyojinDrafts`, `applyRadianceTotal`,
+  `applyHipfireTimings`.
 - `autoExtractor` applies every `apply*` it finds. It serves `Unknown` and
   llama-swap peers. When you add an `apply*`, add it to auto too, ordered so
   the more precise source runs last.
