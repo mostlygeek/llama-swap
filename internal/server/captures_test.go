@@ -56,6 +56,21 @@ func TestServer_CaptureStoreAndRetrieve(t *testing.T) {
 		t.Fatal("addCapture returned false")
 	}
 
+	_, cborBytes, err := compressCapture(&capture)
+	if err != nil {
+		t.Fatalf("compressCapture: %v", err)
+	}
+	entry, found, err := mm.store.Captures().Get(context.Background(), "cap-3")
+	if err != nil || !found {
+		t.Fatalf("Get: found=%v err=%v", found, err)
+	}
+	if entry.UncompressedBytes != int64(cborBytes) {
+		t.Errorf("UncompressedBytes = %d, want CBOR length %d", entry.UncompressedBytes, cborBytes)
+	}
+	if size := mm.store.Captures().Size(); size.Compressed != int64(len(entry.Data)) || size.Uncompressed != int64(cborBytes) {
+		t.Errorf("Size = %+v, want {%d %d}", size, len(entry.Data), cborBytes)
+	}
+
 	got := mm.getCaptureByID("cap-3")
 	if got == nil || got.ID != 3 || !bytes.Equal(got.ReqBody, []byte("hello")) {
 		t.Fatalf("getCaptureByID = %+v", got)
@@ -101,9 +116,9 @@ func TestServer_CaptureBufferPrunesOldest(t *testing.T) {
 func waitForCaptureSize(t *testing.T, mm *metricsMonitor, maxBytes int64) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for mm.store.Captures().Size() > maxBytes {
+	for mm.store.Captures().Size().Compressed > maxBytes {
 		if time.Now().After(deadline) {
-			t.Fatalf("captures size = %d, want <= %d", mm.store.Captures().Size(), maxBytes)
+			t.Fatalf("compressed captures size = %d, want <= %d", mm.store.Captures().Size().Compressed, maxBytes)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -184,7 +199,7 @@ func TestServer_CaptureTooLargeSkipped(t *testing.T) {
 	if mm.addCapture("cap-1", ReqRespCapture{ID: 1, ReqBody: body}) {
 		t.Fatal("addCapture should reject a capture larger than captureBuffer")
 	}
-	if mm.store.Captures().Size() != 0 {
+	if mm.store.Captures().Size() != (store.CaptureSize{}) {
 		t.Fatal("rejected capture should not be stored")
 	}
 }

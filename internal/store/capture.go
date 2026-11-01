@@ -12,11 +12,22 @@ var ErrCaptureExists = errors.New("capture id already exists")
 
 // CaptureEntry is one stored request/response capture. ID is the capture ID
 // recorded on the activity row (see NewCaptureID) and Timestamp is when the
-// capture was written. Data is opaque to the store: callers own its encoding.
+// capture was written. Data is the compressed capture and is opaque to the
+// store: callers own its encoding. UncompressedBytes is the caller's size of
+// the capture before compression; the compressed size is len(Data).
 type CaptureEntry struct {
-	ID        string
-	Timestamp time.Time
-	Data      []byte
+	ID                string
+	Timestamp         time.Time
+	Data              []byte
+	UncompressedBytes int64
+}
+
+// CaptureSize totals the stored captures. Compressed is the sum of
+// len(Data) and is what size limits apply to; Uncompressed is the sum of
+// UncompressedBytes.
+type CaptureSize struct {
+	Compressed   int64
+	Uncompressed int64
 }
 
 // CaptureRepository persists request/response captures keyed by capture ID.
@@ -43,10 +54,11 @@ type CaptureRepository interface {
 	// present is not an error.
 	Delete(ctx context.Context, id string) error
 
-	// Prune deletes the oldest written captures until the total size of the
-	// stored Data is at most maxBytes. A maxBytes of zero or less is a no-op.
+	// Prune deletes the oldest written captures until the total compressed
+	// size is at most maxBytes. A maxBytes of zero or less is a no-op.
 	Prune(ctx context.Context, maxBytes int64) error
 
-	// Size returns the total size in bytes of the stored Data.
-	Size() int64
+	// Size returns the compressed and uncompressed totals of the stored
+	// captures.
+	Size() CaptureSize
 }

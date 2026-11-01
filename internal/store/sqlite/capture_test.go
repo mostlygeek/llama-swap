@@ -28,7 +28,7 @@ func TestStore_CapturePutGet(t *testing.T) {
 	_, captures := newCaptureStore(t)
 
 	ts := time.Unix(1750000000, 0)
-	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "c7", Timestamp: ts, Data: []byte("blob")}))
+	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "c7", Timestamp: ts, Data: []byte("blob"), UncompressedBytes: 40}))
 
 	got, found, err := captures.Get(ctx, "c7")
 	require.NoError(t, err)
@@ -36,7 +36,8 @@ func TestStore_CapturePutGet(t *testing.T) {
 	assert.Equal(t, "c7", got.ID)
 	assert.Equal(t, ts.Unix(), got.Timestamp.Unix())
 	assert.Equal(t, []byte("blob"), got.Data)
-	assert.EqualValues(t, 4, captures.Size())
+	assert.EqualValues(t, 40, got.UncompressedBytes)
+	assert.Equal(t, store.CaptureSize{Compressed: 4, Uncompressed: 40}, captures.Size())
 
 	_, found, err = captures.Get(ctx, "c8")
 	require.NoError(t, err)
@@ -50,7 +51,7 @@ func TestStore_CapturePutRejectsDuplicateID(t *testing.T) {
 	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "a", Data: []byte("first")}))
 	err := captures.Put(ctx, store.CaptureEntry{ID: "a", Data: []byte("second")})
 	require.ErrorIs(t, err, store.ErrCaptureExists)
-	assert.EqualValues(t, 5, captures.Size(), "a rejected put does not count")
+	assert.EqualValues(t, 5, captures.Size().Compressed, "a rejected put does not count")
 
 	got, found, err := captures.Get(ctx, "a")
 	require.NoError(t, err)
@@ -84,11 +85,11 @@ func TestStore_CaptureDelete(t *testing.T) {
 	ctx := context.Background()
 	_, captures := newCaptureStore(t)
 
-	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "a", Data: make([]byte, 10)}))
-	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "b", Data: make([]byte, 20)}))
+	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "a", Data: make([]byte, 10), UncompressedBytes: 30}))
+	require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: "b", Data: make([]byte, 20), UncompressedBytes: 70}))
 	require.NoError(t, captures.Delete(ctx, "a"))
 	require.NoError(t, captures.Delete(ctx, "missing"), "deleting a missing id is not an error")
-	assert.EqualValues(t, 20, captures.Size())
+	assert.Equal(t, store.CaptureSize{Compressed: 20, Uncompressed: 70}, captures.Size())
 
 	_, found, err := captures.Get(ctx, "a")
 	require.NoError(t, err)
@@ -101,17 +102,19 @@ func TestStore_CapturePruneDropsOldestBySize(t *testing.T) {
 
 	// IDs are written out of string order to show pruning follows write
 	// order, not ID order.
+	// The limit applies to compressed bytes: each capture is 100 bytes
+	// stored but 1000 before compression.
 	order := []string{"e", "d", "c", "b", "a"}
 	for _, id := range order {
-		require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: id, Data: make([]byte, 100)}))
+		require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: id, Data: make([]byte, 100), UncompressedBytes: 1000}))
 	}
 
 	require.NoError(t, captures.Prune(ctx, 0), "zero limit is a no-op")
 	require.NoError(t, captures.Prune(ctx, 500), "at the limit nothing is pruned")
-	assert.EqualValues(t, 500, captures.Size())
+	assert.Equal(t, store.CaptureSize{Compressed: 500, Uncompressed: 5000}, captures.Size())
 
 	require.NoError(t, captures.Prune(ctx, 250))
-	assert.EqualValues(t, 200, captures.Size())
+	assert.Equal(t, store.CaptureSize{Compressed: 200, Uncompressed: 2000}, captures.Size())
 	found, err := captures.Has(ctx, order)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]bool{"b": true, "a": true}, found)
@@ -128,7 +131,7 @@ func TestStore_CapturePruneAcrossBatches(t *testing.T) {
 		require.NoError(t, captures.Put(ctx, store.CaptureEntry{ID: fmt.Sprintf("c%04d", i), Data: make([]byte, 10)}))
 	}
 	require.NoError(t, captures.Prune(ctx, 100))
-	assert.EqualValues(t, 100, captures.Size())
+	assert.EqualValues(t, 100, captures.Size().Compressed)
 
 	found, err := captures.Has(ctx, []string{fmt.Sprintf("c%04d", n-11), fmt.Sprintf("c%04d", n-10), fmt.Sprintf("c%04d", n-1)})
 	require.NoError(t, err)
@@ -159,7 +162,7 @@ func TestStore_CapturesPersistAcrossReopen(t *testing.T) {
 	entry, err := first.Activity().Insert(ctx, store.ActivityLogEntry{Model: "m", CaptureID: captureID})
 	require.NoError(t, err)
 	data := bytes.Repeat([]byte("c"), 64)
-	require.NoError(t, first.Captures().Put(ctx, store.CaptureEntry{ID: captureID, Data: data}))
+	require.NoError(t, first.Captures().Put(ctx, store.CaptureEntry{ID: captureID, Data: data, UncompressedBytes: 640}))
 	require.NoError(t, first.Close())
 
 	second, err := New(activityPath, capturesPath)
@@ -176,7 +179,7 @@ func TestStore_CapturesPersistAcrossReopen(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, data, got.Data)
-	assert.EqualValues(t, 64, second.Captures().Size(), "size is reloaded on open")
+	assert.Equal(t, store.CaptureSize{Compressed: 64, Uncompressed: 640}, second.Captures().Size(), "totals are reloaded on open")
 
 	// Captures are in their own file, not in the activity database.
 	var tables int

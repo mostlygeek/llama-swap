@@ -145,6 +145,7 @@ func (mp *metricsMonitor) addCapture(captureID string, capture ReqRespCapture) b
 		return false
 	}
 
+	// captureBuffer limits compressed bytes, the size actually stored.
 	if int64(len(compressed)) > mp.maxCaptureBytes {
 		mp.logger.Warnf("capture %s too large (%d bytes), skipping: exceeds captureBuffer of %d bytes", captureID, len(compressed), mp.maxCaptureBytes)
 		return false
@@ -156,7 +157,11 @@ func (mp *metricsMonitor) addCapture(captureID string, capture ReqRespCapture) b
 	defer cancel()
 
 	captures := mp.store.Captures()
-	if err := captures.Put(ctx, store.CaptureEntry{ID: captureID, Data: compressed}); err != nil {
+	if err := captures.Put(ctx, store.CaptureEntry{
+		ID:                captureID,
+		Data:              compressed,
+		UncompressedBytes: int64(uncompressedBytes),
+	}); err != nil {
 		mp.logger.Warnf("failed to store capture %s: %v", captureID, err)
 		return false
 	}
