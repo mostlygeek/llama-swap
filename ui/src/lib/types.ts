@@ -83,6 +83,7 @@ export interface ActivityLogEntry {
   resp_status_code: number;
   tokens: TokenMetrics;
   duration_ms: number;
+  capture_id?: string;
   has_capture: boolean;
   error_msg?: string;
   metadata?: Record<string, string>;

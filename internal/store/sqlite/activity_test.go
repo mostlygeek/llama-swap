@@ -30,7 +30,7 @@ func TestActivity_SortColumnsCoverStoreKeys(t *testing.T) {
 }
 
 func TestStore_ActivityTaskRouteRoundTrip(t *testing.T) {
-	st, err := New("")
+	st, err := New("", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestStore_ActivityTaskRouteRoundTrip(t *testing.T) {
 // TestStore_ActivityTaskBackfill checks migration 00004 labels rows recorded
 // before the task column existed, and leaves reasoning tokens unknown.
 func TestStore_ActivityTaskBackfill(t *testing.T) {
-	st, err := New("")
+	st, err := New("", "")
 	if err != nil {
 		t.Fatal(err)
 	}

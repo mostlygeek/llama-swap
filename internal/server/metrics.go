@@ -6,14 +6,15 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -38,14 +39,33 @@ func (e ActivityLogEvent) Type() uint32 {
 
 // metricsMonitor parses upstream responses for token statistics, stores
 // activity in a store, and (when captures are enabled) stores
-// zstd+CBOR-compressed request/response captures in a sized in-memory cache.
+// zstd+CBOR-compressed request/response captures in the store's capture
+// repository, bounded to maxCaptureBytes in total.
+//
+// Captures are written on the request path, but pruning them back under
+// maxCaptureBytes runs on a background goroutine so a request never waits for
+// old captures to be deleted. The total can briefly exceed maxCaptureBytes
+// while a prune is pending.
 type metricsMonitor struct {
-	store          store.Store
-	maxMetrics     int
-	logger         *logmon.Monitor
-	enableCaptures bool
-	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
+	store           store.Store
+	maxMetrics      int
+	logger          *logmon.Monitor
+	enableCaptures  bool
+	maxCaptureBytes int64
+
+	// pruneCh wakes the prune goroutine. It holds one pending request, so
+	// many captures written while a prune runs cause one more prune, not
+	// one each. Nil when captures are disabled.
+	pruneCh   chan struct{}
+	pruneStop context.CancelFunc
+	pruneDone chan struct{}
+	closeOnce sync.Once
 }
+
+// capturePruneTimeout bounds one background prune. A prune after
+// captureBuffer is lowered can delete a lot; one that times out is resumed
+// by the next capture.
+const capturePruneTimeout = 5 * time.Minute
 
 func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int, st store.Store) *metricsMonitor {
 	if maxMetrics <= 0 {
@@ -58,9 +78,51 @@ func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB i
 		enableCaptures: captureBufferMB > 0,
 	}
 	if captureBufferMB > 0 {
-		mm.captureCache = cache.New(captureBufferMB * 1024 * 1024)
+		mm.maxCaptureBytes = int64(captureBufferMB) * 1024 * 1024
+		mm.startCapturePruner()
+		// The store outlives a config reload, so apply a lowered
+		// captureBuffer now rather than on the next capture.
+		mm.requestCapturePrune()
 	}
 	return mm
+}
+
+// startCapturePruner starts the goroutine that prunes captures. Close stops
+// it.
+func (mp *metricsMonitor) startCapturePruner() {
+	ctx, cancel := context.WithCancel(context.Background())
+	mp.pruneCh = make(chan struct{}, 1)
+	mp.pruneStop = cancel
+	mp.pruneDone = make(chan struct{})
+	go func() {
+		defer close(mp.pruneDone)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-mp.pruneCh:
+				mp.pruneCaptures(ctx)
+			}
+		}
+	}()
+}
+
+// requestCapturePrune asks the prune goroutine to bring captures back under
+// maxCaptureBytes. It never blocks: if a request is already pending, this one
+// is folded into it.
+func (mp *metricsMonitor) requestCapturePrune() {
+	select {
+	case mp.pruneCh <- struct{}{}:
+	default:
+	}
+}
+
+func (mp *metricsMonitor) pruneCaptures(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, capturePruneTimeout)
+	defer cancel()
+	if err := mp.store.Captures().Prune(ctx, mp.maxCaptureBytes); err != nil && !errors.Is(err, context.Canceled) {
+		mp.warnf("failed to prune captures: %v", err)
+	}
 }
 
 // queueMetrics persists a metric and returns the store-assigned row. It
@@ -89,16 +151,41 @@ func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry) {
 	event.Emit(ActivityLogEvent{Metrics: metric})
 }
 
+// overlayCaptureState sets HasCapture on entries whose capture is still in
+// the capture repository. Stored captures are hidden while captures are
+// disabled.
 func (mp *metricsMonitor) overlayCaptureState(entries []ActivityLogEntry) {
-	if mp.captureCache == nil {
+	var found map[string]bool
+	if mp.enableCaptures {
+		ids := make([]string, 0, len(entries))
 		for i := range entries {
-			entries[i].HasCapture = false
+			if entries[i].CaptureID != "" {
+				ids = append(ids, entries[i].CaptureID)
+			}
 		}
-		return
+		if len(ids) > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			var err error
+			if found, err = mp.store.Captures().Has(ctx, ids); err != nil {
+				mp.warnf("failed to look up captures: %v", err)
+			}
+		}
 	}
 	for i := range entries {
-		entries[i].HasCapture = mp.captureCache.Has(entries[i].ID)
+		entries[i].HasCapture = entries[i].CaptureID != "" && found[entries[i].CaptureID]
 	}
+}
+
+// newCaptureID returns a capture ID for an activity row recorded at t that
+// will get a capture, or "" when captures are disabled. The ID is recorded on
+// the row before the capture is written; if writing fails or the capture is
+// pruned later, the row simply has no capture.
+func (mp *metricsMonitor) newCaptureID(t time.Time) string {
+	if !mp.enableCaptures {
+		return ""
+	}
+	return store.NewCaptureID(t)
 }
 
 func (mp *metricsMonitor) warnf(format string, args ...any) {
@@ -113,7 +200,16 @@ func (mp *metricsMonitor) debugf(format string, args ...any) {
 	}
 }
 
+// Close stops the capture prune goroutine, cancelling a prune in progress,
+// and waits for it to exit so the store can be closed after it. It is safe to
+// call more than once.
 func (mp *metricsMonitor) Close() error {
+	mp.closeOnce.Do(func() {
+		if mp.pruneStop != nil {
+			mp.pruneStop()
+			<-mp.pruneDone
+		}
+	})
 	return nil
 }
 
@@ -203,6 +299,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), r.URL.Path)
 		decoded, decErr := mp.decodeResponseBody(recorder, r.URL.Path)
 		tm.ErrorMsg = failedErrorMessage(recorder.Status(), decoded, decErr)
+		tm.CaptureID = mp.newCaptureID(tm.Timestamp)
 		stored, ok := mp.queueMetrics(tm)
 		if !ok {
 			return
@@ -210,7 +307,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		tm = stored
 		// Capture the request only; the failure is surfaced via ErrorMsg
 		// rather than storing the (possibly undisplayable) response body.
-		tm.HasCapture = mp.storeCapture(tm.ID, r, recorder, cf&^captureRespBody, reqBody, reqHeaders, nil)
+		tm.HasCapture = mp.storeCapture(tm, r, recorder, cf&^captureRespBody, reqBody, reqHeaders, nil)
 		mp.emitMetric(tm)
 		return
 	}
@@ -240,25 +337,27 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		tm.DurationMs = u.DurationMs
 	}
 
+	tm.CaptureID = mp.newCaptureID(tm.Timestamp)
 	stored, ok := mp.queueMetrics(tm)
 	if !ok {
 		return
 	}
 	tm = stored
-	tm.HasCapture = mp.storeCapture(tm.ID, r, recorder, cf, reqBody, reqHeaders, body)
+	tm.HasCapture = mp.storeCapture(tm, r, recorder, cf, reqBody, reqHeaders, body)
 	mp.emitMetric(tm)
 }
 
-// storeCapture assembles a ReqRespCapture for id, honoring the captureFields
-// mask, and stores it when captures are enabled. body is the response body to
+// storeCapture assembles a ReqRespCapture for the stored activity row tm,
+// honoring the captureFields mask, and stores it under tm.CaptureID when one
+// was assigned. body is the response body to
 // capture (already decompressed by the caller); pass nil to omit it. Returns
 // true if a capture was stored.
-func (mp *metricsMonitor) storeCapture(id int, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string, body []byte) bool {
-	if !mp.enableCaptures {
+func (mp *metricsMonitor) storeCapture(tm ActivityLogEntry, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string, body []byte) bool {
+	if !mp.enableCaptures || tm.CaptureID == "" {
 		return false
 	}
 	capture := ReqRespCapture{
-		ID:         id,
+		ID:         tm.ID,
 		ReqPath:    r.URL.Path,
 		ReqHeaders: reqHeaders,
 	}
@@ -273,7 +372,7 @@ func (mp *metricsMonitor) storeCapture(id int, r *http.Request, recorder *respon
 	if cf&captureRespBody != 0 {
 		capture.RespBody = body
 	}
-	return mp.addCapture(capture)
+	return mp.addCapture(tm.CaptureID, capture)
 }
 
 // decodeResponseBody returns the buffered response body, decompressing it when

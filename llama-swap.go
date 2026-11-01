@@ -68,11 +68,25 @@ var logTimeFormats = map[string]string{
 	"stampnano":   time.StampNano,
 }
 
-func configStorePath(cfg config.Config) string {
+// storePaths are the database files a store is opened with. An empty path
+// is an in-memory database. A reload reopens the store only when they change.
+type storePaths struct {
+	activity string
+	captures string
+}
+
+func configStorePaths(cfg config.Config) storePaths {
 	if cfg.Store == nil {
-		return ""
+		return storePaths{}
 	}
-	return strings.TrimSpace(cfg.Store.Path)
+	return storePaths{
+		activity: strings.TrimSpace(cfg.Store.Path),
+		captures: cfg.Store.CapturesPath(),
+	}
+}
+
+func openStore(paths storePaths) (*sqlite.Store, error) {
+	return sqlite.New(paths.activity, paths.captures)
 }
 
 func configureTailcatListener(cfg *config.Config, keyPath string) error {
@@ -252,8 +266,8 @@ func main() {
 	// keeps it paused (issue #1268).
 	pauseState := server.NewPauseState()
 
-	initialStorePath := configStorePath(cfg)
-	initialStore, err := sqlite.New(initialStorePath)
+	initialStorePaths := configStorePaths(cfg)
+	initialStore, err := openStore(initialStorePaths)
 	if err != nil {
 		slog.Error("failed to create store", "error", err)
 		os.Exit(1)
@@ -270,7 +284,7 @@ func main() {
 	var activeMu sync.RWMutex
 	activeSrv := initialSrv
 	activeStore := initialStore
-	activeStorePath := initialStorePath
+	activeStorePaths := initialStorePaths
 
 	tailcatHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		activeMu.RLock()
@@ -350,17 +364,17 @@ func main() {
 			return
 		}
 
-		newStorePath := configStorePath(newCfg)
+		newStorePaths := configStorePaths(newCfg)
 		activeMu.RLock()
 		currentStore := activeStore
-		currentStorePath := activeStorePath
+		currentStorePaths := activeStorePaths
 		currentTailcat := activeTailcat
 		activeMu.RUnlock()
 
 		newStore := currentStore
-		storeChanged := newStorePath != currentStorePath
+		storeChanged := newStorePaths != currentStorePaths
 		if storeChanged {
-			newStore, err = sqlite.New(newStorePath)
+			newStore, err = openStore(newStorePaths)
 			if err != nil {
 				proxyLog.Warnf("failed to create new store during reload: %v", err)
 				return
@@ -389,7 +403,7 @@ func main() {
 		oldStore := activeStore
 		activeSrv = newSrv
 		activeStore = newStore
-		activeStorePath = newStorePath
+		activeStorePaths = newStorePaths
 		activeMu.Unlock()
 
 		applyLogSettings(newCfg)

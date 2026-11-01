@@ -33,7 +33,7 @@ func TestServer_CapacityProcessLifecycle(t *testing.T) {
 	if _, err := os.Stat(binary); os.IsNotExist(err) {
 		t.Skip("run make simple-responder to test real processes")
 	}
-	st, err := sqlite.New("")
+	st, err := sqlite.New("", "")
 	require.NoError(t, err)
 	defer st.Close()
 	input := fmt.Sprintf(`routing:
