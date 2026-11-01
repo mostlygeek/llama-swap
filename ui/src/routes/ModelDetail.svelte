@@ -49,14 +49,6 @@
   let message = $derived(loadingMessage(model));
 </script>
 
-<!--
-  h-full, not min-h-full: the Logs tab sizes itself with `h-full` all the way
-  down to the scrolling <pre>, and a percentage height only resolves against a
-  definite height. When this box was min-h-full the log text grew it instead,
-  so the page-level scroller in App.svelte scrolled and the log panel never
-  got its own scrollbar. overflow-y-auto here keeps the taller Activity and
-  Details tabs scrollable without moving the page.
--->
 <div class="flex h-full flex-col gap-3 overflow-y-auto p-0 sm:gap-4 sm:p-2">
   {#if !model}
     <Card.Root class="shrink-0 p-6">
@@ -136,13 +128,6 @@
       {/if}
     </Card.Root>
 
-    <!--
-      The explicit min-height replaces the flex item's content-based minimum
-      (min-height: auto) with a floor: the tab area never collapses below a
-      usable log panel, and a tall header - a long description or a wall of
-      wrapped aliases in a short window - scrolls this route instead of
-      squeezing the logs out of view behind Card.Root's overflow-hidden.
-    -->
     <Tabs value="activity" class="min-h-[min(20rem,70vh)] flex-1">
       <TabsList variant="line">
         <TabsTrigger value="activity">Activity</TabsTrigger>
