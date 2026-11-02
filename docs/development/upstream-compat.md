@@ -96,7 +96,8 @@ Building blocks in `usage.go`:
   to -1 and the duration set to wall time.
 - Server extras are small `apply*` functions: `applyTimings`
   (llama-server style `timings`), `applyVLLMMetrics`, `applyTabbyAPIRates`,
-  `applyOMLXRates`, `applyKyojinDrafts`, `applyRadianceTotal`.
+  `applyOMLXRates`, `applyTensorFold`, `applyKyojinDrafts`,
+  `applyRadianceTotal`.
 - `autoExtractor` applies every `apply*` it finds. It serves `Unknown` and
   llama-swap peers. When you add an `apply*`, add it to auto too, ordered so
   the more precise source runs last.
