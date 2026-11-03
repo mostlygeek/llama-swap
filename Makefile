@@ -84,7 +84,7 @@ test-chart:
 # ui/node_modules directory itself can't be the target because make treats an
 # existing directory as up to date. The stamp lives inside node_modules so
 # deleting node_modules also forces a reinstall.
-UI_DEPS_STAMP = ui/node_modules/.deps-stamp
+UI_DEPS_STAMP = ui/node_modules/.stamp
 
 $(UI_DEPS_STAMP): ui/package.json ui/package-lock.json
 	cd ui && npm ci
