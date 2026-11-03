@@ -15,10 +15,14 @@ import (
 // CreateMetricsMiddleware returns middleware that records token metrics for
 // model-dispatched POST requests. It resolves the model, tees the response into
 // a buffer, and parses token usage once the upstream handler returns.
+//
+// /v1/realtime websocket upgrades are recorded too, once per session when the
+// socket closes; see realtime.go.
 func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if mm == nil || r.Method != http.MethodPost {
+			websocket := r.Method == http.MethodGet && swaputil.IsWebSocketUpgrade(r)
+			if mm == nil || (r.Method != http.MethodPost && !websocket) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -37,7 +41,7 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 			}
 
 			task, metered := meteredTask(checkPath)
-			if !metered {
+			if !metered || websocket != (task == hint.TaskRealtime) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -82,10 +86,20 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 			r = r.WithContext(ctx)
 
 			recorder := newBodyCopier(w)
+			if websocket {
+				recorder.realtime = newRealtimeSession()
+			}
+			// For a websocket this returns when the session ends.
 			next.ServeHTTP(recorder, r)
 			// A request abandoned before any response was written must not be
 			// filed as a successful (empty-body) metric. See #1029.
 			swaputil.MarkClientClosed(recorder, r)
+			if websocket && recorder.Status() == http.StatusSwitchingProtocols {
+				mm.recordRealtime(data.ModelID, task, r, recorder)
+				return
+			}
+			// A refused upgrade (model failed to start, upstream error) is an
+			// ordinary failed request.
 			mm.record(data.ModelID, task, r, recorder, cf, reqBody, reqHeaders)
 		})
 	}

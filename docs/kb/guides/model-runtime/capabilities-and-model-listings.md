@@ -48,6 +48,7 @@ What each server can report:
 | audio or video input | yes | no | no |
 | tools | yes, from the chat template | no | yes |
 | decision model output | yes, from `/v1/models` | no | no |
+| audio output (speech) | yes, from `/v1/models` | no | no |
 | reranker | no | no | no |
 | embeddings | no | no | no |
 
@@ -57,11 +58,13 @@ the running build accepts. Both vary per deployment: halogen serves images
 only when it was started with a vision tower, and that is read rather than
 assumed.
 
-Decision models are the one thing `/props` cannot show. They answer
-`/v1/systemone` and generate no text, so llama-server marks them with
-`output_modalities: ["decisions"]` in its `/v1/models` instead, and llama-swap
-reports `out: [decisions]` and no tools for them, whatever their chat template
-says.
+What a model outputs is the one thing `/props` cannot show, so it is read
+from the `output_modalities` in llama-server's own `/v1/models`. Decision
+models answer `/v1/systemone` and generate no text; llama-server marks them
+with `["decisions"]`, and llama-swap reports `out: [decisions]` and no tools
+for them, whatever their chat template says. Speech models such as LFM Audio
+report `["text", "audio"]`, and llama-swap reports `out: [text, audio]`. They
+speak over `/v1/realtime` (the Playground's Realtime tab).
 
 vLLM is the thin one. Nothing it serves says whether it was started with
 `--enable-auto-tool-choice`, or whether the model takes images, so set those

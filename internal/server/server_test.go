@@ -642,6 +642,7 @@ func TestServer_MeteredTask(t *testing.T) {
 		{"/v1/audio/transcriptions", hint.TaskTranscription, true},
 		{"/v1/systemone", hint.TaskDecision, true},
 		{"/audioapi/v1/tasks/run", hint.TaskAudio, true},
+		{"/v1/realtime", hint.TaskRealtime, true},
 		// listing endpoints are not inference
 		{"/v1/audio/voices", "", false},
 		{"/v1/models", "", false},

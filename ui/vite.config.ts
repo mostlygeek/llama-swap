@@ -3,6 +3,7 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
 import { compression } from "vite-plugin-compression2";
 import path from "node:path";
+import fs from "node:fs";
 
 // KaTeX's CSS lists woff2/woff/ttf fallbacks per font-face, but browsers only
 // ever fetch the first format they support (woff2, universally today) - the
@@ -65,10 +66,17 @@ export default defineConfig({
     // on the public internet for dev?! haha.
     host: "0.0.0.0",
     allowedHosts: true,
+    // Browsers only allow the microphone (Playground > Realtime) on localhost
+    // or https. To use it from another machine, point these at a cert/key.
+    https:
+      process.env.UI_DEV_TLS_CERT && process.env.UI_DEV_TLS_KEY
+        ? { cert: fs.readFileSync(process.env.UI_DEV_TLS_CERT), key: fs.readFileSync(process.env.UI_DEV_TLS_KEY) }
+        : undefined,
     proxy: Object.fromEntries(
       ["/api", "/logs", "/upstream", "/unload", "/v1", "/sdapi"].map((path) => [
         path,
-        process.env.LLAMA_SWAP_URL ?? "http://localhost:8080",
+        // ws: forwards websocket upgrades too, for /v1/realtime
+        { target: process.env.LLAMA_SWAP_URL ?? "http://localhost:8080", ws: true },
       ]),
     ),
   },
