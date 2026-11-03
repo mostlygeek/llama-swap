@@ -135,6 +135,28 @@ RUN if [ "$RUN_UID" != "0" ]; then \
     mkdir -p /etc/llama-swap/config && \
     chown -R ${RUN_UID}:${RUN_UID} /etc/llama-swap
 
+# Container engine clients, so a model's cmd can run `docker run ...` or
+# `podman run ...` against the host's engine. Only clients are installed, never
+# a daemon: the engine is reached through a socket mounted into the container
+# (see "Running models in containers" in the README).
+#
+# - docker-ce-cli comes from Docker's own apt repo; Ubuntu's docker.io package
+#   lags well behind and pulls in the daemon.
+# - podman-remote is Ubuntu's client-only Podman. Podman's remote client
+#   behaviour is selected at build time, so linking it as `podman` lets configs
+#   written for a local Podman work unchanged.
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+      -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    . /etc/os-release && \
+    printf 'Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: %s\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
+      "${UBUNTU_CODENAME:-$VERSION_CODENAME}" > /etc/apt/sources.list.d/docker.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    docker-ce-cli podman-remote \
+    && ln -s podman-remote /usr/bin/podman \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy whisper.cpp binaries and libraries

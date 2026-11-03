@@ -734,7 +734,7 @@ echo "Verifying build artifacts..."
 echo "=========================================="
 echo ""
 
-EXPECTED_BINARIES=(llama-server llama-cli llama-bench whisper-server whisper-cli sd-server sd-cli audiocpp_server audiocpp_cli llama-swap vllm-wrapper ik-llama-server)
+EXPECTED_BINARIES=(llama-server llama-cli llama-bench whisper-server whisper-cli sd-server sd-cli audiocpp_server audiocpp_cli llama-swap vllm-wrapper ik-llama-server docker podman)
 
 MISSING_BINARIES=()
 for binary in "${EXPECTED_BINARIES[@]}"; do
@@ -754,7 +754,7 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
     exit 1
 fi
 
-VERIFIED_LIST="llama-server, llama-cli, llama-bench, whisper-server, whisper-cli, sd-server, sd-cli, audiocpp_server, audiocpp_cli, llama-swap, vllm-wrapper, ik-llama-server"
+VERIFIED_LIST="llama-server, llama-cli, llama-bench, whisper-server, whisper-cli, sd-server, sd-cli, audiocpp_server, audiocpp_cli, llama-swap, vllm-wrapper, ik-llama-server, docker, podman"
 echo "All expected binaries verified: ${VERIFIED_LIST}"
 
 # audio.cpp must be a deployment build: the model_specs catalog is compiled into

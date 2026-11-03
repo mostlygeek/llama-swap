@@ -24,6 +24,12 @@ container user to an unprivileged host user. Podman supports equivalent
 per-container UID/GID mappings through [user
 namespaces](https://docs.podman.io/en/latest/markdown/podman-run.1.html#set-uid-gid-mapping-in-a-new-user-namespace).
 
+Mounting the Docker or Podman socket into the llama-swap container, so models
+can run as containers (see `guides/model-runtime/running-models-in-containers`),
+gives it root-equivalent control of the host: anything that can reach the
+socket can start a privileged container. Only do this for a llama-swap instance
+you trust, and keep its API off untrusted networks.
+
 Treat model files and surrounding tooling as part of the security boundary.
 The LLM ecosystem has had [unsafe model serialization
 issues](https://huggingface.co/docs/hub/security-pickle); non-root images reduce

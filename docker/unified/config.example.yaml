@@ -8,6 +8,20 @@
 #
 # The image also ships whisper-server, sd-server, audiocpp_server and
 # ik-llama-server. Add them as further entries under models: when you need them.
+#
+# It also has the docker and podman clients, for models that run as containers
+# on the host. Mount the host's engine socket into this container first (see
+# docker/unified/README.md). -v paths are paths on the host.
+#
+#   qwen-docker:
+#     proxy: "http://127.0.0.1:${PORT}"
+#     cmd: |
+#       docker run --name ${MODEL_ID} --init --rm --gpus all
+#       -p ${PORT}:8080 -v /mnt/nvme/models:/models
+#       ghcr.io/ggml-org/llama.cpp:server-cuda
+#       --model /models/qwen3-8b.gguf
+#     cmdStop: docker stop ${MODEL_ID}
+#     unloadTimeout: 30
 
 models:
   # https://huggingface.co/unsloth/gemma-4-12b-it-GGUF

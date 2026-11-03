@@ -9,6 +9,10 @@ These scripts create a custom llama-swap container that contains:
 - vllm-wrapper for vLLM sleep mode support (see [cmd/vllm-wrapper](../../cmd/vllm-wrapper/README.md))
 - kubeswap for managing inference backends in a Kubernetes namespace (see [cmd/kubeswap](../../cmd/kubeswap/README.md))
 
+- `docker` and `podman` command-line clients, for running a model as a
+  container on the host's engine (see [Running models in
+  containers](#running-models-in-containers))
+
 `vllm-wrapper` is built from the same llama-swap revision as the `llama-swap`
 binary in the image. It expects a vLLM server started with `--enable-sleep-mode`
 that is reachable from the container; vLLM itself is not included in the image.
@@ -245,6 +249,55 @@ docker run ghcr.io/mostlygeek/llama-swap:unified-cuda13 -config /models/my.yaml
 Arguments therefore win outright over `LLAMA_SWAP_*`, rather than being appended
 to flags the entrypoint built. `--entrypoint llama-swap` still bypasses the
 script entirely.
+
+## Running models in containers
+
+The image carries the `docker` and `podman` clients so a model's `cmd` can start
+its inference server as a container. There is no engine inside the image. The
+clients talk to the host's engine through a socket mounted into the llama-swap
+container, and the model containers run on the host beside it.
+
+- `docker` is `docker-ce-cli` from Docker's own apt repository.
+- `podman` is Ubuntu's `podman-remote`, linked as `podman`, so commands written
+  for a local Podman work unchanged. It is the 4.9.3 client from Ubuntu 24.04.
+
+```yaml
+services:
+  llama-swap:
+    image: ghcr.io/mostlygeek/llama-swap:unified-cuda13
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # Docker
+      # - /run/podman/podman.sock:/run/podman/podman.sock   # Podman instead
+      - ./config.yaml:/etc/llama-swap/config/config.yaml
+```
+
+```yaml
+models:
+  qwen-docker:
+    proxy: "http://127.0.0.1:${PORT}"
+    cmd: |
+      docker run --name ${MODEL_ID} --init --rm --gpus all
+      -p ${PORT}:8080 -v /mnt/nvme/models:/models
+      ghcr.io/ggml-org/llama.cpp:server-cuda
+      --model /models/qwen3-8b.gguf
+    cmdStop: docker stop ${MODEL_ID}
+    unloadTimeout: 30
+```
+
+Three things to know:
+
+- `-v` paths are resolved by the host's engine, so the left side is a path on
+  the host, not inside the llama-swap container.
+- The socket gives root-equivalent access to the host. See
+  `docs/kb/guides/operations/container-security.md`.
+- The `rootless` image runs as UID 10001, which needs the socket's group added
+  (`group_add` in compose, `--group-add` with `docker run`). A rootless Podman
+  socket also needs `CONTAINER_HOST` set; as root the client defaults to
+  `/run/podman/podman.sock`.
+
+The knowledge base guide `docs/kb/guides/model-runtime/running-models-in-containers.md`
+has the Podman GPU flags and the common failure modes.
 
 ## The config the image ships
 

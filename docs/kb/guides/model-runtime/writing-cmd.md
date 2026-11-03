@@ -157,4 +157,5 @@ If the upstream expects a different model name than your llama-swap ID, use
 
 - `reference/config/models` — every model setting, annotated
 - `guides/configuration/macros` — cutting repetition out of long commands
+- `guides/model-runtime/running-models-in-containers` — `docker run` / `podman run` as a `cmd`
 - `guides/model-runtime/troubleshooting-model-wont-load` — when it doesn't start
