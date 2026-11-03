@@ -23,14 +23,17 @@ brings it back on its own:
 ```yaml
 hooks:
   on_startup:
-    preload: [main-llm, helper]
+    preload: [main-llm]
   on_unload:
-    restore: [main-llm, helper]
+    restore: [main-llm]
     delay: 30
 
 models:
-  main-llm: { cmd: ..., }          # no ttl: the default
-  experiment: { cmd: ..., ttl: 900 } # swaps main-llm out, unloads when idle
+  main-llm:    # no ttl: the default
+    cmd: llama-server --port ${PORT} -m /models/main.gguf
+  experiment:  # swaps main-llm out, unloads after 15 idle minutes
+    cmd: llama-server --port ${PORT} -m /models/experiment.gguf
+    ttl: 900
 ```
 
 After any model stops (unload, ttl, eviction or crash) and no other model has
@@ -47,6 +50,8 @@ What goes wrong:
   default never comes back.
 - A model that fails to start is not retried until another model stops, so a
   broken default does not loop. Check the proxy log for `restore:` lines.
+- A pass waits at most `healthCheckTimeout` + 30 s for each model, so an
+  upstream that loads but never answers does not block later restores.
 - An unknown model name in `restore` is a configuration error.
 
 Keep hook commands fast and observable. A failing hook or a model that cannot

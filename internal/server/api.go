@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -417,7 +418,7 @@ func (s *Server) startPreload() {
 			}
 			s.logs.ProxyLogs.Infof("preloading model: %s", modelID)
 
-			status := s.warmModel(modelID, false)
+			status := s.warmModel(s.shutdownCtx, modelID, false)
 			success := status < http.StatusBadRequest
 			if !success {
 				s.logs.ProxyLogs.Errorf("failed to preload model %s: status %d", modelID, status)
@@ -431,9 +432,10 @@ func (s *Server) startPreload() {
 // router, the way a client request would, and returns the HTTP status the
 // request ended with. noEvict makes the scheduler refuse (409) instead of
 // stopping another model. The upstream's own answer to GET / counts too, so a
-// server without a root route reports 404 after loading fine.
-func (s *Server) warmModel(modelID string, noEvict bool) int {
-	req, err := http.NewRequestWithContext(s.shutdownCtx, http.MethodGet, "/", nil)
+// server without a root route reports 404 after loading fine. Cancelling ctx
+// abandons the request; a load it already started still completes.
+func (s *Server) warmModel(ctx context.Context, modelID string, noEvict bool) int {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
 	if err != nil {
 		return http.StatusInternalServerError
 	}

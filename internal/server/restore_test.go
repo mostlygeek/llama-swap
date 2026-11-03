@@ -11,10 +11,14 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
-// restoreTestServer returns a server whose on_unload hook restores m1 after a
-// short delay, and a channel receiving every request the local router got.
-func restoreTestServer(t *testing.T) (*Server, *stubRouter, chan swaputil.ReqContextData) {
+// restoreTestServer returns a server whose on_unload hook restores m1 (or the
+// given models) after a short delay, and a channel receiving every request the
+// local router got.
+func restoreTestServer(t *testing.T, restore ...string) (*Server, *stubRouter, chan swaputil.ReqContextData) {
 	t.Helper()
+	if len(restore) == 0 {
+		restore = []string{"m1"}
+	}
 	got := make(chan swaputil.ReqContextData, 10)
 	local := newStubRouter([]string{"m1", "m2"}, "ok")
 	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
@@ -24,7 +28,7 @@ func restoreTestServer(t *testing.T) (*Server, *stubRouter, chan swaputil.ReqCon
 	}
 	s := newTestServer(local, newStubRouter(nil, ""))
 	s.cfg = config.Config{Hooks: config.HooksConfig{
-		OnUnload: config.HookOnUnload{Restore: []string{"m1"}, Delay: 1},
+		OnUnload: config.HookOnUnload{Restore: restore, Delay: 1},
 	}}
 	s.startRestore()
 	s.restore.delay = 20 * time.Millisecond
@@ -104,6 +108,55 @@ func TestServer_Restore_WaitsForResume(t *testing.T) {
 	s.pause.set(false)
 	event.Emit(swaputil.InferencePausedEvent{Paused: false})
 	expectRestore(t, got)
+}
+
+// TestServer_Restore_BoundedWarmUp checks that an upstream which never answers
+// the warm-up request does not hold the pass: the next model still gets loaded.
+func TestServer_Restore_BoundedWarmUp(t *testing.T) {
+	s, local, got := restoreTestServer(t, "m1", "m2")
+	s.restore.warmTimeout = 50 * time.Millisecond
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		data, _ := swaputil.ReadContext(r.Context())
+		got <- data
+		if data.ModelID == "m1" {
+			<-r.Context().Done() // healthy but never answers
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+
+	emitStop("m2", string(process.StateStopping))
+
+	for _, want := range []string{"m1", "m2"} {
+		select {
+		case d := <-got:
+			if d.ModelID != want {
+				t.Fatalf("request for %s, want %s", d.ModelID, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no restore request for %s", want)
+		}
+	}
+}
+
+// TestServer_Restore_SupersededPassIsSkipped checks that a pass whose timer
+// fired while an earlier pass held the lock does nothing once a newer stop
+// restarted the quiet period: only the newest pass restores, after its delay.
+func TestServer_Restore_SupersededPassIsSkipped(t *testing.T) {
+	s, _, got := restoreTestServer(t)
+	s.restore.busy.Lock() // an earlier pass is still running
+
+	emitStop("m2", string(process.StateStopping))
+	time.Sleep(100 * time.Millisecond) // its timer fires and waits for busy
+
+	s.restore.mu.Lock()
+	s.restore.delay = 400 * time.Millisecond
+	s.restore.mu.Unlock()
+	emitStop("m2", string(process.StateStopping))
+	time.Sleep(50 * time.Millisecond) // let the event reach the restorer
+	s.restore.busy.Unlock()
+
+	expectNoRestore(t, got) // the stale pass must not run early
+	expectRestore(t, got)   // the newest pass runs after its own delay
 }
 
 func TestServer_Restore_StopsWithServer(t *testing.T) {
