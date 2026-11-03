@@ -721,10 +721,31 @@
                     },
                     "additionalProperties": false,
                     "description": "Actions to perform on startup."
+                },
+                "on_unload": {
+                    "type": "object",
+                    "properties": {
+                        "restore": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "default": [],
+                            "description": "Models to load again after another model stops (unload, ttl, eviction, crash). Each is loaded only when that evicts nothing, so a model someone requested is never displaced. Listed in order; unknown names are an error."
+                        },
+                        "delay": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 30,
+                            "description": "Seconds without another model stopping before the restore runs. 0 means the default, 30."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "description": "Actions to perform after a model stops."
                 }
             },
             "additionalProperties": false,
-            "description": "A dictionary of event triggers and actions. Only supported hook is on_startup."
+            "description": "A dictionary of event triggers and actions: on_startup and on_unload."
         },
         "logToStdout": {
             "type": "string",

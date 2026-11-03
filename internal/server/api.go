@@ -417,22 +417,33 @@ func (s *Server) startPreload() {
 			}
 			s.logs.ProxyLogs.Infof("preloading model: %s", modelID)
 
-			req, err := http.NewRequestWithContext(s.shutdownCtx, http.MethodGet, "/", nil)
-			if err != nil {
-				continue
-			}
-			req = req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: modelID, ModelID: modelID, Metadata: make(map[string]string)}))
-
-			dw := &discardResponseWriter{status: http.StatusOK}
-			s.local.ServeHTTP(dw, req)
-
-			success := dw.status < http.StatusBadRequest
+			status := s.warmModel(modelID, false)
+			success := status < http.StatusBadRequest
 			if !success {
-				s.logs.ProxyLogs.Errorf("failed to preload model %s: status %d", modelID, dw.status)
+				s.logs.ProxyLogs.Errorf("failed to preload model %s: status %d", modelID, status)
 			}
 			event.Emit(swaputil.ModelPreloadedEvent{ModelName: modelID, Success: success})
 		}
 	}()
+}
+
+// warmModel loads modelID by sending a background GET / through the local
+// router, the way a client request would, and returns the HTTP status the
+// request ended with. noEvict makes the scheduler refuse (409) instead of
+// stopping another model. The upstream's own answer to GET / counts too, so a
+// server without a root route reports 404 after loading fine.
+func (s *Server) warmModel(modelID string, noEvict bool) int {
+	req, err := http.NewRequestWithContext(s.shutdownCtx, http.MethodGet, "/", nil)
+	if err != nil {
+		return http.StatusInternalServerError
+	}
+	req = req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{
+		Model: modelID, ModelID: modelID, NoEvict: noEvict, Metadata: make(map[string]string),
+	}))
+
+	dw := &discardResponseWriter{status: http.StatusOK}
+	s.local.ServeHTTP(dw, req)
+	return dw.status
 }
 
 // handleMetrics serves Prometheus-format performance metrics. Returns 503 when
