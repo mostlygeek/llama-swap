@@ -23,6 +23,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `v1/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
   - `v1/audio/transcriptions` ([docs](https://github.com/mostlygeek/llama-swap/issues/41#issuecomment-2722637867))
   - `v1/audio/voices`
+  - `v1/realtime` - websocket, requires `?model={model_id}` query parameter
   - `v1/images/generations`
   - `v1/images/edits`
 - ✅ Anthropic API supported endpoints:

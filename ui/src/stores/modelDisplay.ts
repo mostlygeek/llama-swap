@@ -23,8 +23,8 @@ export const collapsedSections = persistentStore<Record<string, boolean>>(
 );
 
 // Show a curated set of capability badges (context window, vision, tools) on
-// each Models list row. Off by default to keep the list dense.
+// each Models list row. On by default; turn off in Settings for a denser list.
 export const showCapabilityTags = persistentStore<boolean>(
   "models-dash-show-capability-tags",
-  false,
+  true,
 );

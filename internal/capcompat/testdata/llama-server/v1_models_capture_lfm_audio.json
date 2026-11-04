@@ -1,0 +1,64 @@
+{
+    "models": [
+        {
+            "name": "/models/LFM3-Audio-2B-F16.gguf",
+            "model": "/models/LFM3-Audio-2B-F16.gguf",
+            "modified_at": "",
+            "size": "",
+            "digest": "",
+            "type": "model",
+            "description": "",
+            "tags": [
+                ""
+            ],
+            "capabilities": [
+                "completion",
+                "multimodal"
+            ],
+            "parameters": "",
+            "details": {
+                "parent_model": "",
+                "format": "gguf",
+                "family": "",
+                "families": [
+                    ""
+                ],
+                "parameter_size": "",
+                "quantization_level": ""
+            }
+        }
+    ],
+    "object": "list",
+    "data": [
+        {
+            "id": "/models/LFM3-Audio-2B-F16.gguf",
+            "aliases": [
+                "/models/LFM3-Audio-2B-F16.gguf"
+            ],
+            "tags": [],
+            "object": "model",
+            "architecture": {
+                "input_modalities": [
+                    "text",
+                    "audio"
+                ],
+                "output_modalities": [
+                    "text",
+                    "audio"
+                ]
+            },
+            "created": 1793686174,
+            "owned_by": "llamacpp",
+            "meta": {
+                "vocab_type": 2,
+                "n_vocab": 128000,
+                "n_ctx": 128000,
+                "n_ctx_train": 128000,
+                "n_embd": 2048,
+                "n_params": 1728801600,
+                "size": 3458379008,
+                "ftype": "F16"
+            }
+        }
+    ]
+}

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -168,6 +169,46 @@ func TestCapcompat_DetectLlamaServerDecisionModel(t *testing.T) {
 	assert.Equal(t, []string{"decisions"}, info.Capabilities.Out)
 	assert.False(t, info.Capabilities.Tools, "no text output, so no tool calls")
 	assert.Equal(t, 16384, info.Capabilities.Context)
+}
+
+// A speech to speech model (LFM3 Audio on build b12063) accepts audio, which
+// /props reports, and also speaks, which only the listing's
+// output_modalities says. The capture's chat_template is elided and its model
+// paths shortened.
+func TestCapcompat_DetectLlamaServerAudioOutput(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models_capture_lfm_audio.json"),
+		"/props":     fixture(t, "llama-server", "props_capture_lfm_audio.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "liquidfm-2B")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.LlamaServer, info.Upstream)
+	assert.Equal(t, []string{"text", "audio"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text", "audio"}, info.Capabilities.Out)
+	assert.True(t, info.Capabilities.Tools, "text is still an output, so tools stay")
+	assert.Equal(t, 128000, info.Capabilities.Context)
+	require.NoError(t, info.Capabilities.Validate())
+}
+
+func TestCapcompat_DetectLlamaServerAudioOnlyOutput(t *testing.T) {
+	// A speech-only model reports output_modalities ["audio"]. It must not be
+	// credited with text, or with tools, which need text out.
+	listing := regexp.MustCompile(`"output_modalities": \[[^\]]*\]`).ReplaceAll(
+		fixture(t, "llama-server", "v1_models_capture_lfm_audio.json"),
+		[]byte(`"output_modalities": ["audio"]`))
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": listing,
+		"/props":     fixture(t, "llama-server", "props_capture_lfm_audio.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "liquidfm-2B")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"audio"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools)
+	require.NoError(t, info.Capabilities.Validate())
 }
 
 func TestCapcompat_DetectLlamaServerIgnoresUnmappedModalities(t *testing.T) {

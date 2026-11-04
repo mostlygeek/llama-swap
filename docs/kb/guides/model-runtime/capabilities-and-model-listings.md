@@ -4,7 +4,7 @@ summary: Advertise images, tools and context length in /v1/models, automatically
 category: guides
 tags: [capabilities, voices, speech, models, tools, vision, context, autodetect, embeddings, reranker, llama-server, vllm, halogen, playground, decisions]
 config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, models.*.capabilities.voices, models.*.capabilities.embeddings, models.*.capabilities.reranker, store.path]
-updated: 2026-10-28
+updated: 2026-11-04
 ---
 
 # Model capabilities and model listings
@@ -48,6 +48,7 @@ What each server can report:
 | audio or video input | yes | no | no |
 | tools | yes, from the chat template | no | yes |
 | decision model output | yes, from `/v1/models` | no | no |
+| audio output (speech) | yes, from `/v1/models` | no | no |
 | reranker | no | no | no |
 | embeddings | no | no | no |
 
@@ -57,11 +58,16 @@ the running build accepts. Both vary per deployment: halogen serves images
 only when it was started with a vision tower, and that is read rather than
 assumed.
 
-Decision models are the one thing `/props` cannot show. They answer
-`/v1/systemone` and generate no text, so llama-server marks them with
-`output_modalities: ["decisions"]` in its `/v1/models` instead, and llama-swap
-reports `out: [decisions]` and no tools for them, whatever their chat template
-says.
+What a model outputs is the one thing `/props` cannot show, so it is read
+from the `output_modalities` in llama-server's own `/v1/models`. Decision
+models answer `/v1/systemone` and generate no text; llama-server marks them
+with `["decisions"]`, and llama-swap reports `out: [decisions]` and no tools
+for them, whatever their chat template says. Speech models report audio:
+LFM Audio reports `["text", "audio"]` and gets `out: [text, audio]`, and a
+speech-only model reports `["audio"]` and gets `out: [audio]`. Audio output
+alone does not mean a model can hold a `/v1/realtime` conversation (the
+Playground's Realtime tab); that also needs a model that chats, such as LFM
+Audio.
 
 vLLM is the thin one. Nothing it serves says whether it was started with
 `--enable-auto-tool-choice`, or whether the model takes images, so set those

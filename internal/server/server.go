@@ -184,6 +184,9 @@ var modelGetRoutes = []string{
 	"/v1/audio/voices",
 	"/sdapi/v1/loras",
 	"/props",
+
+	// websocket upgrade, OpenAI Realtime API style (?model=...)
+	"/v1/realtime",
 }
 
 // meteredRoutes maps every endpoint the metrics middleware records to the
@@ -217,6 +220,9 @@ var meteredRoutes = map[string]hint.Task{
 
 	"/v1/systemone":          hint.TaskDecision,
 	"/audioapi/v1/tasks/run": hint.TaskAudio,
+
+	// a websocket, recorded once per session when it closes
+	"/v1/realtime": hint.TaskRealtime,
 
 	// versionless routes, see issue #728
 	"/v/chat/completions":      hint.TaskChat,

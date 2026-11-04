@@ -239,7 +239,10 @@ func activitySource(r *http.Request) string {
 // can be inspected without storing unreadable raw response bytes. reqBody and
 // reqHeaders are the request data buffered before dispatch. task is the kind
 // of inference, from the metered route table.
-func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
+// newEntry starts the activity row for a finished request: what was asked,
+// who asked, where it was routed, and the request's metadata. It also returns
+// the upstream the router detected.
+func (mp *metricsMonitor) newEntry(modelID string, task hint.Task, r *http.Request, recorder *responseBodyCopier) (ActivityLogEntry, hint.Upstream) {
 	tm := ActivityLogEntry{
 		Timestamp:       time.Now(),
 		Model:           modelID,
@@ -273,6 +276,24 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		}
 		tm.Metadata["selector"] = selectorID
 	}
+	return tm, upstream
+}
+
+// recordRealtime files one row for a finished /v1/realtime websocket. Its
+// duration is the whole session, and its tokens and metadata are the
+// session's tallies. No capture is kept: the traffic is mostly audio.
+func (mp *metricsMonitor) recordRealtime(modelID string, task hint.Task, r *http.Request, recorder *responseBodyCopier) {
+	tm, _ := mp.newEntry(modelID, task, r, recorder)
+	recorder.realtime.fill(&tm)
+	stored, ok := mp.queueMetrics(tm)
+	if !ok {
+		return
+	}
+	mp.emitMetric(stored)
+}
+
+func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
+	tm, upstream := mp.newEntry(modelID, task, r, recorder)
 
 	queueAndEmit := func() {
 		stored, ok := mp.queueMetrics(tm)
@@ -485,6 +506,10 @@ type responseBodyCopier struct {
 	status      int
 	wroteHeader bool
 	start       time.Time
+
+	// realtime, when set, taps the connection Hijack hands out so a
+	// /v1/realtime websocket can be tallied. See realtime.go.
+	realtime *realtimeSession
 }
 
 func newBodyCopier(w http.ResponseWriter) *responseBodyCopier {
@@ -551,7 +576,19 @@ func (w *responseBodyCopier) Flush() {
 // over the connection for websocket upgrades.
 func (w *responseBodyCopier) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
+		conn, brw, err := hj.Hijack()
+		if err != nil {
+			return conn, brw, err
+		}
+		// ReverseProxy hijacks only once the upstream has agreed to switch
+		// protocols, and writes that 101 straight to the connection rather
+		// than through WriteHeader, so note it here.
+		w.status = http.StatusSwitchingProtocols
+		w.wroteHeader = true
+		if w.realtime != nil {
+			conn = &realtimeConn{Conn: conn, session: w.realtime}
+		}
+		return conn, brw, nil
 	}
 	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
 }
