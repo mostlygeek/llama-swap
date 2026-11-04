@@ -3,7 +3,7 @@ title: Realtime voice chat with /v1/realtime
 summary: Proxy OpenAI Realtime API websockets to llama-server for speech to speech models like LFM3 Audio, and talk to them from the Playground.
 category: guides
 tags: [realtime, websocket, voice, speech, audio, lfm, liquid, llama-server, playground, microphone, https, secure context]
-config_keys: [models.*.cmd, models.*.ttl, models.*.compat.ignoreWebsockets]
+config_keys: [models.*.cmd, models.*.ttl, models.*.compat.ignoreWebsockets, models.*.concurrencyLimit, globalConcurrencyLimit]
 updated: 2026-11-04
 ---
 
@@ -87,6 +87,10 @@ An open session counts as an in-flight request for its whole life. The model
 stays loaded and busy, so a swap that needs its memory waits until the session
 closes, and `ttl` counts from when it closes. Disconnect when done. Unloading
 the model by hand does not wait: it stops the model and ends the session.
+
+The session also holds one slot of `models.*.concurrencyLimit` and of
+`globalConcurrencyLimit` until it closes, idle or not. With a small global
+limit, a few open sessions can turn other requests away with HTTP 429.
 
 Do not set `compat.ignoreWebsockets` on a realtime model: the websocket could
 then not start a stopped model, and the model could be swapped out mid-call.

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -188,6 +189,25 @@ func TestCapcompat_DetectLlamaServerAudioOutput(t *testing.T) {
 	assert.Equal(t, []string{"text", "audio"}, info.Capabilities.Out)
 	assert.True(t, info.Capabilities.Tools, "text is still an output, so tools stay")
 	assert.Equal(t, 128000, info.Capabilities.Context)
+	require.NoError(t, info.Capabilities.Validate())
+}
+
+func TestCapcompat_DetectLlamaServerAudioOnlyOutput(t *testing.T) {
+	// A speech-only model reports output_modalities ["audio"]. It must not be
+	// credited with text, or with tools, which need text out.
+	listing := regexp.MustCompile(`"output_modalities": \[[^\]]*\]`).ReplaceAll(
+		fixture(t, "llama-server", "v1_models_capture_lfm_audio.json"),
+		[]byte(`"output_modalities": ["audio"]`))
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": listing,
+		"/props":     fixture(t, "llama-server", "props_capture_lfm_audio.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "liquidfm-2B")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"audio"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools)
 	require.NoError(t, info.Capabilities.Validate())
 }
 

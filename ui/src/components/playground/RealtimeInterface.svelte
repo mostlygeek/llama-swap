@@ -14,7 +14,7 @@
     pcm16ToBase64,
     pcm16ToFloat,
     realtimeUrl,
-    resample,
+    Resampler,
     rms,
   } from "../../lib/realtimeAudio";
   import ModelSelector from "./ModelSelector.svelte";
@@ -94,6 +94,10 @@
   let micLevel = $state(0);
   let assistantSpeaking = $state(false);
   let responseActive = $state(false);
+  // The reply being generated, and replies the user talked over: their audio
+  // still in flight from the server is kept for replay but not played.
+  let activeResponseId: string | null = null;
+  const silencedResponses = new Set<string>();
   let transcriptEl = $state<HTMLDivElement | null>(null);
   let showSettings = $state(false);
   // the turn whose recorded audio is being replayed
@@ -108,6 +112,10 @@
   let micStream: MediaStream | null = null;
   let micCtx: AudioContext | null = null;
   let micNode: AudioWorkletNode | null = null;
+  let micResampler: Resampler | null = null;
+  // Push-to-talk is held down. The mic can take a while to open (permission
+  // prompt), and a release during that wait must cancel the turn.
+  let pttHeld = false;
   let micBlock: Float32Array[] = [];
   let micBlockLen = 0;
   let preroll: Int16Array[] = [];
@@ -211,6 +219,8 @@
     status = "idle";
     statusDetail = "";
     responseActive = false;
+    activeResponseId = null;
+    silencedResponses.clear();
     stopMic();
     stopPlayback();
     connectedStore.set(false);
@@ -259,6 +269,7 @@
       }
       case "response.created": {
         responseActive = true;
+        activeResponseId = ev.response.id;
         const id = nextTurnId();
         responseTurns.set(ev.response.id, id);
         responseAudio.set(ev.response.id, []);
@@ -277,12 +288,14 @@
       case "response.output_audio.delta": {
         const pcm = base64ToPcm16(ev.delta ?? "");
         responseAudio.get(ev.response_id)?.push(pcm);
-        playChunk(pcm);
+        if (!silencedResponses.has(ev.response_id)) playChunk(pcm);
         break;
       }
       case "response.done": {
         responseActive = false;
         const rid = ev.response?.id;
+        if (rid === activeResponseId) activeResponseId = null;
+        silencedResponses.delete(rid);
         const id = responseTurns.get(rid);
         if (id) {
           const chunks = responseAudio.get(rid) ?? [];
@@ -309,6 +322,7 @@
   /** Stop whatever the assistant is saying so the user can speak. */
   function interrupt() {
     stopPlayback();
+    if (activeResponseId) silencedResponses.add(activeResponseId);
     if (responseActive) send({ type: "response.cancel" });
   }
 
@@ -474,13 +488,18 @@
     const url = URL.createObjectURL(new Blob([workletSource], { type: "application/javascript" }));
     try {
       await micCtx.audioWorklet.addModule(url);
+      const source = micCtx.createMediaStreamSource(micStream);
+      micNode = new AudioWorkletNode(micCtx, "realtime-capture");
+      micNode.port.onmessage = (e) => onMicFrames(e.data as Float32Array);
+      source.connect(micNode);
+    } catch (err) {
+      // Release the mic rather than leave it recording with nothing reading it.
+      stopMic();
+      addError(`microphone unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      return;
     } finally {
       URL.revokeObjectURL(url);
     }
-    const source = micCtx.createMediaStreamSource(micStream);
-    micNode = new AudioWorkletNode(micCtx, "realtime-capture");
-    micNode.port.onmessage = (e) => onMicFrames(e.data as Float32Array);
-    source.connect(micNode);
     vad.reset();
     micOn = true;
     // Disconnected while the mic was opening: don't leave it recording.
@@ -495,6 +514,7 @@
     micStream = null;
     micCtx?.close();
     micCtx = null;
+    micResampler = null;
     micBlock = [];
     micBlockLen = 0;
     preroll = [];
@@ -523,7 +543,10 @@
 
     const level = rms(block);
     micLevel = Math.min(1, level * 8);
-    const pcm = floatToPcm16(resample(block, micCtx.sampleRate, inputRate));
+    if (micResampler?.fromRate !== micCtx.sampleRate || micResampler.toRate !== inputRate) {
+      micResampler = new Resampler(micCtx.sampleRate, inputRate);
+    }
+    const pcm = floatToPcm16(micResampler.process(block));
     const blockMs = (block.length / micCtx.sampleRate) * 1000;
 
     if ($micModeStore === "vad") {
@@ -555,8 +578,10 @@
 
   async function pttDown() {
     if (!isConnected || $micModeStore !== "ptt" || capturing) return;
+    pttHeld = true;
     await startMic();
-    if (!micOn) return;
+    // Released (or disconnected) while the mic was opening: no turn.
+    if (!micOn || !pttHeld || capturing) return;
     // Push-to-talk starts clean: no audio from before the button was pressed.
     preroll = [];
     prerollLen = 0;
@@ -564,6 +589,7 @@
   }
 
   function pttUp() {
+    pttHeld = false;
     if ($micModeStore !== "ptt" || !capturing) return;
     endUtterance();
   }
@@ -684,6 +710,7 @@
     disconnect();
     playCtx?.close();
     playCtx = null;
+    for (const t of turns) if (t.audioUrl) URL.revokeObjectURL(t.audioUrl);
   });
 
   function handleTextKeyDown(event: KeyboardEvent) {

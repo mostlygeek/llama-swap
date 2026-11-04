@@ -14,25 +14,79 @@ export function realtimeUrl(path: string, model: string, location: { protocol: s
 }
 
 /**
- * Linearly resample mono float samples from one rate to another. Microphones
- * run at the AudioContext's rate (usually 48 kHz), which is never what the
- * server wants, and asking for a 16 kHz context breaks MediaStream sources in
- * Firefox, so the conversion happens here.
+ * Resample a stream of mono float samples from one rate to another, fed in
+ * blocks. Microphones run at the AudioContext's rate (usually 48 kHz), which
+ * is never what the server wants, and asking for a 16 kHz context breaks
+ * MediaStream sources in Firefox, so the conversion happens here.
+ *
+ * Going down, a windowed-sinc low-pass first removes what the new rate cannot
+ * hold; without it a 12 kHz hiss folds back as a false 4 kHz tone. The filter
+ * history and the read position carry across blocks, so splitting the stream
+ * into blocks gives the same output as one long block.
  */
-export function resample(input: Float32Array, fromRate: number, toRate: number): Float32Array {
-  if (fromRate === toRate || input.length === 0) return input;
-  const ratio = fromRate / toRate;
-  const length = Math.floor(input.length / ratio);
-  const out = new Float32Array(length);
-  for (let i = 0; i < length; i++) {
-    const pos = i * ratio;
-    const idx = Math.floor(pos);
-    const frac = pos - idx;
-    const a = input[idx];
-    const b = idx + 1 < input.length ? input[idx + 1] : a;
-    out[i] = a + (b - a) * frac;
+export class Resampler {
+  private readonly ratio: number;
+  private readonly taps: Float32Array;
+  // The last taps.length - 1 input samples, the filter's history.
+  private history: Float32Array;
+  // Next output position in the current block's filtered samples; -1 is the
+  // previous block's last sample, kept in prev.
+  private pos = 0;
+  private prev = 0;
+
+  constructor(
+    readonly fromRate: number,
+    readonly toRate: number,
+    numTaps = 63,
+  ) {
+    this.ratio = fromRate / toRate;
+    this.taps = toRate < fromRate ? lowPass(numTaps, (0.45 * toRate) / fromRate) : new Float32Array([1]);
+    this.history = new Float32Array(this.taps.length - 1);
   }
-  return out;
+
+  process(input: Float32Array): Float32Array {
+    if (this.fromRate === this.toRate || input.length === 0) return input;
+    const taps = this.taps;
+    const hist = this.history.length;
+    const x = new Float32Array(hist + input.length);
+    x.set(this.history);
+    x.set(input, hist);
+    const y = new Float32Array(input.length);
+    for (let i = 0; i < y.length; i++) {
+      let acc = 0;
+      for (let k = 0; k < taps.length; k++) acc += taps[k] * x[hist + i - k];
+      y[i] = acc;
+    }
+    this.history = x.slice(x.length - hist);
+
+    const out: number[] = [];
+    while (this.pos < y.length - 1) {
+      const idx = Math.floor(this.pos);
+      const frac = this.pos - idx;
+      const a = idx < 0 ? this.prev : y[idx];
+      out.push(a + (y[idx + 1] - a) * frac);
+      this.pos += this.ratio;
+    }
+    this.pos -= y.length;
+    this.prev = y[y.length - 1];
+    return Float32Array.from(out);
+  }
+}
+
+/** Blackman-windowed sinc low-pass, cutoff in cycles per sample, unity DC gain. */
+function lowPass(numTaps: number, cutoff: number): Float32Array {
+  const taps = new Float32Array(numTaps);
+  const mid = (numTaps - 1) / 2;
+  let sum = 0;
+  for (let i = 0; i < numTaps; i++) {
+    const t = i - mid;
+    const sinc = t === 0 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * t) / (Math.PI * t);
+    const w = 0.42 - 0.5 * Math.cos((2 * Math.PI * i) / (numTaps - 1)) + 0.08 * Math.cos((4 * Math.PI * i) / (numTaps - 1));
+    taps[i] = sinc * w;
+    sum += taps[i];
+  }
+  for (let i = 0; i < numTaps; i++) taps[i] /= sum;
+  return taps;
 }
 
 /** Convert [-1, 1] float samples to PCM16, clamping anything out of range. */

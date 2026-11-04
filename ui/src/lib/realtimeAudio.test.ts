@@ -8,7 +8,7 @@ import {
   pcm16ToBase64,
   pcm16ToFloat,
   realtimeUrl,
-  resample,
+  Resampler,
   rms,
 } from "./realtimeAudio";
 
@@ -24,21 +24,42 @@ describe("realtimeUrl", () => {
   });
 });
 
-describe("resample", () => {
+function sine(freq: number, rate: number, length: number): Float32Array {
+  return Float32Array.from({ length }, (_, i) => Math.sin((2 * Math.PI * freq * i) / rate));
+}
+
+describe("Resampler", () => {
   it("returns the input when the rates match", () => {
     const input = new Float32Array([0.1, 0.2]);
-    expect(resample(input, 16000, 16000)).toBe(input);
+    expect(new Resampler(16000, 16000).process(input)).toBe(input);
   });
 
-  it("downsamples 48 kHz to 16 kHz by a third", () => {
-    const input = new Float32Array(4800).fill(0.5);
-    const out = resample(input, 48000, 16000);
+  it("downsamples 48 kHz to 16 kHz by a third, keeping a constant level", () => {
+    const out = new Resampler(48000, 16000).process(new Float32Array(4800).fill(0.5));
     expect(out.length).toBe(1600);
-    expect(out.every((v) => Math.abs(v - 0.5) < 1e-6)).toBe(true);
+    // past the filter's warm-up the level is unchanged
+    expect(out.slice(100).every((v) => Math.abs(v - 0.5) < 1e-3)).toBe(true);
   });
 
-  it("interpolates between samples", () => {
-    const out = resample(new Float32Array([0, 1, 0, 1]), 2, 4);
+  it("keeps speech frequencies and removes what would alias", () => {
+    const voice = new Resampler(48000, 16000).process(sine(1000, 48000, 4800)).slice(100);
+    const hiss = new Resampler(48000, 16000).process(sine(12000, 48000, 4800)).slice(100);
+    expect(rms(voice)).toBeGreaterThan(0.69);
+    expect(rms(hiss)).toBeLessThan(0.01);
+  });
+
+  it("gives the same output whether fed in blocks or all at once", () => {
+    const input = sine(440, 44100, 4410);
+    const whole = new Resampler(44100, 16000).process(input);
+    const r = new Resampler(44100, 16000);
+    const parts: number[] = [];
+    for (let i = 0; i < input.length; i += 1764) parts.push(...r.process(input.subarray(i, i + 1764)));
+    expect(parts.length).toBe(whole.length);
+    parts.forEach((v, i) => expect(v).toBeCloseTo(whole[i], 6));
+  });
+
+  it("interpolates when upsampling", () => {
+    const out = new Resampler(2, 4).process(new Float32Array([0, 1, 0, 1]));
     expect(Array.from(out.slice(0, 3))).toEqual([0, 0.5, 1]);
   });
 });

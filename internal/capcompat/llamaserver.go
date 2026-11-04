@@ -87,14 +87,17 @@ func (p llamaServerProber) Probe(ctx context.Context, c *Client, models ModelsRe
 	// read from the listing. A decision model only answers /v1/systemone and
 	// generates no text: llama-server reports output_modalities
 	// ["decisions"]. A speech model such as LFM Audio reports
-	// ["text", "audio"]; it speaks over /v1/realtime.
+	// ["text", "audio"]; it speaks over /v1/realtime. A speech-only model
+	// reports ["audio"] and is not credited with text.
 	if entry, ok := models.Find(modelName); ok {
 		outs := entry.Architecture.OutputModalities
 		switch {
 		case slices.Contains(outs, "decisions"):
 			caps.Out = []string{"decisions"}
+		case slices.Contains(outs, "audio") && slices.Contains(outs, "text"):
+			caps.Out = []string{"text", "audio"}
 		case slices.Contains(outs, "audio"):
-			caps.Out = append(caps.Out, "audio")
+			caps.Out = []string{"audio"}
 		}
 	}
 
