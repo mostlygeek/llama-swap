@@ -3,11 +3,190 @@ package logmon
 import (
 	"bytes"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestLogMonitor_Close(t *testing.T) {
+	var stdout bytes.Buffer
+	m := NewWriter(&stdout)
+	m.Write([]byte("before"))
+	closer, ok := any(m).(io.Closer)
+	if !ok {
+		t.Fatal("Monitor has no Close method")
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := m.Write([]byte("after")); err != nil || n != 5 {
+		t.Fatalf("Write after Close: %d, %v", n, err)
+	}
+	if stdout.String() != "beforeafter" {
+		t.Fatal("Close must preserve stdout writes")
+	}
+	if len(m.GetHistory()) != 0 {
+		t.Fatal("closed monitor retained history")
+	}
+	m.OnLogData(func([]byte) { t.Error("subscribed after Close") })()
+}
+
+func TestLogMonitor_CloseConcurrent(t *testing.T) {
+	m := NewWriter(io.Discard)
+	closer, ok := any(m).(io.Closer)
+	if !ok {
+		t.Fatal("Monitor has no Close method")
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				cancel := m.OnLogData(func([]byte) {})
+				m.Write([]byte("log"))
+				cancel()
+				if j == 100 {
+					closer.Close()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	closer.Close()
+}
+
+func TestLogMonitor_CloseBackpressure(t *testing.T) {
+	m := NewWriter(io.Discard)
+	closer, ok := any(m).(io.Closer)
+	if !ok {
+		t.Fatal("Monitor has no Close method")
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	cancel := m.OnLogData(func([]byte) { once.Do(func() { close(entered) }); <-release })
+	defer cancel()
+	defer close(release)
+	m.Write([]byte("first"))
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("subscriber did not start")
+	}
+	for i := 0; i < 10000; i++ {
+		m.Write([]byte("queued"))
+	}
+	done := make(chan struct{})
+	go func() { closer.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Close blocked behind subscriber")
+	}
+	if len(m.GetHistory()) != 0 {
+		t.Fatal("closed monitor retained history")
+	}
+}
+
+func TestLogMonitor_CloseReleasesGoroutines(t *testing.T) {
+	before := runtime.NumGoroutine()
+	for i := 0; i < 100; i++ {
+		m := NewWriter(io.Discard)
+		closer, ok := any(m).(io.Closer)
+		if !ok {
+			t.Fatal("Monitor has no Close method")
+		}
+		m.OnLogData(func([]byte) {})
+		m.Write([]byte("log"))
+		closer.Close()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	after := runtime.NumGoroutine()
+	t.Logf("goroutines before=%d after=%d", before, after)
+	if after > before {
+		t.Fatalf("goroutines leaked: before=%d after=%d", before, after)
+	}
+}
+
+// A Close invoked from inside a subscriber callback must return without waiting
+// for that callback, and must not leave the events queued behind it to be
+// delivered afterwards: only the running callback may outlive the shutdown.
+func TestLogMonitor_CloseFromCallback(t *testing.T) {
+	m := NewWriter(io.Discard)
+	closer, ok := any(m).(io.Closer)
+	if !ok {
+		t.Fatal("Monitor has no Close method")
+	}
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	closed := make(chan struct{})
+	var enterOnce sync.Once
+	cancel := m.OnLogData(func(data []byte) {
+		switch string(data) {
+		case "1":
+			enterOnce.Do(func() {
+				close(entered)
+				<-release
+			})
+		case "2":
+			if err := closer.Close(); err != nil {
+				t.Error(err)
+			}
+			close(closed)
+		}
+	})
+	defer cancel()
+	defer closer.Close()
+
+	// A second consumer of the same group acts as a fence: Broadcast appends to
+	// every subscriber under one lock, so once this one has been handed the
+	// third line the first consumer is already holding both queued lines.
+	reached := make(chan struct{})
+	cancelFence := m.OnLogData(func(data []byte) {
+		if string(data) == "3" {
+			close(reached)
+		}
+	})
+	defer cancelFence()
+
+	for _, line := range []string{"1", "2", "3"} {
+		if _, err := m.Write([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first callback did not start")
+	}
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued lines never reached the broadcast group")
+	}
+	close(release)
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close from a subscriber callback never returned")
+	}
+
+	if len(m.GetHistory()) != 0 {
+		t.Fatal("closed monitor retained history")
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestLogMonitor(t *testing.T) {
 	logMonitor := NewWriter(io.Discard)

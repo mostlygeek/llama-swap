@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/capcompat"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -134,6 +135,11 @@ type ProcessCommand struct {
 	// It is initialized when the process becomes Ready and updated after ServeHTTP completes.
 	lastUse  atomic.Int64
 	inflight atomic.Int64 // current in-flight ServeHTTP calls
+
+	// detected is what capcompat.Detect found when the process last became
+	// ready. Cleared at the start of each doStart; nil until detection
+	// succeeds.
+	detected atomic.Pointer[capcompat.Info]
 }
 
 var _ Process = (*ProcessCommand)(nil)
@@ -173,6 +179,9 @@ func (p *ProcessCommand) Logger() *logmon.Monitor { return p.processLogger }
 // callers through a single serialization point so the state machine never
 // observes a race.
 func (p *ProcessCommand) run() {
+	// The monitor has the same lifetime as this process, across unloads and
+	// restarts. Release it only when the parent router discards the process.
+	defer p.processLogger.Close()
 	// Mutable state — only read/written from this goroutine. ServeHTTP reads
 	// p.handler concurrently, which is why handler is an atomic.Pointer.
 	// p.status mirrors `state` so State() can observe transitions; setState
@@ -457,6 +466,7 @@ func (p *ProcessCommand) run() {
 }
 
 func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout time.Duration) startResult {
+	p.detected.Store(nil)
 	if p.config.Proxy == "" {
 		return startResult{err: fmt.Errorf("upstream proxy missing")}
 	}
@@ -574,6 +584,10 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 
 	checkEndpoint := strings.TrimSpace(p.config.CheckEndpoint)
 	if checkEndpoint == "none" {
+		// Without a health check the upstream may not be listening yet, so
+		// detection runs alongside serving, with retries, for as long as the
+		// command runs.
+		go p.detectUpstream(cmdCtx, true)
 		return startResult{cmd: cmd, cmdDone: cmdDone, cancel: cmdCancel, handlerFn: handlerFn}
 	}
 
@@ -641,6 +655,14 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 			return prematureExit()
 		case <-time.After(time.Second):
 		}
+	}
+
+	// The health check has passed, so the upstream is listening: detect it
+	// now, before the process is reported ready, so the first request
+	// already knows which server it is talking to.
+	p.detectUpstream(startCtx, false)
+	if startCtx.Err() != nil {
+		return abort(ErrStartAborted)
 	}
 
 	return startResult{cmd: cmd, cmdDone: cmdDone, cancel: cmdCancel, handlerFn: handlerFn}
@@ -842,10 +864,62 @@ func (p *ProcessCommand) State() ProcessState {
 }
 
 func (p *ProcessCommand) Status() Status {
-	if st := p.status.Load(); st != nil {
-		return *st
+	st := Status{State: StateStopped}
+	if loaded := p.status.Load(); loaded != nil {
+		st = *loaded
 	}
-	return Status{State: StateStopped}
+	if st.State == StateReady {
+		if info := p.detected.Load(); info != nil {
+			st.Upstream = info.Upstream
+		}
+	}
+	return st
+}
+
+// detectTimeout bounds detection for a model whose health check has just
+// passed. The server is known to be listening, so one quick try is enough.
+const detectTimeout = 2 * time.Second
+
+// detectUpstream asks the upstream what it is with capcompat.Detect, keeps
+// the result for Status, and publishes it as a capcompat.DetectedEvent so the
+// capabilities cache can store it. retry is for models without a health
+// check, which may not be listening yet when they are reported ready.
+//
+// Detection failing is normal (image, speech and transcription servers have
+// no model listing) and never stops the process from serving.
+func (p *ProcessCommand) detectUpstream(ctx context.Context, retry bool) {
+	base, err := url.Parse(p.config.Proxy)
+	if err != nil {
+		return
+	}
+	client := capcompat.NewClient(base, p.config.Timeouts, p.proxyLogger)
+	name := capcompat.UpstreamModelName(p.id, p.config)
+
+	var info capcompat.Info
+	if retry {
+		info, err = capcompat.DetectWithRetry(ctx, client, name)
+	} else {
+		detectCtx, cancel := context.WithTimeout(ctx, detectTimeout)
+		info, err = capcompat.Detect(detectCtx, client, name)
+		cancel()
+	}
+	if ctx.Err() != nil {
+		// The process stopped mid-detection; a result now would describe a
+		// process that is gone.
+		return
+	}
+	if err == nil {
+		p.detected.Store(&info)
+		p.proxyLogger.Debugf("<%s> detected upstream %s", p.id, info.Upstream)
+	} else {
+		p.proxyLogger.Debugf("<%s> upstream detection failed: %v", p.id, err)
+	}
+	event.Emit(capcompat.DetectedEvent{
+		ModelID: p.id,
+		Key:     capcompat.LocalKey(p.id, p.config),
+		Info:    info,
+		Err:     err,
+	})
 }
 
 func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {

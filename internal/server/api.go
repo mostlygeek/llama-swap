@@ -10,6 +10,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
@@ -211,11 +212,19 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		// Resolved once and reused for the aliases, which describe the same
 		// upstream and must not disagree with the model they point at.
 		caps := s.resolveCapabilities(r.Context(), id, mc)
+		upstream := s.localUpstream(r.Context(), id, mc)
+		if upstream != hint.Unknown {
+			internalMetadata["upstream"] = string(upstream)
+		}
 		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata, caps, status, internalMetadata))
 
 		if s.cfg.IncludeAliasesInList {
 			for _, alias := range mc.Aliases {
 				if alias := strings.TrimSpace(alias); alias != "" {
+					aliasMetadata := map[string]any{"type": "alias", "modelID": id}
+					if upstream != hint.Unknown {
+						aliasMetadata["upstream"] = string(upstream)
+					}
 					data = append(data, newRecord(
 						alias,
 						mc.Name,
@@ -223,7 +232,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 						mc.Metadata,
 						caps,
 						status,
-						map[string]any{"type": "alias", "modelID": id},
+						aliasMetadata,
 					))
 				}
 			}

@@ -589,7 +589,7 @@
   }
 
   .prose :global(a) {
-    color: var(--primary);
+    color: var(--link);
     text-decoration: underline;
   }
 

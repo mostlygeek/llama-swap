@@ -1,0 +1,1 @@
+{"id":"chatcmpl-omlx1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Hello!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":56,"completion_tokens":8,"total_tokens":64,"prompt_tokens_details":{"cached_tokens":16},"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38}}

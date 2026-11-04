@@ -2,15 +2,19 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/store/sqlite"
 )
 
 func TestServer_CaptureCompressRoundtrip(t *testing.T) {
@@ -48,16 +52,155 @@ func TestServer_CaptureStoreAndRetrieve(t *testing.T) {
 	}
 
 	capture := ReqRespCapture{ID: 3, ReqPath: "/v1/chat/completions", ReqBody: []byte("hello")}
-	if !mm.addCapture(capture) {
+	if !mm.addCapture("cap-3", capture) {
 		t.Fatal("addCapture returned false")
 	}
 
-	got := mm.getCaptureByID(3)
-	if got == nil || !bytes.Equal(got.ReqBody, []byte("hello")) {
+	_, cborBytes, err := compressCapture(&capture)
+	if err != nil {
+		t.Fatalf("compressCapture: %v", err)
+	}
+	entry, found, err := mm.store.Captures().Get(context.Background(), "cap-3")
+	if err != nil || !found {
+		t.Fatalf("Get: found=%v err=%v", found, err)
+	}
+	if entry.UncompressedBytes != int64(cborBytes) {
+		t.Errorf("UncompressedBytes = %d, want CBOR length %d", entry.UncompressedBytes, cborBytes)
+	}
+	if size := mm.store.Captures().Size(); size.Compressed != int64(len(entry.Data)) || size.Uncompressed != int64(cborBytes) {
+		t.Errorf("Size = %+v, want {%d %d}", size, len(entry.Data), cborBytes)
+	}
+
+	got := mm.getCaptureByID("cap-3")
+	if got == nil || got.ID != 3 || !bytes.Equal(got.ReqBody, []byte("hello")) {
 		t.Fatalf("getCaptureByID = %+v", got)
 	}
-	if mm.getCaptureByID(999) != nil {
+	if mm.getCaptureByID("missing") != nil {
 		t.Fatal("expected nil for unknown capture ID")
+	}
+}
+
+func TestServer_CaptureBufferPrunesOldest(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 1)
+
+	// Random bodies do not compress, so each capture is a bit over 400 KB
+	// and only two fit in the 1 MB captureBuffer.
+	rng := rand.New(rand.NewSource(1))
+	for id := 1; id <= 4; id++ {
+		body := make([]byte, 400*1024)
+		rng.Read(body)
+		if !mm.addCapture(fmt.Sprintf("cap-%d", id), ReqRespCapture{ID: id, ReqBody: body}) {
+			t.Fatalf("addCapture %d returned false", id)
+		}
+	}
+
+	// Pruning runs in the background.
+	waitForCaptureSize(t, mm, mm.maxCaptureBytes)
+	for id, want := range map[int]bool{1: false, 2: false, 3: true, 4: true} {
+		if got := mm.getCaptureByID(fmt.Sprintf("cap-%d", id)) != nil; got != want {
+			t.Errorf("capture %d stored = %v, want %v", id, got, want)
+		}
+	}
+
+	// Rows name their capture by capture ID; a pruned capture or a row
+	// without one reads as no capture.
+	entries := []ActivityLogEntry{{ID: 2, CaptureID: "cap-2"}, {ID: 3, CaptureID: "cap-3"}, {ID: 5}}
+	mm.overlayCaptureState(entries)
+	if entries[0].HasCapture || !entries[1].HasCapture || entries[2].HasCapture {
+		t.Errorf("HasCapture = [%v %v %v], want [false true false]", entries[0].HasCapture, entries[1].HasCapture, entries[2].HasCapture)
+	}
+}
+
+// waitForCaptureSize waits for the background pruner to bring the stored
+// captures down to at most maxBytes.
+func waitForCaptureSize(t *testing.T, mm *metricsMonitor, maxBytes int64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for mm.store.Captures().Size().Compressed > maxBytes {
+		if time.Now().After(deadline) {
+			t.Fatalf("compressed captures size = %d, want <= %d", mm.store.Captures().Size().Compressed, maxBytes)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A lowered captureBuffer is applied when the monitor is built, as on a
+// config reload that keeps the same store.
+func TestServer_CapturePruneOnNewMonitor(t *testing.T) {
+	st, err := sqlite.New("", "")
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	ctx := context.Background()
+	for i := range 3 {
+		data := make([]byte, 700*1024)
+		if err := st.Captures().Put(ctx, store.CaptureEntry{ID: fmt.Sprintf("cap-%d", i), Data: data}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+	}
+
+	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 100, 1, st)
+	t.Cleanup(func() { mm.Close() })
+	waitForCaptureSize(t, mm, 1024*1024)
+
+	found, err := st.Captures().Has(ctx, []string{"cap-0", "cap-1", "cap-2"})
+	if err != nil {
+		t.Fatalf("Has: %v", err)
+	}
+	if found["cap-0"] || found["cap-1"] || !found["cap-2"] {
+		t.Errorf("kept captures = %v, want only cap-2", found)
+	}
+}
+
+func TestServer_CapturePrunerClose(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 1)
+	if err := mm.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case <-mm.pruneDone:
+	default:
+		t.Fatal("prune goroutine still running after Close")
+	}
+	if err := mm.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	// Requests finishing after Close must not block on the pruner.
+	for range 3 {
+		mm.requestCapturePrune()
+	}
+
+	disabled := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 0)
+	disabled.requestCapturePrune()
+	if err := disabled.Close(); err != nil {
+		t.Fatalf("Close with captures disabled: %v", err)
+	}
+}
+
+func TestServer_CaptureIDCollisionKeepsFirst(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 5)
+	if !mm.addCapture("26103120-abcd", ReqRespCapture{ID: 1, ReqPath: "/first"}) {
+		t.Fatal("first addCapture returned false")
+	}
+	if mm.addCapture("26103120-abcd", ReqRespCapture{ID: 2, ReqPath: "/second"}) {
+		t.Fatal("addCapture with a taken ID should return false")
+	}
+	if got := mm.getCaptureByID("26103120-abcd"); got == nil || got.ID != 1 {
+		t.Fatalf("getCaptureByID = %+v, want the first capture", got)
+	}
+}
+
+func TestServer_CaptureTooLargeSkipped(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 1)
+	body := make([]byte, 2*1024*1024)
+	rand.New(rand.NewSource(1)).Read(body)
+	if mm.addCapture("cap-1", ReqRespCapture{ID: 1, ReqBody: body}) {
+		t.Fatal("addCapture should reject a capture larger than captureBuffer")
+	}
+	if mm.store.Captures().Size() != (store.CaptureSize{}) {
+		t.Fatal("rejected capture should not be stored")
 	}
 }
 
@@ -66,10 +209,13 @@ func TestServer_CaptureDisabled(t *testing.T) {
 	if mm.enableCaptures {
 		t.Fatal("captures should be disabled with zero buffer")
 	}
-	if mm.addCapture(ReqRespCapture{ID: 1}) {
+	if mm.newCaptureID(time.Now()) != "" {
+		t.Fatal("newCaptureID should return \"\" when disabled")
+	}
+	if mm.addCapture("cap-1", ReqRespCapture{ID: 1}) {
 		t.Fatal("addCapture should return false when disabled")
 	}
-	if mm.getCaptureByID(1) != nil {
+	if mm.getCaptureByID("cap-1") != nil {
 		t.Fatal("getCaptureByID should return nil when disabled")
 	}
 }

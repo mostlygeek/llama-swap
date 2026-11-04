@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 )
@@ -54,6 +55,9 @@ type fakeProcess struct {
 	opMu sync.Mutex
 
 	autoReady bool
+
+	// upstream is reported by Status, standing in for detection.
+	upstream hint.Upstream
 
 	// ensureErr, when non-nil, makes EnsureReady fail with it, driving the
 	// dispatch-error path without needing a real process to die.
@@ -143,7 +147,7 @@ func (f *fakeProcess) State() process.ProcessState {
 func (f *fakeProcess) Status() process.Status {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return process.Status{State: f.state, ReadySince: f.readySince}
+	return process.Status{State: f.state, ReadySince: f.readySince, Upstream: f.upstream}
 }
 
 func (f *fakeProcess) markReady() { f.setState(process.StateReady) }

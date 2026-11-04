@@ -80,12 +80,19 @@ test-chart:
 		fi; \
 	done
 
-ui/node_modules:
-	cd ui && npm install
+# Stamp file so the install re-runs whenever the dependencies change. The
+# ui/node_modules directory itself can't be the target because make treats an
+# existing directory as up to date. The stamp lives inside node_modules so
+# deleting node_modules also forces a reinstall.
+UI_DEPS_STAMP = ui/node_modules/.stamp
+
+$(UI_DEPS_STAMP): ui/package.json ui/package-lock.json
+	cd ui && npm ci
+	touch $@
 
 # build the UI into internal/server/ui_dist; the `embed_ui` build tag embeds
 # this output into the binary (see internal/server/embed.go)
-ui: ui/node_modules
+ui: $(UI_DEPS_STAMP)
 	cd ui && npm run build
 
 # copy the Go and TypeScript source, without tests, into

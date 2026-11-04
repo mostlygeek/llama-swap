@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"net/http"
 	"time"
 
@@ -30,6 +31,10 @@ type Status struct {
 	// Loading is the latest loading progress the upstream reported through
 	// its health check. Only set while State is StateStarting.
 	Loading *LoadingProgress
+	// Upstream is the server family detected when the process became ready,
+	// or hint.Unknown before detection finishes or when it failed. Only set
+	// while State is StateReady.
+	Upstream hint.Upstream
 }
 
 type Process interface {

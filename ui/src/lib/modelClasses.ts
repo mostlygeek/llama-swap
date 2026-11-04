@@ -59,6 +59,21 @@ export interface ModelClassGroup<T extends { id: string } & Classifiable> {
 }
 
 /**
+ * Aggregate of the row status dots: green when any model in the group is
+ * ready, amber while one is starting or stopping, gray otherwise. Mirrors the
+ * per-model status dot so a collapsed section or folded sub-menu still shows
+ * whether that group has something loaded.
+ */
+export function sectionStatusDotColor(models: Pick<Model, "state">[]): string {
+  let transitioning = false;
+  for (const model of models) {
+    if (model.state === "ready") return "bg-success";
+    if (model.state === "starting" || model.state === "stopping") transitioning = true;
+  }
+  return transitioning ? "bg-warning" : "bg-muted-foreground/40";
+}
+
+/**
  * Groups models by class in MODEL_CLASS_ORDER, sorting each group by ID with a
  * locale-aware numeric compare - the backend sorts /v1/models by raw ASCII,
  * which scatters mixed-case IDs (gemma-4 lands after every uppercase name)

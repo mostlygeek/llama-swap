@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 )
 
 // halogenOwner is what halogen-flash-server reports in /v1/models.
@@ -53,6 +54,8 @@ type halogenProber struct{}
 var _ Prober = halogenProber{}
 
 func (halogenProber) Name() string { return "halogen" }
+
+func (halogenProber) Upstream(ModelsResponse) hint.Upstream { return hint.Halogen }
 
 func (halogenProber) Matches(models ModelsResponse) bool {
 	return strings.EqualFold(models.OwnedBy(), halogenOwner)

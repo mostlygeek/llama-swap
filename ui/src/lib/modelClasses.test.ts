@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   classifyModel,
   groupModelsByClass,
+  sectionStatusDotColor,
   MODEL_CLASS_ORDER,
   modelClassLabels,
 } from "./modelClasses";
+import type { Model } from "./types";
 
 // Minimal fixtures shaped like /v1/models records. Every case mirrors a real
 // model from a live llama-swap instance, so the matrix below is the regression
@@ -147,6 +149,48 @@ describe("groupModelsByClass", () => {
     ]);
     const nonEmpty = groups.filter((g) => g.models.length > 0);
     expect(nonEmpty.map((g) => g.class)).toEqual(["chat", "image", "video"]);
+  });
+});
+
+describe("sectionStatusDotColor", () => {
+  it("returns gray with no ready and no transitioning models", () => {
+    expect(
+      sectionStatusDotColor([
+        { state: "stopped" },
+        { state: "unknown" },
+      ] as Pick<Model, "state">[]),
+    ).toBe("bg-muted-foreground/40");
+  });
+
+  it("returns green when any model is ready, even with others stopped", () => {
+    expect(
+      sectionStatusDotColor([
+        { state: "stopped" },
+        { state: "ready" },
+      ] as Pick<Model, "state">[]),
+    ).toBe("bg-success");
+  });
+
+  it("returns amber when none is ready but one is starting or stopping", () => {
+    expect(
+      sectionStatusDotColor([{ state: "starting" }] as Pick<Model, "state">[]),
+    ).toBe("bg-warning");
+    expect(
+      sectionStatusDotColor([{ state: "stopping" }] as Pick<Model, "state">[]),
+    ).toBe("bg-warning");
+  });
+
+  it("prefers green over amber when both are present", () => {
+    expect(
+      sectionStatusDotColor([
+        { state: "starting" },
+        { state: "ready" },
+      ] as Pick<Model, "state">[]),
+    ).toBe("bg-success");
+  });
+
+  it("returns gray for an empty group", () => {
+    expect(sectionStatusDotColor([])).toBe("bg-muted-foreground/40");
   });
 });
 

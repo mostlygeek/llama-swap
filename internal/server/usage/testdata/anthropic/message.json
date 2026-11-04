@@ -1,0 +1,1 @@
+{"id":"msg_01","type":"message","role":"assistant","model":"claude-sonnet","content":[{"type":"text","text":"Hello!"}],"stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":2}}

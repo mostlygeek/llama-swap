@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -233,19 +234,32 @@ func TestAPI_ListModelsAliasesShareResolvedCapabilities(t *testing.T) {
 	}
 }
 
+// detectAndDeliver does what a local process does when it becomes ready:
+// it runs capcompat detection against the model's proxy and publishes the
+// result, here delivered straight to the server's handler.
+func detectAndDeliver(t *testing.T, s *Server, modelID string, mc config.ModelConfig) {
+	t.Helper()
+	base, err := url.Parse(mc.Proxy)
+	require.NoError(t, err)
+	client := capcompat.NewClient(base, mc.Timeouts, nil)
+	info, err := capcompat.DetectWithRetry(context.Background(), client, capcompat.UpstreamModelName(modelID, mc))
+	s.onUpstreamDetected(capcompat.DetectedEvent{
+		ModelID: modelID,
+		Key:     capcompat.LocalKey(modelID, mc),
+		Info:    info,
+		Err:     err,
+	})
+}
+
 func TestAPI_RefreshCapabilitiesOnReady(t *testing.T) {
 	upstream := newCapUpstream(t)
 	mc := config.ModelConfig{Cmd: "llama-server -m vision.gguf", Proxy: upstream.URL}
 	s := capServer(t, "m", mc)
 
-	// The listener lives in New, which the test server does not call, so the
-	// event is delivered to the handler directly. That is the same function
-	// New subscribes.
-	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
-		ProcessName: "m",
-		OldState:    string(process.StateStarting),
-		NewState:    string(process.StateReady),
-	})
+	// The listener lives in New, which the test server does not call, and
+	// the detection itself runs in the process, so the test detects the same
+	// way and delivers the event to the handler New subscribes.
+	detectAndDeliver(t, s, "m", mc)
 
 	requireCached(t, s, "m", mc)
 
@@ -253,23 +267,6 @@ func TestAPI_RefreshCapabilitiesOnReady(t *testing.T) {
 	assert.Equal(t, 8192, rec.ContextLength)
 	assert.Equal(t, []any{"text", "image"}, rec.Architecture["input_modalities"])
 	assert.Nil(t, rec.Capabilities["function_calling"], "this template reports no tool support")
-}
-
-func TestAPI_RefreshCapabilitiesIgnoresNonReadyStates(t *testing.T) {
-	upstream := newCapUpstream(t)
-	mc := config.ModelConfig{Cmd: "llama-server -m vision.gguf", Proxy: upstream.URL}
-	s := capServer(t, "m", mc)
-
-	for _, state := range []process.ProcessState{
-		process.StateStarting, process.StateStopping, process.StateStopped, process.StateShutdown,
-	} {
-		s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
-			ProcessName: "m",
-			NewState:    string(state),
-		})
-	}
-
-	assert.Zero(t, listModel(t, s).ContextLength, "only a ready process can be probed")
 }
 
 func TestAPI_RefreshCapabilitiesSkipsDisableAuto(t *testing.T) {
@@ -281,10 +278,7 @@ func TestAPI_RefreshCapabilitiesSkipsDisableAuto(t *testing.T) {
 	}
 	s := capServer(t, "m", mc)
 
-	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
-		ProcessName: "m",
-		NewState:    string(process.StateReady),
-	})
+	detectAndDeliver(t, s, "m", mc)
 
 	// Nothing should ever be written for a model that opted out.
 	key := capcompat.LocalKey("m", mc)
@@ -299,10 +293,7 @@ func TestAPI_RefreshCapabilitiesIgnoresUnknownModel(t *testing.T) {
 
 	// A process event for a model that is not in this config must not panic
 	// or probe. Hot reloads make this reachable.
-	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
-		ProcessName: "not-in-config",
-		NewState:    string(process.StateReady),
-	})
+	s.onUpstreamDetected(capcompat.DetectedEvent{ModelID: "not-in-config", Key: "k"})
 }
 
 func TestAPI_RefreshCapabilitiesSurvivesUnreachableUpstream(t *testing.T) {
@@ -311,10 +302,7 @@ func TestAPI_RefreshCapabilitiesSurvivesUnreachableUpstream(t *testing.T) {
 	mc := config.ModelConfig{Cmd: "a", Proxy: "http://127.0.0.1:1"}
 	s := capServer(t, "m", mc)
 
-	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
-		ProcessName: "m",
-		NewState:    string(process.StateReady),
-	})
+	detectAndDeliver(t, s, "m", mc)
 
 	assert.Zero(t, listModel(t, s).ContextLength)
 }
@@ -438,10 +426,7 @@ func TestAPI_RefreshCapabilitiesAnnouncesNewCapabilities(t *testing.T) {
 	})
 	defer cancel()
 
-	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
-		ProcessName: "m",
-		NewState:    string(process.StateReady),
-	})
+	detectAndDeliver(t, s, "m", mc)
 
 	select {
 	case e := <-changed:
@@ -469,9 +454,7 @@ func TestAPI_RefreshCapabilitiesSilentWhenNothingChanged(t *testing.T) {
 		default:
 		}
 	})
-	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
-		ProcessName: "m", NewState: string(process.StateReady),
-	})
+	detectAndDeliver(t, s, "m", mc)
 	select {
 	case <-first:
 	case <-time.After(5 * time.Second):
@@ -490,9 +473,7 @@ func TestAPI_RefreshCapabilitiesSilentWhenNothingChanged(t *testing.T) {
 	})
 	defer cancelAgain()
 
-	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
-		ProcessName: "m", NewState: string(process.StateReady),
-	})
+	detectAndDeliver(t, s, "m", mc)
 
 	select {
 	case <-again:
@@ -520,13 +501,57 @@ func TestAPI_RefreshCapabilitiesSilentOnUnsupportedUpstream(t *testing.T) {
 	})
 	defer cancel()
 
-	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
-		ProcessName: "m", NewState: string(process.StateReady),
-	})
+	detectAndDeliver(t, s, "m", mc)
 
 	select {
 	case <-fired:
 		t.Fatal("an upstream with nothing to report should not announce a change")
 	case <-time.After(500 * time.Millisecond):
 	}
+}
+
+// recordUpstream returns meta.llamaswap.upstream for a /v1/models record, or
+// "" when the record has none.
+func recordUpstream(t *testing.T, rec modelRecord) string {
+	t.Helper()
+	ls, ok := rec.Meta["llamaswap"].(map[string]any)
+	require.True(t, ok, "%s has no meta.llamaswap", rec.ID)
+	upstream, _ := ls["upstream"].(string)
+	return upstream
+}
+
+func TestAPI_ListModelsReportsDetectedUpstream(t *testing.T) {
+	upstream := newCapUpstream(t)
+	mc := config.ModelConfig{
+		Cmd:     "llama-server -m vision.gguf",
+		Proxy:   upstream.URL,
+		Aliases: []string{"m-alias"},
+	}
+	s := capServer(t, "m", mc)
+	s.cfg.IncludeAliasesInList = true
+
+	for _, rec := range listModels(t, s) {
+		assert.Empty(t, recordUpstream(t, rec), "%s before detection", rec.ID)
+	}
+
+	detectAndDeliver(t, s, "m", mc)
+	requireCached(t, s, "m", mc)
+
+	records := listModels(t, s)
+	require.Len(t, records, 2)
+	for _, rec := range records {
+		assert.Equal(t, "llama-server", recordUpstream(t, rec), "%s after detection", rec.ID)
+	}
+}
+
+func TestAPI_ListModelsUpstreamHiddenForDisableAuto(t *testing.T) {
+	mc := config.ModelConfig{
+		Cmd:          "llama-server -m a.gguf",
+		Proxy:        "http://localhost:9001",
+		Capabilities: config.ModelCapConfig{DisableAuto: true},
+	}
+	s := capServer(t, "m", mc)
+	seedCapabilities(t, s, "m", mc, config.ModelCapConfig{Context: 8192})
+
+	assert.Empty(t, recordUpstream(t, listModel(t, s)))
 }

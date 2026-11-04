@@ -7,8 +7,8 @@ package store
 import "context"
 
 // Store is the root of data access. It groups one repository per kind of
-// persisted data, all backed by the same underlying database, and owns that
-// database's lifecycle.
+// persisted data and owns the lifecycle of the databases behind them.
+// Captures live in their own database, separate from activity and cache.
 type Store interface {
 	// Activity returns the repository for request activity log rows.
 	Activity() ActivityRepository
@@ -16,11 +16,14 @@ type Store interface {
 	// Cache returns the repository for cached key/blob records.
 	Cache() CacheRepository
 
-	// IsInMemory reports whether the backing database is not persisted to
+	// Captures returns the repository for request/response captures.
+	Captures() CaptureRepository
+
+	// IsInMemory reports whether the activity database is not persisted to
 	// disk. In-memory stores are bounded by pruning rather than by disk.
 	IsInMemory() bool
 
-	// Close releases the backing database. It is safe to call more than once.
+	// Close releases the backing databases. It is safe to call more than once.
 	Close() error
 }
 

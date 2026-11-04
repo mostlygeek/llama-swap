@@ -6,16 +6,19 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/server/usage"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
@@ -36,14 +39,33 @@ func (e ActivityLogEvent) Type() uint32 {
 
 // metricsMonitor parses upstream responses for token statistics, stores
 // activity in a store, and (when captures are enabled) stores
-// zstd+CBOR-compressed request/response captures in a sized in-memory cache.
+// zstd+CBOR-compressed request/response captures in the store's capture
+// repository, bounded to maxCaptureBytes in total.
+//
+// Captures are written on the request path, but pruning them back under
+// maxCaptureBytes runs on a background goroutine so a request never waits for
+// old captures to be deleted. The total can briefly exceed maxCaptureBytes
+// while a prune is pending.
 type metricsMonitor struct {
-	store          store.Store
-	maxMetrics     int
-	logger         *logmon.Monitor
-	enableCaptures bool
-	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
+	store           store.Store
+	maxMetrics      int
+	logger          *logmon.Monitor
+	enableCaptures  bool
+	maxCaptureBytes int64
+
+	// pruneCh wakes the prune goroutine. It holds one pending request, so
+	// many captures written while a prune runs cause one more prune, not
+	// one each. Nil when captures are disabled.
+	pruneCh   chan struct{}
+	pruneStop context.CancelFunc
+	pruneDone chan struct{}
+	closeOnce sync.Once
 }
+
+// capturePruneTimeout bounds one background prune. A prune after
+// captureBuffer is lowered can delete a lot; one that times out is resumed
+// by the next capture.
+const capturePruneTimeout = 5 * time.Minute
 
 func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int, st store.Store) *metricsMonitor {
 	if maxMetrics <= 0 {
@@ -56,9 +78,51 @@ func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB i
 		enableCaptures: captureBufferMB > 0,
 	}
 	if captureBufferMB > 0 {
-		mm.captureCache = cache.New(captureBufferMB * 1024 * 1024)
+		mm.maxCaptureBytes = int64(captureBufferMB) * 1024 * 1024
+		mm.startCapturePruner()
+		// The store outlives a config reload, so apply a lowered
+		// captureBuffer now rather than on the next capture.
+		mm.requestCapturePrune()
 	}
 	return mm
+}
+
+// startCapturePruner starts the goroutine that prunes captures. Close stops
+// it.
+func (mp *metricsMonitor) startCapturePruner() {
+	ctx, cancel := context.WithCancel(context.Background())
+	mp.pruneCh = make(chan struct{}, 1)
+	mp.pruneStop = cancel
+	mp.pruneDone = make(chan struct{})
+	go func() {
+		defer close(mp.pruneDone)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-mp.pruneCh:
+				mp.pruneCaptures(ctx)
+			}
+		}
+	}()
+}
+
+// requestCapturePrune asks the prune goroutine to bring captures back under
+// maxCaptureBytes. It never blocks: if a request is already pending, this one
+// is folded into it.
+func (mp *metricsMonitor) requestCapturePrune() {
+	select {
+	case mp.pruneCh <- struct{}{}:
+	default:
+	}
+}
+
+func (mp *metricsMonitor) pruneCaptures(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, capturePruneTimeout)
+	defer cancel()
+	if err := mp.store.Captures().Prune(ctx, mp.maxCaptureBytes); err != nil && !errors.Is(err, context.Canceled) {
+		mp.warnf("failed to prune captures: %v", err)
+	}
 }
 
 // queueMetrics persists a metric and returns the store-assigned row. It
@@ -87,16 +151,41 @@ func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry) {
 	event.Emit(ActivityLogEvent{Metrics: metric})
 }
 
+// overlayCaptureState sets HasCapture on entries whose capture is still in
+// the capture repository. Stored captures are hidden while captures are
+// disabled.
 func (mp *metricsMonitor) overlayCaptureState(entries []ActivityLogEntry) {
-	if mp.captureCache == nil {
+	var found map[string]bool
+	if mp.enableCaptures {
+		ids := make([]string, 0, len(entries))
 		for i := range entries {
-			entries[i].HasCapture = false
+			if entries[i].CaptureID != "" {
+				ids = append(ids, entries[i].CaptureID)
+			}
 		}
-		return
+		if len(ids) > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			var err error
+			if found, err = mp.store.Captures().Has(ctx, ids); err != nil {
+				mp.warnf("failed to look up captures: %v", err)
+			}
+		}
 	}
 	for i := range entries {
-		entries[i].HasCapture = mp.captureCache.Has(entries[i].ID)
+		entries[i].HasCapture = entries[i].CaptureID != "" && found[entries[i].CaptureID]
 	}
+}
+
+// newCaptureID returns a capture ID for an activity row recorded at t that
+// will get a capture, or "" when captures are disabled. The ID is recorded on
+// the row before the capture is written; if writing fails or the capture is
+// pruned later, the row simply has no capture.
+func (mp *metricsMonitor) newCaptureID(t time.Time) string {
+	if !mp.enableCaptures {
+		return ""
+	}
+	return store.NewCaptureID(t)
 }
 
 func (mp *metricsMonitor) warnf(format string, args ...any) {
@@ -111,7 +200,16 @@ func (mp *metricsMonitor) debugf(format string, args ...any) {
 	}
 }
 
+// Close stops the capture prune goroutine, cancelling a prune in progress,
+// and waits for it to exit so the store can be closed after it. It is safe to
+// call more than once.
 func (mp *metricsMonitor) Close() error {
+	mp.closeOnce.Do(func() {
+		if mp.pruneStop != nil {
+			mp.pruneStop()
+			<-mp.pruneDone
+		}
+	})
 	return nil
 }
 
@@ -139,17 +237,32 @@ func activitySource(r *http.Request) string {
 // controlling which parts are retained. Failed (non-200) requests capture the
 // request only and set ErrorMsg to a description of the failure, so the error
 // can be inspected without storing unreadable raw response bytes. reqBody and
-// reqHeaders are the request data buffered before dispatch.
-func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
+// reqHeaders are the request data buffered before dispatch. task is the kind
+// of inference, from the metered route table.
+// newEntry starts the activity row for a finished request: what was asked,
+// who asked, where it was routed, and the request's metadata. It also returns
+// the upstream the router detected.
+func (mp *metricsMonitor) newEntry(modelID string, task hint.Task, r *http.Request, recorder *responseBodyCopier) (ActivityLogEntry, hint.Upstream) {
 	tm := ActivityLogEntry{
 		Timestamp:       time.Now(),
 		Model:           modelID,
+		Task:            string(task),
 		ReqPath:         r.URL.Path,
 		RespContentType: recorder.Header().Get("Content-Type"),
 		RespStatusCode:  recorder.Status(),
 		DurationMs:      int(time.Since(recorder.StartTime()).Milliseconds()),
+		Tokens:          TokenMetrics{ReasoningTokens: -1},
 	}
 	tm.Src = activitySource(r)
+
+	// The router or peer proxy fills the hint while dispatching; it says
+	// where the request went and which extractor understands the response.
+	upstream := hint.Unknown
+	if h := hint.From(r.Context()); h != nil {
+		tm.Route = string(h.Route)
+		tm.PeerID = h.PeerID
+		upstream = h.Upstream
+	}
 
 	if ctxData, ok := swaputil.ReadContext(r.Context()); ok && len(ctxData.Metadata) > 0 {
 		tm.Metadata = make(map[string]string, len(ctxData.Metadata))
@@ -163,6 +276,24 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		}
 		tm.Metadata["selector"] = selectorID
 	}
+	return tm, upstream
+}
+
+// recordRealtime files one row for a finished /v1/realtime websocket. Its
+// duration is the whole session, and its tokens and metadata are the
+// session's tallies. No capture is kept: the traffic is mostly audio.
+func (mp *metricsMonitor) recordRealtime(modelID string, task hint.Task, r *http.Request, recorder *responseBodyCopier) {
+	tm, _ := mp.newEntry(modelID, task, r, recorder)
+	recorder.realtime.fill(&tm)
+	stored, ok := mp.queueMetrics(tm)
+	if !ok {
+		return
+	}
+	mp.emitMetric(stored)
+}
+
+func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
+	tm, upstream := mp.newEntry(modelID, task, r, recorder)
 
 	queueAndEmit := func() {
 		stored, ok := mp.queueMetrics(tm)
@@ -189,6 +320,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), r.URL.Path)
 		decoded, decErr := mp.decodeResponseBody(recorder, r.URL.Path)
 		tm.ErrorMsg = failedErrorMessage(recorder.Status(), decoded, decErr)
+		tm.CaptureID = mp.newCaptureID(tm.Timestamp)
 		stored, ok := mp.queueMetrics(tm)
 		if !ok {
 			return
@@ -196,7 +328,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		tm = stored
 		// Capture the request only; the failure is surfaced via ErrorMsg
 		// rather than storing the (possibly undisplayable) response body.
-		tm.HasCapture = mp.storeCapture(tm.ID, r, recorder, cf&^captureRespBody, reqBody, reqHeaders, nil)
+		tm.HasCapture = mp.storeCapture(tm, r, recorder, cf&^captureRespBody, reqBody, reqHeaders, nil)
 		mp.emitMetric(tm)
 		return
 	}
@@ -219,57 +351,34 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		body = decoded
 	}
 
-	if strings.Contains(recorder.Header().Get("Content-Type"), "text/event-stream") {
-		if parsed, err := processStreamingResponse(modelID, recorder.StartTime(), body); err != nil {
-			mp.logger.Warnf("error processing streaming response: %v, path=%s, recording minimal metrics", err, r.URL.Path)
-		} else {
-			tm.Tokens = parsed.Tokens
-			tm.DurationMs = parsed.DurationMs
-		}
-	} else if gjson.ValidBytes(body) {
-		parsed := gjson.ParseBytes(body)
-		usage := parsed.Get("usage")
-		timings := parsed.Get("timings")
-		responseMetrics := parsed.Get("metrics")
-
-		// /infill responses are arrays; timings live in the last element (#463).
-		if strings.HasPrefix(r.URL.Path, "/infill") {
-			if arr := parsed.Array(); len(arr) > 0 {
-				timings = arr[len(arr)-1].Get("timings")
-			}
-		}
-
-		if usage.Exists() || timings.Exists() || responseMetrics.Exists() {
-			if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings, responseMetrics); err != nil {
-				mp.logger.Warnf("error parsing metrics: %v, path=%s, recording minimal metrics", err, r.URL.Path)
-			} else {
-				tm.Tokens = parsedMetrics.Tokens
-				tm.DurationMs = parsedMetrics.DurationMs
-			}
-		}
-	} else {
-		mp.logger.Warnf("metrics: invalid JSON in response body path=%s, recording minimal metrics", r.URL.Path)
+	if u, err := usage.Extract(upstream, r.URL.Path, recorder.Header().Get("Content-Type"), body, recorder.StartTime()); err != nil {
+		mp.logger.Warnf("metrics: %v, path=%s, recording minimal metrics", err, r.URL.Path)
+	} else if u.Found {
+		tm.Tokens = u.Tokens
+		tm.DurationMs = u.DurationMs
 	}
 
+	tm.CaptureID = mp.newCaptureID(tm.Timestamp)
 	stored, ok := mp.queueMetrics(tm)
 	if !ok {
 		return
 	}
 	tm = stored
-	tm.HasCapture = mp.storeCapture(tm.ID, r, recorder, cf, reqBody, reqHeaders, body)
+	tm.HasCapture = mp.storeCapture(tm, r, recorder, cf, reqBody, reqHeaders, body)
 	mp.emitMetric(tm)
 }
 
-// storeCapture assembles a ReqRespCapture for id, honoring the captureFields
-// mask, and stores it when captures are enabled. body is the response body to
+// storeCapture assembles a ReqRespCapture for the stored activity row tm,
+// honoring the captureFields mask, and stores it under tm.CaptureID when one
+// was assigned. body is the response body to
 // capture (already decompressed by the caller); pass nil to omit it. Returns
 // true if a capture was stored.
-func (mp *metricsMonitor) storeCapture(id int, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string, body []byte) bool {
-	if !mp.enableCaptures {
+func (mp *metricsMonitor) storeCapture(tm ActivityLogEntry, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string, body []byte) bool {
+	if !mp.enableCaptures || tm.CaptureID == "" {
 		return false
 	}
 	capture := ReqRespCapture{
-		ID:         id,
+		ID:         tm.ID,
 		ReqPath:    r.URL.Path,
 		ReqHeaders: reqHeaders,
 	}
@@ -284,7 +393,7 @@ func (mp *metricsMonitor) storeCapture(id int, r *http.Request, recorder *respon
 	if cf&captureRespBody != 0 {
 		capture.RespBody = body
 	}
-	return mp.addCapture(capture)
+	return mp.addCapture(tm.CaptureID, capture)
 }
 
 // decodeResponseBody returns the buffered response body, decompressing it when
@@ -351,218 +460,6 @@ func failedErrorMessage(status int, body []byte, decErr error) string {
 	return fmt.Sprintf("HTTP %d", status)
 }
 
-// usagePaths lists the JSON paths where a per-event usage object can live.
-var usagePaths = []string{"usage", "response.usage", "message.usage"}
-
-// extractUsageTokens reads input/output/cached token counts from a usage
-// gjson.Result, handling the field-name differences across endpoints.
-func extractUsageTokens(usage gjson.Result) (input, output, cached int64, ok bool) {
-	cached = -1
-	if !usage.Exists() {
-		return
-	}
-
-	if v := usage.Get("prompt_tokens"); v.Exists() {
-		input = v.Int()
-		ok = true
-	} else if v := usage.Get("input_tokens"); v.Exists() {
-		input = v.Int()
-		ok = true
-	}
-
-	if v := usage.Get("completion_tokens"); v.Exists() {
-		output = v.Int()
-		ok = true
-	} else if v := usage.Get("output_tokens"); v.Exists() {
-		output = v.Int()
-		ok = true
-	}
-
-	if v := usage.Get("cache_read_input_tokens"); v.Exists() {
-		cached = v.Int()
-		ok = true
-	} else if v := usage.Get("input_tokens_details.cached_tokens"); v.Exists() {
-		cached = v.Int()
-		ok = true
-	} else if v := usage.Get("prompt_tokens_details.cached_tokens"); v.Exists() {
-		cached = v.Int()
-		ok = true
-	}
-	return
-}
-
-func processStreamingResponse(modelID string, start time.Time, body []byte) (ActivityLogEntry, error) {
-	var (
-		inputTokens, outputTokens int64
-		cachedTokens              int64 = -1
-		hasAny                    bool
-		usage                     gjson.Result
-		timings                   gjson.Result
-		responseMetrics           gjson.Result
-	)
-
-	prefix := []byte("data:")
-	for offset := 0; offset < len(body); {
-		nl := bytes.IndexByte(body[offset:], '\n')
-		var line []byte
-		if nl == -1 {
-			line = body[offset:]
-			offset = len(body)
-		} else {
-			line = body[offset : offset+nl]
-			offset += nl + 1
-		}
-
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 || !bytes.HasPrefix(line, prefix) {
-			continue
-		}
-		data := bytes.TrimSpace(line[len(prefix):])
-		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
-			continue
-		}
-		if !gjson.ValidBytes(data) {
-			continue
-		}
-		parsed := gjson.ParseBytes(data)
-
-		for _, path := range usagePaths {
-			u := parsed.Get(path)
-			if !u.Exists() {
-				continue
-			}
-			i, o, c, ok := extractUsageTokens(u)
-			if !ok {
-				continue
-			}
-			hasAny = true
-			if i > 0 {
-				inputTokens = i
-			}
-			if o > 0 {
-				outputTokens = o
-			}
-			if c >= 0 {
-				cachedTokens = c
-			}
-			// Remember the last usage block so buildMetrics can read the
-			// backend rates it embeds there.
-			usage = u
-		}
-		if t := parsed.Get("timings"); t.Exists() {
-			timings = t
-			hasAny = true
-		}
-		if m := parsed.Get("metrics"); m.Exists() {
-			responseMetrics = m
-			hasAny = true
-		}
-	}
-
-	if !hasAny {
-		return ActivityLogEntry{}, fmt.Errorf("no valid JSON data found in stream")
-	}
-
-	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, usage, timings, responseMetrics), nil
-}
-
-func parseMetrics(modelID string, start time.Time, usage, timings, responseMetrics gjson.Result) (ActivityLogEntry, error) {
-	input, output, cached, _ := extractUsageTokens(usage)
-	return buildMetrics(modelID, start, input, output, cached, usage, timings, responseMetrics), nil
-}
-
-// buildMetrics composes an ActivityLogEntry from accumulated token counts and
-// optional llama-server timings (which override input/output and provide rates)
-// or vLLM response metrics (rates and speculative decoding counters). TabbyAPI
-// and oMLX embed rates in the usage block, which supplies base rates
-// when timings and metrics are absent.
-func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, usage, timings, responseMetrics gjson.Result) ActivityLogEntry {
-	wallDurationMs := int(time.Since(start).Milliseconds())
-	durationMs := wallDurationMs
-	tokensPerSecond := -1.0
-	promptPerSecond := -1.0
-	draftTokens := -1
-	draftAccTokens := -1
-
-	// TabbyAPI reports prompt/completion rates and total time inside its usage
-	// block. These are base values that llama-server timings and vLLM metrics
-	// override when present.
-	if usage.Exists() {
-		if v := usage.Get("prompt_tokens_per_sec"); v.Exists() && v.Type != gjson.Null {
-			promptPerSecond = v.Float()
-		} else if v := usage.Get("prompt_tokens_per_second"); v.Type == gjson.Number {
-			// oMLX reports prompt throughput using the long-form suffix.
-			promptPerSecond = v.Float()
-		}
-		if v := usage.Get("completion_tokens_per_sec"); v.Exists() && v.Type != gjson.Null {
-			tokensPerSecond = v.Float()
-		} else if v := usage.Get("generation_tokens_per_second"); v.Type == gjson.Number {
-			// oMLX calls completion throughput generation throughput.
-			tokensPerSecond = v.Float()
-		}
-		if v := usage.Get("total_time"); v.Exists() {
-			if totalTimeMs := int(v.Float() * 1000); totalTimeMs > durationMs {
-				durationMs = totalTimeMs
-			}
-		}
-	}
-
-	if timings.Exists() {
-		inputTokens = timings.Get("prompt_n").Int()
-		outputTokens = timings.Get("predicted_n").Int()
-		promptPerSecond = timings.Get("prompt_per_second").Float()
-		tokensPerSecond = timings.Get("predicted_per_second").Float()
-		timingsDurationMs := int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float())
-		if timingsDurationMs > durationMs {
-			durationMs = timingsDurationMs
-		}
-		if cachedValue := timings.Get("cache_n"); cachedValue.Exists() {
-			cachedTokens = cachedValue.Int()
-		}
-		if timings.Get("draft_n").Exists() && timings.Get("draft_n_accepted").Exists() {
-			draftTokens = int(timings.Get("draft_n").Int())
-			draftAccTokens = int(timings.Get("draft_n_accepted").Int())
-		}
-	}
-	// vLLM reports speculative decoding counts under metrics.speculative_decoding
-	// when started with --per-request-spec-decode-metrics (#1032). Both counters
-	// are required so the acceptance rate is never derived from a half-filled
-	// object.
-	if spec := responseMetrics.Get("speculative_decoding"); spec.Exists() {
-		drafted := spec.Get("num_draft_tokens")
-		accepted := spec.Get("num_accepted_draft_tokens")
-		if drafted.Exists() && accepted.Exists() {
-			draftTokens = int(drafted.Int())
-			draftAccTokens = int(accepted.Int())
-		}
-	}
-	if timeToFirstToken := responseMetrics.Get("time_to_first_token_ms"); timeToFirstToken.Exists() && timeToFirstToken.Float() > 0 {
-		cachedForRate := cachedTokens
-		if cachedForRate < 0 {
-			cachedForRate = 0
-		}
-		promptPerSecond = float64(inputTokens-cachedForRate) / (timeToFirstToken.Float() / 1000)
-	}
-	if meanInterTokenLatency := responseMetrics.Get("mean_itl_ms"); meanInterTokenLatency.Exists() && meanInterTokenLatency.Float() > 0 {
-		tokensPerSecond = 1000 / meanInterTokenLatency.Float()
-	}
-
-	return ActivityLogEntry{
-		Timestamp: time.Now(),
-		Model:     modelID,
-		Tokens: TokenMetrics{
-			CachedTokens:    int(cachedTokens),
-			DraftTokens:     draftTokens,
-			DraftAccTokens:  draftAccTokens,
-			InputTokens:     int(inputTokens),
-			OutputTokens:    int(outputTokens),
-			PromptPerSecond: promptPerSecond,
-			TokensPerSecond: tokensPerSecond,
-		},
-		DurationMs: durationMs,
-	}
-}
-
 // decompressBody decompresses the body based on the Content-Encoding header.
 func decompressBody(body []byte, encoding string) ([]byte, error) {
 	switch strings.ToLower(strings.TrimSpace(encoding)) {
@@ -609,6 +506,10 @@ type responseBodyCopier struct {
 	status      int
 	wroteHeader bool
 	start       time.Time
+
+	// realtime, when set, taps the connection Hijack hands out so a
+	// /v1/realtime websocket can be tallied. See realtime.go.
+	realtime *realtimeSession
 }
 
 func newBodyCopier(w http.ResponseWriter) *responseBodyCopier {
@@ -675,7 +576,19 @@ func (w *responseBodyCopier) Flush() {
 // over the connection for websocket upgrades.
 func (w *responseBodyCopier) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
+		conn, brw, err := hj.Hijack()
+		if err != nil {
+			return conn, brw, err
+		}
+		// ReverseProxy hijacks only once the upstream has agreed to switch
+		// protocols, and writes that 101 straight to the connection rather
+		// than through WriteHeader, so note it here.
+		w.status = http.StatusSwitchingProtocols
+		w.wroteHeader = true
+		if w.realtime != nil {
+			conn = &realtimeConn{Conn: conn, session: w.realtime}
+		}
+		return conn, brw, nil
 	}
 	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
 }

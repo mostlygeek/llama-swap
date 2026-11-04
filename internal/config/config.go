@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -144,8 +145,30 @@ type HookOnStartup struct {
 	Profile string   `yaml:"profile"`
 }
 
+// Store configures where llama-swap persists data.
 type Store struct {
+	// Path is the SQLite database file for activity logs.
 	Path string `yaml:"path"`
+	// PersistCaptures keeps request/response captures in a second SQLite
+	// file next to Path; see CapturesPath. When false, captures are kept in
+	// memory. Their total size is bounded by captureBuffer either way.
+	PersistCaptures bool `yaml:"persistCaptures"`
+}
+
+// CapturesPath returns the captures database file for this store, or "" when
+// captures are not persisted. It is derived from Path so the two files always
+// travel together: /path/to/metrics.db stores captures in
+// /path/to/metrics_captures.db.
+func (s *Store) CapturesPath() string {
+	if s == nil || !s.PersistCaptures {
+		return ""
+	}
+	path := strings.TrimSpace(s.Path)
+	if path == "" {
+		return ""
+	}
+	ext := filepath.Ext(path)
+	return strings.TrimSuffix(path, ext) + "_captures" + ext
 }
 
 type UIConfig struct {
