@@ -220,6 +220,7 @@ type Config struct {
 	Store              *Store            `yaml:"store"`
 	UI                 UIConfig          `yaml:"ui"`
 	Performance        PerformanceConfig `yaml:"performance"`
+	MetricsPass        MetricsPassConfig `yaml:"metricsPass"`
 	HelpAgent          HelpAgentConfig   `yaml:"helpagent"`
 	GlobalTTL          int               `yaml:"globalTTL"`
 	UnloadTimeout      int               `yaml:"unloadTimeout"`

@@ -270,6 +270,10 @@ groups:
 		Performance: PerformanceConfig{
 			Every: 5 * time.Second,
 		},
+		MetricsPass: MetricsPassConfig{
+			Every:      15 * time.Second,
+			Visibility: MetricsPassVisibilityLoaded,
+		},
 		Profiles: map[string]ProfileConfig{
 			"test": {
 				Description: "Test profile",

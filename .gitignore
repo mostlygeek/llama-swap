@@ -17,5 +17,9 @@ internal/mcptools/sourcecode/_src/
 evals/docs-agent/runs/
 evals/config.yaml
 
+# Anchore syft SBOM
+sbom.cdx.json
+
 # Playwright CLI artifacts (screenshots, snapshots, console logs)
 .playwright-cli/
+

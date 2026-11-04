@@ -1,5 +1,6 @@
 # Changelog
 
+
 ## v269 (Oct 31, 2026)
 
 Happy Halloween!
@@ -29,6 +30,7 @@ Details below:
 - [PR #1292](https://github.com/mostlygeek/llama-swap/pull/1292) Extract usage parsing into pluggable upstream-specific handlers: splits usage extraction into per-upstream extractors (llama-server, vLLM, Anthropic, OpenAI, TabbyAPI, oMLX and an "auto" fallback that reads every known format) fed by the new `internal/hint` package which carries upstream and task information through the request context, and records task type, route, peer and reasoning tokens in the activity log, so token counts and performance metrics are accurate per upstream instead of assuming one format by [@mostlygeek](https://github.com/mostlygeek)
 - [PR #1293](https://github.com/mostlygeek/llama-swap/pull/1293) ui: fix the Model page Logs panel scrolling the whole page: gives the page its own scroll container and a minimum height for the Activity/Logs tabs, so a long log scrolls inside the panel instead of pushing the whole page by [@mostlygeek](https://github.com/mostlygeek)
 - [PR #1294](https://github.com/mostlygeek/llama-swap/pull/1294) Store request/response captures in separate SQLite database: moves captures out of the in-memory `internal/cache` into a capture repository backed by its own SQLite database (new `store.persistCaptures`, `captureBuffer` unchanged), so captures can persist across restarts without fragmenting the metrics db, are pruned asynchronously by compressed size and are addressed by a `yymmddhh-xxxx` capture id that activity rows link to; `internal/cache` is removed (#1115) by [@mostlygeek](https://github.com/mostlygeek)
+
 
 ## v268 (Oct 28, 2026)
 
