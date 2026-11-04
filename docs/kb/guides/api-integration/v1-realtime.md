@@ -2,9 +2,9 @@
 title: Realtime voice chat with /v1/realtime
 summary: Proxy OpenAI Realtime API websockets to llama-server for speech to speech models like LFM3 Audio, and talk to them from the Playground.
 category: guides
-tags: [realtime, websocket, voice, speech, audio, lfm, liquid, llama-server, playground, microphone]
+tags: [realtime, websocket, voice, speech, audio, lfm, liquid, llama-server, playground, microphone, https, secure context]
 config_keys: [models.*.cmd, models.*.ttl, models.*.compat.ignoreWebsockets]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Realtime voice chat with /v1/realtime
@@ -61,6 +61,26 @@ Any Realtime API client works too. What llama-server expects:
 - Start the instructions with `Respond with interleaved text and audio.`,
   the model's prompt for spoken chat. The Playground's default does.
 
+## Microphone over plain http
+
+The Playground connects with `ws://` or `wss://` to match the page, but the
+browser only gives it the microphone in a secure context: an https page, or
+one opened as `localhost`, `127.0.0.1` or `*.localhost`. Over
+`http://<host>:8080` the mic is missing. Ways around it:
+
+- **SSH tunnel:** `ssh -L 8080:localhost:8080 <host>`, then open
+  `http://localhost:8080`. Nothing else to set up.
+- **Chrome or Edge:** in `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
+  add `http://<host>:8080`, enable it and relaunch.
+- **Firefox:** in `about:config` set `media.devices.insecure.enabled` and
+  `media.getusermedia.insecure.enabled` to `true`.
+- **https:** give llama-swap a certificate the browser trusts, from
+  [mkcert](https://github.com/FiloSottile/mkcert), `tailscale cert`, or a
+  reverse proxy such as Caddy in front of it. Safari only works this way.
+
+The browser flags are per browser profile and lower its guard for that
+origin, so keep them to hosts you trust.
+
 ## Swapping and ttl
 
 An open session counts as an in-flight request for its whole life. The model
@@ -77,8 +97,8 @@ Each session is one Activity row, written when it closes. See
 ## What goes wrong
 
 - **"microphone unavailable" in the Playground.** Browsers only allow the
-  microphone on https or `localhost`. Serve llama-swap over https, or reach
-  it through an SSH tunnel to `localhost`.
+  microphone on https or `localhost`; the websocket itself works over plain
+  http. See "Microphone over plain http" below.
 - **The first reply describes or repeats what you said.** The instructions
   lack `Respond with interleaved text and audio.`, so the model treats the
   audio as something to describe.
