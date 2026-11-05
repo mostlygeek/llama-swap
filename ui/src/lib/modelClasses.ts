@@ -5,9 +5,16 @@ import type { Model } from "./types";
  * capability flags and modality lists - never from the model ID, so IDs stay
  * free of grouping prefixes.
  */
-export type ModelClass = "chat" | "image" | "video" | "audio" | "embed" | "rerank";
+export type ModelClass =
+  | "chat"
+  | "image"
+  | "video"
+  | "audio"
+  | "embed"
+  | "rerank"
+  | "decisions";
 
-/** Section order for the Models list: chat first as the most-used class, then the generation modalities, then the retrieval helpers. */
+/** Section order for the Models list: chat first as the most-used class, then the generation modalities, then the helpers that generate no text. */
 export const MODEL_CLASS_ORDER: readonly ModelClass[] = [
   "chat",
   "image",
@@ -15,6 +22,7 @@ export const MODEL_CLASS_ORDER: readonly ModelClass[] = [
   "audio",
   "embed",
   "rerank",
+  "decisions",
 ];
 
 export const modelClassLabels: Record<ModelClass, string> = {
@@ -24,6 +32,7 @@ export const modelClassLabels: Record<ModelClass, string> = {
   audio: "Audio",
   embed: "Embeddings",
   rerank: "Rerank",
+  decisions: "Decisions",
 };
 
 type Classifiable = Pick<Model, "capabilities" | "modalities">;
@@ -36,12 +45,16 @@ type Classifiable = Pick<Model, "capabilities" | "modalities">;
  *   producing audio - only audio OUTPUT makes a model Audio, so LFM3-Omni-style
  *   omni chat models stay in Chat;
  * - an embedding model can surface as text->text from capability discovery, so
- *   the explicit embeddings flag must win when set.
+ *   the explicit embeddings flag must win when set;
+ * - a decision model answers /v1/systemone and produces neither text nor
+ *   media, but it may still accept image input and so carry the vision flag,
+ *   which must not make it look like a chat model.
  */
 export function classifyModel(model: Classifiable): ModelClass {
   // Record cast, matching matchesCapabilities: the embeddings key arrives
   // from /v1/models at runtime but is not declared on ModelCapabilities here.
   const caps = (model.capabilities ?? {}) as Record<string, boolean>;
+  if (model.modalities?.out?.includes("decisions")) return "decisions";
   if (caps.reranker) return "rerank";
   // A config can declare out: [image] with no input modalities, which derives
   // no image_generation flag, so the output modality is checked too.

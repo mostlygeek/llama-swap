@@ -15,7 +15,8 @@ export interface ModelCapabilities {
 }
 
 // Input/output modalities a model reports through the /v1/models
-// architecture block. Values are "text", "audio", "image" or "video".
+// architecture block. Values are "text", "audio", "image" or "video"; an
+// output can also be "decisions" for a model that only answers /v1/systemone.
 export interface ModelModalities {
   in: string[];
   out: string[];
