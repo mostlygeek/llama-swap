@@ -42,6 +42,17 @@ var (
 
 const shutdownTimeout = 30 * time.Second
 
+func listenURL(scheme, addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return scheme + "://" + addr
+	}
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	return scheme + "://" + net.JoinHostPort(host, port)
+}
+
 // docsConfigSchema stays at the repository root because it is the public
 // schema URL and is also used by deployment tooling.
 //
@@ -471,10 +482,10 @@ func main() {
 	go func() {
 		var startErr error
 		if useTLS {
-			proxyLog.Infof("llama-swap listening with TLS on https://%s", listenAddr)
+			proxyLog.Infof("llama-swap listening with TLS on %s", listenURL("https", listenAddr))
 			startErr = httpServer.ListenAndServeTLS(*flagCertFile, *flagKeyFile)
 		} else {
-			proxyLog.Infof("llama-swap listening on http://%s", listenAddr)
+			proxyLog.Infof("llama-swap listening on %s", listenURL("http", listenAddr))
 			startErr = httpServer.ListenAndServe()
 		}
 		if startErr != nil && !errors.Is(startErr, http.ErrServerClosed) {
