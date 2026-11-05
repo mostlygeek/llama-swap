@@ -12,6 +12,25 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
+func TestListenURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		scheme string
+		addr   string
+		want   string
+	}{
+		{name: "default HTTP wildcard", scheme: "http", addr: ":8080", want: "http://0.0.0.0:8080"},
+		{name: "default HTTPS wildcard", scheme: "https", addr: ":8443", want: "https://0.0.0.0:8443"},
+		{name: "explicit IPv4", scheme: "http", addr: "127.0.0.1:8080", want: "http://127.0.0.1:8080"},
+		{name: "explicit IPv6", scheme: "https", addr: "[::1]:8443", want: "https://[::1]:8443"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, listenURL(tt.scheme, tt.addr))
+		})
+	}
+}
+
 func TestConfigureTailcatListener_RequiresModels(t *testing.T) {
 	cfg := config.Config{}
 	err := configureTailcatListener(&cfg, "/path/to/server.private.json")
