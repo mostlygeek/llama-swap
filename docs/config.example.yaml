@@ -110,7 +110,8 @@ helpagent:
 
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
-# - the ${PORT} macro can be used in model.cmd and model.proxy settings
+# - the ${PORT} macro can be used in model.cmd, and elsewhere in that model once
+#   model.cmd uses it
 # - it is automatically incremented for every model that uses it
 startPort: 10001
 
@@ -120,6 +121,9 @@ startPort: 10001
 # - when true, a stream of loading messages will be sent to the client in the
 #   reasoning field so chat UIs can show that loading is in progress.
 # - see #366 for more details
+# - this is for chat clients. To show a real progress bar on the Models page,
+#   have your server report progress from its checkEndpoint: see the "Loading
+#   progress" section of guides/model-runtime/writing-cmd.
 sendLoadingState: true
 
 # includeAliasesInList: present aliases within the /v1/models OpenAI API listing

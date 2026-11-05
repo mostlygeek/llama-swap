@@ -1,0 +1,99 @@
+# Grounded in docs/kb/guides/tools/*.md, the programs shipped in cmd/.
+- id: tools-fake-model
+  question: How can I try out model swapping and TTL without a GPU or a real model?
+  tags: [fake-model]
+  expect_regex: ["fake-model"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Use `fake-model`, a small server in the repository that answers
+    /v1/chat/completions with lorem ipsum at a fixed speed. Use it as a model's
+    cmd, with `-listen localhost:${PORT}`.
+  rubric:
+    - Names fake-model
+    - Shows it used as a model's cmd
+
+- id: tools-wol-proxy
+  question: My GPU box suspends when idle. How can a request wake it and still get answered?
+  tags: [wol-proxy]
+  expect_regex: ["wol-proxy"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Run `wol-proxy` on an always-on machine on the same LAN, with `-mac` and
+    `-upstream`. It sends a Wake-on-LAN packet and holds the request until
+    llama-swap is up.
+  rubric:
+    - Names wol-proxy
+    - Says it runs on a separate always-on machine
+
+- id: tools-vllm-sleep
+  question: Reloading vLLM on every swap is slow. How do I make swapping it faster?
+  tags: [vllm-wrapper]
+  expect_regex: ["vllm-wrapper", "sleep"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Use `vllm-wrapper serve` as cmd and `vllm-wrapper sleep` as cmdStop, with
+    vLLM started with `--enable-sleep-mode`. Waking is much faster than a cold
+    start.
+  rubric:
+    - Uses vllm-wrapper for both cmd and cmdStop
+    - Mentions --enable-sleep-mode
+
+- id: tools-kubeswap-model
+  question: How do I run a model's server as a Kubernetes workload from llama-swap?
+  tags: [kubeswap]
+  expect_regex: ["kubeswap serve", "kubeswap delete"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Use the kubeswap wrapper: `cmd` runs `kubeswap serve`, `cmdStop` runs
+    `kubeswap delete`, and `proxy` points at `http://127.0.0.1:${PORT}`.
+  rubric:
+    - Shows kubeswap serve as cmd and kubeswap delete as cmdStop
+    - Sets proxy
+
+- id: tools-kubeswap-matrix-builder
+  question: With the kubeswap Helm chart, how do I allow one GPU model at a time without writing the matrix DSL by hand?
+  tags: [kubeswap, matrix]
+  expect_regex: ["config\\.matrix|matrix:", "gpu-budget"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `config.matrix` with `builder: gpu-budget` and `budget: 1`, in the
+    form `matrix:` under `config`. It requires `config.models`.
+  rubric:
+    - Shows config.matrix with the gpu-budget builder and budget 1
+    - Says it requires config.models
+
+- id: hard-wol-across-router
+  question: wol-proxy is on another subnet from the llama-swap machine and the server never wakes. Why?
+  tags: [wol-proxy, trap]
+  expect_any: ["broadcast", "same (network|lan|segment|subnet)"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    The Wake-on-LAN packet is a UDP broadcast and will not cross a router, so
+    wol-proxy must be on the same network segment.
+  rubric:
+    - Says the packet is a broadcast that does not cross a router
+    - Says wol-proxy must be on the same segment
+
+- id: hard-vllm-killed-on-unload
+  question: With vllm-wrapper, vLLM gets killed on unload and the next swap is a cold start. What is missing?
+  tags: [vllm-wrapper, trap]
+  expect_regex: ["--stop-pid", "\\$\\{PID\\}"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `--stop-pid ${PID}` in cmdStop. Without it `serve` keeps running, and after
+    unloadTimeout llama-swap kills the whole process group, including vLLM.
+  rubric:
+    - Gives --stop-pid ${PID} on vllm-wrapper sleep
+    - Explains the process group kill
+
+- id: hard-kubeswap-dra
+  question: My cluster exposes GPUs through Dynamic Resource Allocation and kubeswap pods with --gpu stay Pending forever. What do I use instead?
+  tags: [kubeswap, trap]
+  expect_regex: ["--resource-claim"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Create a ResourceClaim in the namespace and attach it with
+    `--resource-claim name=claim` in place of `--gpu`.
+  rubric:
+    - Gives --resource-claim
+    - Says the ResourceClaim must already exist

@@ -3,8 +3,8 @@ title: Automatic model unloading with ttl
 summary: How ttl, globalTTL, unloadTimeout and Docker cmdStop interact, plus how to unload on demand or pause inference.
 category: guides
 tags: [ttl, unload, vram, memory, idle, docker, container, cmd-stop, pause, resume, gaming]
-config_keys: [globalTTL, unloadTimeout, models.*.ttl, models.*.unloadTimeout, models.*.cmdStop]
-updated: 2026-10-27
+config_keys: [globalTTL, unloadTimeout, models.*.ttl, models.*.unloadTimeout, models.*.cmdStop, models.*.compat.ignoreWebsockets]
+updated: 2026-11-04
 ---
 
 # Automatic model unloading with ttl
@@ -39,6 +39,10 @@ So `globalTTL: 600` with no per-model `ttl` unloads every model after 10
 minutes idle. A model that should stay resident sets `ttl: 0` to opt out.
 
 The timer measures **inactivity**, not lifetime — it resets on every request.
+Websocket traffic is not a request here when `compat.ignoreWebsockets` is on,
+which it always is for ComfyUI, so a long render you watch over its websocket
+counts as idle and can be unloaded. Use a longer `ttl`, or `ttl: 0`; see
+`guides/upstreams/comfyui`.
 
 ## `unloadTimeout` is a different thing
 

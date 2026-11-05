@@ -1,15 +1,17 @@
-# Grounded in docs/kb/tutorials/tool-calling-setup.md, guides/mcp-endpoint.md,
-# guides/api-keys-and-auth.md, guides/filters-and-request-rewriting.md
+# Grounded in docs/kb/guides/model-runtime/writing-cmd.md,
+# guides/model-runtime/capabilities-and-model-listings.md and
+# guides/api-integration/{mcp-endpoint,api-keys-and-auth,filters-and-request-rewriting}.md
 - id: tools-jinja-flag
   question: My model answers in prose describing a tool call instead of actually calling the tool. What is missing?
   tags: [tools]
   expect_regex: ["--jinja"]
   expect_tools: [docs__search_docs]
   reference: |
-    llama-server needs `--jinja`. Without it llama.cpp ignores the tools array
-    entirely and answers in prose, with no error.
+    Recent llama-server builds enable `--jinja` by default, so this means the
+    build is older than that: add `--jinja` to cmd. Without it llama.cpp ignores
+    the tools array entirely and answers in prose, with no error.
   rubric:
-    - Identifies the missing --jinja flag
+    - Identifies the missing --jinja flag, on a build older than its default-on change
     - Explains that without it the tools array is ignored silently
 
 - id: tools-capability-flag
@@ -62,13 +64,16 @@
 - id: filters-strip-params
   question: How do I stop clients from overriding the temperature on one of my models?
   tags: [filters]
-  expect_regex: ["stripParams"]
+  # Either works: stripParams drops the client value, a forced setParams
+  # overwrites it.
+  expect_any: ["stripParams", "setParams"]
   expect_tools: [docs__search_docs]
   reference: |
     Use `filters.stripParams: "temperature"` on the model, which removes the
-    parameter from incoming requests. setParams can then force a value.
+    parameter from incoming requests, or a forced `filters.setParams`, which
+    overwrites whatever the client sent.
   rubric:
-    - Names filters.stripParams
+    - Names filters.stripParams or a forced filters.setParams
     - Shows a yaml snippet applying it to a model
 
 - id: peers-remote-model

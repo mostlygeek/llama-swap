@@ -15,3 +15,40 @@
   expect_regex: ["ignorePaths"]
   expect_tools_any: [docs__search_docs, docs__get_doc]
   require_tools: true
+
+- id: connectivity-body-too-large
+  question: Long audio uploads through llama-swap fail with HTTP 413. What do I change?
+  tags: [limits]
+  expect_regex: ["maxRequestBodyMB"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Raise `maxRequestBodyMB`, which defaults to 250.
+  rubric:
+    - Names maxRequestBodyMB
+    - Notes a reverse proxy can have its own smaller limit, or that memory use grows with it
+
+- id: connectivity-eof-after-stream
+  question: The request right after a streamed response fails with 502 proxy error EOF, and a retry works. How do I fix it?
+  tags: [proxy, troubleshooting]
+  expect_regex: ["disableKeepAlives"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `disableKeepAlives: true` on that model. The upstream closed a
+    connection it advertised as keep-alive, and the next request landed on it.
+  rubric:
+    - Names models.*.disableKeepAlives
+    - Explains the reused connection was already closed
+
+- id: connectivity-subpath-nginx
+  question: How do I serve llama-swap at https://host/tools/llama-swap/ behind nginx?
+  tags: [reverse-proxy]
+  expect_regex: ["proxy_pass"]
+  expect_any: ["strip", "trailing slash"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    llama-swap has no base-path setting, so strip the prefix at the proxy.
+    With nginx, `proxy_pass http://127.0.0.1:8080/;` strips it because of the
+    trailing slash.
+  rubric:
+    - Shows a proxy_pass with a trailing slash
+    - Says the prefix must be stripped before reaching llama-swap

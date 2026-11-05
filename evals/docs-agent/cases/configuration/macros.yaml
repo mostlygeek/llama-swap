@@ -1,4 +1,4 @@
-# Grounded in docs/kb/guides/macros.md
+# Grounded in docs/kb/guides/configuration/macros.md
 - id: macros-reserved-names
   question: Can I define a macro named PORT in my llama-swap config?
   tags: [macros]

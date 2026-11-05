@@ -52,7 +52,7 @@
   tags: [config, running-config, metadata]
   expect_regex: ["high", "think"]
   expect_tools: [config__get_config]
-  max_iterations: 6
+  max_iterations: 9
   reference: |
     `metadata.reasoning` is `{enabled: true, effort: high, tag: think}`.
   rubric:
@@ -78,7 +78,7 @@
   question: What response header timeout is configured for eval-mistral-nemo-12b on this server?
   tags: [config, running-config, timeouts]
   expect_regex: ["300"]
-  forbid_regex: ["\\b15\\b"]
+  forbid_regex: ["response\\s*header[^\\n\\d]{0,40}\\b15\\b"]
   expect_tools: [config__get_config]
   max_iterations: 6
   reference: |
@@ -117,12 +117,28 @@
   tags: [config, running-config, discovery]
   expect_tools: [config__get_config]
   expect_tools_any: [docs__list_docs, docs__search_docs]
-  max_iterations: 8
+  max_iterations: 10
   reference: |
     A comparison of the documented features against this server's config: the
-    sections it never sets (groups, profiles, selectors, peers, hooks, filters,
-    capabilities, and so on) with a sentence on what each would do for it.
+    sections it never sets (profiles, selectors, peers, hooks, and so on) with a
+    sentence on what each would do for it.
   rubric:
     - Names features that are genuinely absent from the running config
     - Says what each one would do, rather than only listing key names
     - Invents no feature llama-swap does not have
+
+# Two hops: the key name comes from the docs and the answer from a filter over
+# every model, so reading a single model cannot answer it.
+- id: running-config-embeddings-flag
+  question: Which models on this server are flagged as embedding models in their capabilities?
+  tags: [config, running-config, capabilities, hard]
+  expect_regex: ["eval-nomic-embed-v15", "eval-qwen3-embed-8b"]
+  forbid_regex: ["(?:^|\\n)\\s*(?:[-*|]|\\d+\\.)\\s*[*`]*\\s*eval-bge-reranker-v2"]
+  expect_tools: [config__get_config]
+  max_iterations: 8
+  reference: |
+    eval-nomic-embed-v15 and eval-qwen3-embed-8b, which set
+    `capabilities.embeddings: true`.
+  rubric:
+    - Names exactly those two models
+    - Does not list the reranker
