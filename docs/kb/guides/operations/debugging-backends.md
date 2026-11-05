@@ -4,10 +4,15 @@ summary: The failure chain from kubeswap status reasons to backend pod logs, and
 category: guides
 tags: [kubeswap, kubernetes, debugging, logs, pod, gpu, pending, crashloopbackoff, ready, troubleshooting]
 config_keys: [models.*.cmd, models.*.cmdStop, healthCheckTimeout, unloadTimeout]
-updated: 2026-09-12
+updated: 2026-11-04
 ---
 
 # Debugging kubeswap backends when a model fails to load
+
+This guide only applies to models running through kubeswap on Kubernetes. For
+a model llama-swap starts itself with `cmd`, its output is at
+`curl http://localhost:8080/logs` or on the Logs page; see
+`guides/model-runtime/troubleshooting-model-wont-load`.
 
 The wrapper's job is to make the backend pod Ready; when it does not, the
 diagnosis walks down one chain, each step narrowing the suspect:

@@ -16,3 +16,37 @@
   expect_regex: ["routing"]
   expect_tools_any: [docs__search_docs, docs__get_doc]
   require_tools: true
+
+- id: holdout-body-limit-default
+  question: How many megabytes can a request body be by default before llama-swap refuses it?
+  tags: [limits, holdout]
+  expect_regex: ["\\b250\\b"]
+  expect_tools_any: [docs__search_docs, docs__get_config_schema]
+  reference: |
+    250, set by `maxRequestBodyMB`.
+  rubric:
+    - Gives 250 MB
+    - Names maxRequestBodyMB
+
+- id: holdout-subpath-caddy
+  question: Which Caddy directive should I use to put llama-swap under a URL prefix?
+  tags: [reverse-proxy, holdout]
+  expect_regex: ["handle_path"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `handle_path`, which strips the matched prefix. Plain `handle` does not.
+  rubric:
+    - Names handle_path
+    - Says plain handle does not strip the prefix
+
+- id: holdout-keepalive-idleconn
+  question: With disableKeepAlives on a model, does timeouts.idleConn still do anything for it?
+  tags: [proxy, holdout]
+  expect_any: ["\\bno\\b", "not", "nothing"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. Every request opens a new connection, so idleConn does nothing for
+    that model.
+  rubric:
+    - Answers no
+    - Says every request opens a new connection

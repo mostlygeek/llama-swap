@@ -4,7 +4,7 @@ summary: Use the kubeswap wrapper as cmd/cmdStop so llama-swap starts and stops 
 category: guides
 tags: [kubernetes, kubeswap, deployment, k8s, operator, pod, namespace, pvc, gpu, dra, resourceclaim, multi-backend, sd-server, whisper-server, audiocpp_server]
 config_keys: [models.*.cmd, models.*.cmdStop, models.*.proxy, models.*.checkEndpoint, models.*.capabilities, healthCheckTimeout, unloadTimeout, routing]
-updated: 2026-10-10
+updated: 2026-11-04
 ---
 
 # Running inference servers in Kubernetes with kubeswap
@@ -62,8 +62,8 @@ namespace fails with 403s. The chart's `{{ .Release.Namespace }}`
 placeholder keeps it correct; in a hand-rolled deployment or an existing
 ConfigMap, set the release namespace literally.
 
-One config gotcha: llama-swap substitutes only `${PID}` in `cmdStop` (not
-`${PORT}`), so the model ID and namespace there are literal text.
+`cmdStop` takes the same macros as `cmd`, plus `${PID}`, so `${MODEL_ID}` works
+there. No macro holds the namespace, so it stays literal.
 
 Key flags:
 

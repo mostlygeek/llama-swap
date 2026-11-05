@@ -10,3 +10,69 @@
   rubric:
     - Answers no
     - States that model can never be stripped
+
+- id: hard-cors-not-access-control
+  question: If I set security.cors.allowedOrigins, will a curl request from an unlisted machine be rejected?
+  tags: [cors, trap]
+  expect_regex: ["browser"]
+  expect_any: ["\\bno\\b", "not", "won't"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. Enforcement is entirely on the browser side, so curl and other
+    non-browser clients still get the response. Use apiKeys for access control.
+  rubric:
+    - Answers no
+    - Says CORS is enforced by the browser
+    - Points at apiKeys for real access control
+
+- id: hard-cors-empty-list
+  question: What is the difference between leaving out allowedOrigins and writing allowedOrigins as an empty list?
+  tags: [cors, trap]
+  expect_regex: ["any origin|all origins|allow-all", "refus|reject|error|fail"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Leaving it out allows any origin. Writing `allowedOrigins: []` is refused
+    at startup with an error; use `["*"]` to allow any origin on the record.
+  rubric:
+    - Says omitting the key allows any origin
+    - Says an empty list is a startup error
+
+- id: hard-set-if-undefined-zero
+  question: "My config has temperature?: 0.7 and a client sends temperature 0. Which value reaches the model?"
+  tags: [filters, trap]
+  expect_regex: ["(?<![.\\d])0(?![.\\d])"]
+  expect_any: ["defined", "present", "client", "request"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    0, the client's value. Any value present in the body counts as defined,
+    including 0, false, "" and null, so the ? key does not apply.
+  rubric:
+    - Says the client's 0 is used
+    - Explains that 0 counts as defined
+
+- id: hard-realtime-setparams
+  question: Can I use filters.setParams to set the sampling for a /v1/realtime session?
+  tags: [realtime, filters, trap]
+  expect_regex: ["websocket|session"]
+  expect_any: ["\\bno\\b", "cannot", "can't", "not"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. Filters rewrite POST bodies, and a realtime session sends its settings
+    later as websocket messages. Set text sampling with llama-server flags
+    such as --repeat-penalty in cmd.
+  rubric:
+    - Answers no
+    - Explains filters only rewrite POST bodies
+
+- id: hard-realtime-ignore-websockets
+  question: Should I set compat.ignoreWebsockets on a model I use with /v1/realtime?
+  tags: [realtime, trap]
+  expect_regex: ["start|swap"]
+  expect_any: ["\\bno\\b", "not", "don't"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. The websocket could then not start a stopped model, and the model could
+    be swapped out mid-call.
+  rubric:
+    - Answers no
+    - Names both consequences, no start and swapped out mid-call

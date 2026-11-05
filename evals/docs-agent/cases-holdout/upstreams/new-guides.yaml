@@ -1,0 +1,23 @@
+- id: holdout-comfyui-never-ready
+  question: comfyui_auto never becomes ready and requests wait out the health check. What setting is wrong?
+  tags: [comfyui, holdout]
+  expect_regex: ["checkEndpoint"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    The default `checkEndpoint` is /health, which ComfyUI does not serve. Set
+    `checkEndpoint: /`, or `none` to skip the check.
+  rubric:
+    - Names checkEndpoint
+    - Says ComfyUI has no /health
+
+- id: holdout-audiocpp-second-instance
+  question: I want a second audio.cpp server under a different model id. Can /audiocpp/ serve it?
+  tags: [audiocpp, holdout]
+  expect_regex: ["/upstream/"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. /audiocpp/ only serves the model named audiocpp_auto. Serve others
+    through `/upstream/<model>/`.
+  rubric:
+    - Says /audiocpp/ only serves audiocpp_auto
+    - Points at /upstream/<model>/

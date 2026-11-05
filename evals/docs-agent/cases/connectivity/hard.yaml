@@ -8,3 +8,27 @@
   rubric:
     - Gives sippy/gemma-4-12B
     - Explains the peer-id/model naming rule
+
+- id: hard-body-limit-unlimited
+  question: How do I remove the request body size limit entirely? Is maxRequestBodyMB 0 the way?
+  tags: [limits, trap]
+  expect_any: ["\\bno\\b", "not", "cannot", "can't", "rejected"]
+  forbid_regex: ["^\\s*maxRequestBodyMB:\\s*(0|-1)\\s*$"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    You cannot. There is no setting for "no limit": 0 or a negative value is
+    rejected when the config loads. Set a large value instead.
+  rubric:
+    - Says there is no way to disable the limit
+    - Says 0 or a negative value is rejected at config load
+
+- id: hard-peer-same-model
+  question: Peers alpha and beta both serve a model called m. What does a client request to reach beta's copy?
+  tags: [peers, multihop]
+  expect_regex: ["beta/m"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `beta/m`. An unqualified ID only works when exactly one peer provides it.
+  rubric:
+    - Gives beta/m
+    - Says an unqualified id is only usable when one peer provides it

@@ -1,0 +1,24 @@
+# Grounded in the source, not docs/kb: these measure the code__* tools, which
+# only exist when the server is built with -tags embed_src. run.sh does that.
+# The answer names a file, so a move in the tree means updating the regex here.
+- id: code-paused-error
+  question: Where in llama-swap's source code is the "all inference is paused" error defined?
+  tags: [code]
+  expect_regex: ["internal/swaputil/http\\.go"]
+  expect_tools: [code__grep]
+  reference: |
+    `internal/swaputil/http.go`, as `ErrInferencePaused`.
+  rubric:
+    - Names internal/swaputil/http.go
+    - Found it by searching the source
+
+- id: code-body-limit-message
+  question: Which source file produces the "request body exceeds" error message?
+  tags: [code]
+  expect_regex: ["internal/server/contenttype\\.go"]
+  expect_tools: [code__grep]
+  reference: |
+    `internal/server/contenttype.go`.
+  rubric:
+    - Names internal/server/contenttype.go
+    - Found it by searching the source

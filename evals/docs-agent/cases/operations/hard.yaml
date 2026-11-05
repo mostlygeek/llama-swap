@@ -1,0 +1,36 @@
+# Grounded in docs/kb/guides/operations/observability-storage-and-activity.md,
+# tailcat.md and debugging-backends.md
+- id: hard-persist-captures-without-store
+  question: What happens if I set store.persistCaptures true but no store.path?
+  tags: [captures, store, trap]
+  expect_any: ["fail", "error"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Config loading fails. persistCaptures requires store.path.
+  rubric:
+    - Says config loading fails
+    - Says store.path is required
+
+- id: hard-tailcat-empty-allow
+  question: If tailcat.allow is empty or missing, which clients can use my server?
+  tags: [tailcat, trap]
+  expect_any: ["den(y|ies)", "none", "\\bno client", "403"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    None. An empty or missing `allow` denies every client, and llama-swap logs
+    a warning. Use `allow: ["*"]` to admit anyone holding the token.
+  rubric:
+    - Says every client is denied
+    - Does not claim an empty list allows everyone
+
+- id: hard-kubeswap-never-ready
+  question: A kubeswap backend pod runs but never becomes ready, and its log says listening on http://127.0.0.1. What is wrong?
+  tags: [kubeswap, troubleshooting]
+  expect_regex: ["0\\.0\\.0\\.0"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    The server is bound to 127.0.0.1, so nothing outside the pod reaches it.
+    Add `--host 0.0.0.0` or `--listen-ip 0.0.0.0` to the engine's flags.
+  rubric:
+    - Identifies the 127.0.0.1 bind as the cause
+    - Gives the 0.0.0.0 fix

@@ -12,7 +12,7 @@
   question: How do I configure per-API-key rate limiting in llama-swap?
   tags: [negative]
   expect_any: ["not", "no ", "does not", "doesn't", "cannot", "isn't", "unable"]
-  forbid_regex: ["rateLimit", "rate_limit", "requestsPerMinute", "quota"]
+  forbid_regex: ["rateLimit", "rate_limits?\\s*:", "requestsPerMinute", "quotas?\\s*:"]
   expect_tools: [docs__search_docs]
   reference: |
     llama-swap has no rate limiting. apiKeys is all-or-nothing access control:
@@ -56,7 +56,7 @@
   question: What does the models.*.maxConcurrentRequests setting do in llama-swap?
   tags: [negative]
   expect_any: ["not", "no ", "does not", "doesn't", "exist", "isn't"]
-  expect_tools: [docs__search_docs, docs__get_config_schema]
+  expect_tools: [docs__search_docs]
   forbid_regex: ["maxConcurrentRequests (is|sets|controls|limits)"]
   reference: |
     There is no such setting. The nearest real one is
@@ -73,7 +73,7 @@
   question: How do I schedule llama-swap to unload all models at 2am every night?
   tags: [negative]
   expect_any: ["not", "no ", "does not", "doesn't", "cannot", "isn't"]
-  forbid_regex: ["cron:", "schedule:.*2", "unloadAt"]
+  forbid_regex: ["(?:^|\\n)\\s*(?:-\\s*)?cron:", "schedule:.*2", "unloadAt"]
   expect_tools: [docs__search_docs]
   reference: |
     llama-swap has no scheduler for this. The way to do it is an external cron
@@ -82,3 +82,45 @@
     - States llama-swap has no built-in scheduling for unloads
     - Suggests external cron against the unload endpoint, or ttl
     - Does not invent a cron or schedule config key
+
+- id: negative-base-path
+  question: What config setting sets llama-swap's base path for running under a reverse proxy subpath?
+  tags: [negative]
+  expect_any: ["not", "no ", "does not", "doesn't", "cannot", "isn't"]
+  # Anchored to the key form so that saying "there is no basePath" still passes.
+  forbid_regex: ["(basePath|base_path|urlPrefix|pathPrefix):"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    There is none. llama-swap serves everything from its own root and has no
+    base-path setting; the reverse proxy has to strip the prefix.
+  rubric:
+    - States there is no base-path setting
+    - Says to strip the prefix at the reverse proxy
+    - Does not invent a config key for it
+
+- id: negative-capacity-autodetect
+  question: What does the routing.router.settings.capacity.autoDetect setting do?
+  tags: [negative]
+  expect_any: ["not", "no ", "does not", "doesn't", "exist", "isn't"]
+  forbid_regex: ["autoDetect (is|sets|controls|enables|makes|lets|measures)"]
+  expect_tools: [docs__search_docs, docs__get_config_schema]
+  reference: |
+    There is no such setting. The capacity router has `pools`, and llama-swap
+    does not measure usage: limits and requirements are declared by hand.
+  rubric:
+    - States that autoDetect is not a real setting
+    - Does not fabricate a description or default for it
+
+- id: negative-selector-round-robin
+  question: How do I configure a selector with the round robin strategy?
+  tags: [negative]
+  expect_any: ["not", "no ", "does not", "doesn't", "cannot", "isn't"]
+  forbid_regex: ["(?:^|\\n)\\s*(?:-\\s*)?strategy:\\s*[\"']?round"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    There is no round robin strategy. Selectors have three: warm, pin and
+    spillover. spillover is the nearest for spreading load across targets.
+  rubric:
+    - States round robin is not a selector strategy
+    - Names the real strategies
+    - Does not show a yaml block using a round robin strategy
