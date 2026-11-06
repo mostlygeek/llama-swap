@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -106,15 +108,30 @@ func serveRealtimeDeferred(w http.ResponseWriter, r *http.Request, next http.Han
 		return
 	}
 
-	model, buffered, err := readRealtimeModel(conn, brw.Reader)
+	cr := &clientReader{conn: conn}
+	// The server's reader may already hold the first frames. Read the
+	// connection itself after that: a read error through the server's reader,
+	// including the deadline stop() uses, cancels the request's context.
+	var held []byte
+	if n := brw.Reader.Buffered(); n > 0 {
+		held, _ = brw.Reader.Peek(n)
+	}
+	model, err := cr.waitForModel(held, realtimeModelWait)
 	if err != nil {
-		if errors.Is(err, errRealtimeNoModel) {
-			closeRealtime(conn, 1008, "invalid_request_error", "model_not_found", err.Error())
-		}
+		cr.report(err)
 		return
 	}
 
-	up := r.Clone(r.Context())
+	// Until the upstream takes the connection, which can wait on a queue or
+	// a model load, the client is still read in the background: pings are
+	// answered, and a close frame or a dropped connection cancels the
+	// request so it gives up its place.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	stop := cr.watch(cancel)
+	defer stop()
+
+	up := r.Clone(swaputil.SetClientContext(ctx, ctx))
 	q := up.URL.Query()
 	q.Set("model", model)
 	up.URL.RawQuery = q.Encode()
@@ -125,10 +142,18 @@ func serveRealtimeDeferred(w http.ResponseWriter, r *http.Request, next http.Han
 
 	dw := &deferredUpgradeWriter{
 		header: make(http.Header),
-		conn:   &replayConn{Conn: conn, prefix: buffered},
+		takeover: func() net.Conn {
+			stop()
+			return &replayConn{Conn: conn, prefix: cr.pending()}
+		},
 	}
 	next.ServeHTTP(dw, up)
 	if dw.hijacked {
+		return
+	}
+	stop()
+	if cr.err != nil {
+		cr.report(cr.err)
 		return
 	}
 	// The upstream never switched protocols: report its error on the
@@ -143,65 +168,207 @@ func serveRealtimeDeferred(w http.ResponseWriter, r *http.Request, next http.Han
 	closeRealtime(conn, 1011, "server_error", "", fmt.Sprintf("model %q: %s", model, msg))
 }
 
-var errRealtimeNoModel = errors.New("no model: name it in the session.update event (session.audio.input.transcription.model or session.model) or with ?model= on the URL")
+var (
+	errRealtimeNoModel      = errors.New("no model: name it in the session.update event (session.audio.input.transcription.model or session.model) or with ?model= on the URL")
+	errRealtimeTooLarge     = errors.New("message too large")
+	errRealtimeClientClosed = errors.New("client closed the websocket")
+)
 
-// readRealtimeModel reads client frames until a session update names a
-// model. It returns the model and every byte read, which must be replayed to
-// the upstream.
-func readRealtimeModel(conn net.Conn, br *bufio.Reader) (string, []byte, error) {
-	var (
-		buffered []byte
-		model    string
-		found    bool
-		failed   error
-	)
-	ws := wsReader{onText: func(msg []byte) {
-		if found || failed != nil {
+// maxRealtimePending caps the client frames held for replay while the
+// request waits for its model. Past it the client is no longer read, so TCP
+// pushes back until the upstream takes over.
+const maxRealtimePending = 16 << 20
+
+// clientReader reads the client's side of a deferred realtime connection
+// before the upstream exists. Data frames are kept, still masked, to be
+// replayed upstream; control frames are answered here, since nothing else
+// would: a ping gets a pong and a close frame is echoed.
+type clientReader struct {
+	conn net.Conn
+
+	raw  []byte   // bytes of an incomplete frame
+	out  []byte   // complete data frames, for replay
+	text wsReader // reassembles text messages from out
+
+	model   string
+	noModel bool  // a session update named no model
+	err     error // why the background reader stopped, if not stop()
+}
+
+// read reads once from the connection and handles the frames it completes.
+func (c *clientReader) read(chunk []byte) error {
+	n, err := c.conn.Read(chunk)
+	if n > 0 {
+		if ferr := c.consume(chunk[:n]); ferr != nil {
+			return ferr
+		}
+	}
+	return err
+}
+
+func (c *clientReader) consume(b []byte) error {
+	c.raw = append(c.raw, b...)
+	for {
+		hl, n, ok := frameSize(c.raw)
+		if !ok {
+			return nil
+		}
+		if n > maxRealtimeMessage {
+			return errRealtimeTooLarge
+		}
+		if uint64(len(c.raw)-hl) < n {
+			return nil
+		}
+		frame := c.raw[:hl+int(n)]
+		switch frame[0] & 0x0f {
+		case 0x9: // ping
+			_, _ = c.conn.Write(serverFrame(0xa, unmaskPayload(frame, hl)))
+		case 0xa: // unsolicited pong
+		case 0x8: // close: echo its status code and stop
+			payload := unmaskPayload(frame, hl)
+			if len(payload) > 2 {
+				payload = payload[:2]
+			}
+			_, _ = c.conn.Write(serverFrame(0x8, payload))
+			return errRealtimeClientClosed
+		default:
+			c.out = append(c.out, frame...)
+			c.text.feed(frame)
+		}
+		c.raw = append(c.raw[:0], c.raw[len(frame):]...)
+	}
+}
+
+// waitForModel reads until a session update names a model, starting with
+// held, the bytes already read from the connection.
+func (c *clientReader) waitForModel(held []byte, timeout time.Duration) (string, error) {
+	c.text.onText = func(msg []byte) {
+		if c.model != "" || c.noModel {
 			return
 		}
 		m, isUpdate := realtimeEventModel(msg)
 		switch {
 		case m != "":
-			model, found = m, true
+			c.model = m
 		case isUpdate:
-			failed = errRealtimeNoModel
+			c.noModel = true
 		}
-	}}
+	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(realtimeModelWait))
-	defer conn.SetReadDeadline(time.Time{})
+	_ = c.conn.SetReadDeadline(time.Now().Add(timeout))
+	defer c.conn.SetReadDeadline(time.Time{})
 
 	chunk := make([]byte, 32<<10)
-	for !found {
-		n, err := br.Read(chunk)
-		if n > 0 {
-			buffered = append(buffered, chunk[:n]...)
-			ws.feed(chunk[:n])
+	var err error
+	if len(held) > 0 {
+		err = c.consume(held)
+	}
+	for {
+		if err == nil && c.model == "" && !c.noModel {
+			err = c.read(chunk)
 		}
-		if failed != nil {
-			return "", nil, failed
-		}
-		if found {
-			break
-		}
-		if ws.broken || len(buffered) > maxRealtimeMessage {
-			return "", nil, errRealtimeNoModel
+		switch {
+		case c.model != "":
+			return c.model, nil
+		case c.noModel, c.text.broken, len(c.out) > maxRealtimeMessage:
+			return "", errRealtimeNoModel
 		}
 		if err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
-				return "", nil, errRealtimeNoModel
+				return "", errRealtimeNoModel
 			}
-			return "", nil, err
+			return "", err
 		}
 	}
-	// Hand over anything the reader still holds, since the proxy reads the
-	// connection itself from here on.
-	if n := br.Buffered(); n > 0 {
-		rest, _ := br.Peek(n)
-		buffered = append(buffered, rest...)
+}
+
+// watch keeps reading the client in the background, calling cancel when it
+// closes the websocket or drops the connection. The returned stop ends the
+// reading and waits for it; it may be called more than once.
+func (c *clientReader) watch(cancel context.CancelFunc) (stop func()) {
+	var stopping atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		chunk := make([]byte, 32<<10)
+		for len(c.out) < maxRealtimePending {
+			if err := c.read(chunk); err != nil {
+				if !stopping.Load() {
+					c.err = err
+					cancel()
+				}
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			stopping.Store(true)
+			_ = c.conn.SetReadDeadline(time.Now())
+			<-done
+			_ = c.conn.SetReadDeadline(time.Time{})
+		})
 	}
-	return model, buffered, nil
+}
+
+// pending returns every client byte read but not yet sent upstream.
+func (c *clientReader) pending() []byte {
+	return append(c.out, c.raw...)
+}
+
+// report tells the client why its connection is ending, where it can still
+// be told.
+func (c *clientReader) report(err error) {
+	switch {
+	case errors.Is(err, errRealtimeNoModel):
+		closeRealtime(c.conn, 1008, "invalid_request_error", "model_not_found", err.Error())
+	case errors.Is(err, errRealtimeTooLarge):
+		closeRealtime(c.conn, 1009, "invalid_request_error", "", err.Error())
+	}
+}
+
+// frameSize parses a websocket frame header: its length, and the payload's.
+func frameSize(b []byte) (hl int, n uint64, ok bool) {
+	if len(b) < 2 {
+		return 0, 0, false
+	}
+	n = uint64(b[1] & 0x7f)
+	hl = 2
+	switch n {
+	case 126:
+		if len(b) < 4 {
+			return 0, 0, false
+		}
+		n = uint64(binary.BigEndian.Uint16(b[2:4]))
+		hl = 4
+	case 127:
+		if len(b) < 10 {
+			return 0, 0, false
+		}
+		n = binary.BigEndian.Uint64(b[2:10])
+		hl = 10
+	}
+	if b[1]&0x80 != 0 {
+		hl += 4
+	}
+	if len(b) < hl {
+		return 0, 0, false
+	}
+	return hl, n, true
+}
+
+// unmaskPayload returns a copy of a complete frame's payload, unmasked.
+func unmaskPayload(frame []byte, hl int) []byte {
+	payload := append([]byte(nil), frame[hl:]...)
+	if frame[1]&0x80 != 0 {
+		key := frame[hl-4 : hl]
+		for i := range payload {
+			payload[i] ^= key[i%4]
+		}
+	}
+	return payload
 }
 
 // closeRealtime sends an OpenAI style error event and a close frame.
@@ -257,7 +424,9 @@ type deferredUpgradeWriter struct {
 	status   int
 	body     bytes.Buffer
 	hijacked bool
-	conn     *replayConn
+	// takeover stops the background client reader and returns the
+	// connection for the upstream proxy.
+	takeover func() net.Conn
 }
 
 func (w *deferredUpgradeWriter) Header() http.Header { return w.header }
@@ -288,7 +457,8 @@ func (w *deferredUpgradeWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return nil, nil, http.ErrHijacked
 	}
 	w.hijacked = true
-	return w.conn, bufio.NewReadWriter(bufio.NewReader(w.conn), bufio.NewWriter(w.conn)), nil
+	conn := w.takeover()
+	return conn, bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)), nil
 }
 
 // replayConn is the client connection handed to the upstream proxy. Reads

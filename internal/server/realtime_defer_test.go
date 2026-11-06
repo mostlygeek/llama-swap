@@ -204,3 +204,58 @@ func TestServer_Realtime_EventModel(t *testing.T) {
 		}
 	}
 }
+
+// TestServer_Realtime_DeferredAnswersPingAndClose checks that control frames
+// sent before any upstream exists are answered by llama-swap.
+func TestServer_Realtime_DeferredAnswersPingAndClose(t *testing.T) {
+	front := httptest.NewServer(newTestServer(newStubRouter([]string{"rt-model"}, ""), newStubRouter(nil, "")))
+	defer front.Close()
+
+	conn, br := dialRealtime(t, front, "/v1/realtime", "")
+	conn.Write(wsFrame(0x9, true, true, []byte("hello")))
+	if op, payload := readServerFrame(t, br); op != 0xa || string(payload) != "hello" {
+		t.Errorf("frame op %d payload %q, want a pong echoing the ping", op, payload)
+	}
+
+	conn.Write(wsFrame(0x8, true, true, binary.BigEndian.AppendUint16(nil, 1000)))
+	op, payload := readServerFrame(t, br)
+	if op != 0x8 || len(payload) != 2 || binary.BigEndian.Uint16(payload) != 1000 {
+		t.Errorf("frame op %d payload %v, want a close frame echoing 1000", op, payload)
+	}
+	if _, err := br.ReadByte(); err != io.EOF {
+		t.Errorf("read after close = %v, want EOF", err)
+	}
+}
+
+// TestServer_Realtime_DeferredDisconnectCancelsRequest checks that a client
+// hanging up while its request waits on the model cancels the request, so it
+// does not hold a queue slot or start a swap for nobody.
+func TestServer_Realtime_DeferredDisconnectCancelsRequest(t *testing.T) {
+	waiting := make(chan struct{})
+	canceled := make(chan struct{})
+	local := newStubRouter([]string{"rt-model"}, "")
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		close(waiting)
+		<-r.Context().Done()
+		close(canceled)
+	}
+	front := httptest.NewServer(newTestServer(local, newStubRouter(nil, "")))
+	defer front.Close()
+
+	conn, br := dialRealtime(t, front, "/v1/realtime", "")
+	conn.Write(textFrame(true, `{"type":"session.update","session":{"model":"rt-model"}}`))
+	<-waiting
+
+	// still answered while the request waits
+	conn.Write(wsFrame(0x9, true, true, []byte("p")))
+	if op, _ := readServerFrame(t, br); op != 0xa {
+		t.Errorf("op = %d, want a pong while waiting", op)
+	}
+
+	conn.Close()
+	select {
+	case <-canceled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("request was not canceled after the client disconnected")
+	}
+}
