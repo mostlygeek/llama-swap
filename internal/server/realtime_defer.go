@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -36,6 +35,10 @@ import (
 // realtimeModelWait bounds how long a connection without ?model= may stay
 // open before its session.update names a model.
 var realtimeModelWait = 30 * time.Second
+
+// realtimeControlWriteWait bounds a pong or close reply to the client, so a
+// client that never reads cannot block the reader that answers it.
+var realtimeControlWriteWait = 5 * time.Second
 
 // websocketGUID is the RFC 6455 handshake constant.
 const websocketGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -193,6 +196,11 @@ type clientReader struct {
 	model   string
 	noModel bool  // a session update named no model
 	err     error // why the background reader stopped, if not stop()
+
+	// mu orders reply's write deadline against stop's, so a pong being
+	// written cannot push back the deadline stop uses to end it.
+	mu       sync.Mutex
+	stopping bool
 }
 
 // read reads once from the connection and handles the frames it completes.
@@ -222,14 +230,16 @@ func (c *clientReader) consume(b []byte) error {
 		frame := c.raw[:hl+int(n)]
 		switch frame[0] & 0x0f {
 		case 0x9: // ping
-			_, _ = c.conn.Write(serverFrame(0xa, unmaskPayload(frame, hl)))
+			if err := c.reply(serverFrame(0xa, unmaskPayload(frame, hl))); err != nil {
+				return err
+			}
 		case 0xa: // unsolicited pong
 		case 0x8: // close: echo its status code and stop
 			payload := unmaskPayload(frame, hl)
 			if len(payload) > 2 {
 				payload = payload[:2]
 			}
-			_, _ = c.conn.Write(serverFrame(0x8, payload))
+			_ = c.reply(serverFrame(0x8, payload))
 			return errRealtimeClientClosed
 		default:
 			c.out = append(c.out, frame...)
@@ -237,6 +247,32 @@ func (c *clientReader) consume(b []byte) error {
 		}
 		c.raw = append(c.raw[:0], c.raw[len(frame):]...)
 	}
+}
+
+// reply writes a control frame to the client within realtimeControlWriteWait.
+func (c *clientReader) reply(frame []byte) error {
+	c.mu.Lock()
+	if c.stopping {
+		c.mu.Unlock()
+		return net.ErrClosed
+	}
+	_ = c.conn.SetWriteDeadline(time.Now().Add(realtimeControlWriteWait))
+	c.mu.Unlock()
+
+	_, err := c.conn.Write(frame)
+
+	c.mu.Lock()
+	if !c.stopping {
+		_ = c.conn.SetWriteDeadline(time.Time{})
+	}
+	c.mu.Unlock()
+	return err
+}
+
+func (c *clientReader) isStopping() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.stopping
 }
 
 // waitForModel reads until a session update names a model, starting with
@@ -287,14 +323,13 @@ func (c *clientReader) waitForModel(held []byte, timeout time.Duration) (string,
 // closes the websocket or drops the connection. The returned stop ends the
 // reading and waits for it; it may be called more than once.
 func (c *clientReader) watch(cancel context.CancelFunc) (stop func()) {
-	var stopping atomic.Bool
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		chunk := make([]byte, 32<<10)
 		for len(c.out) < maxRealtimePending {
 			if err := c.read(chunk); err != nil {
-				if !stopping.Load() {
+				if !c.isStopping() {
 					c.err = err
 					cancel()
 				}
@@ -305,10 +340,13 @@ func (c *clientReader) watch(cancel context.CancelFunc) (stop func()) {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			stopping.Store(true)
-			_ = c.conn.SetReadDeadline(time.Now())
+			// Both directions: the reader may be blocked writing a pong.
+			c.mu.Lock()
+			c.stopping = true
+			_ = c.conn.SetDeadline(time.Now())
+			c.mu.Unlock()
 			<-done
-			_ = c.conn.SetReadDeadline(time.Time{})
+			_ = c.conn.SetDeadline(time.Time{})
 		})
 	}
 }

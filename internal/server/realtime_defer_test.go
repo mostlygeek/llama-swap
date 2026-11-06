@@ -259,3 +259,53 @@ func TestServer_Realtime_DeferredDisconnectCancelsRequest(t *testing.T) {
 		t.Fatal("request was not canceled after the client disconnected")
 	}
 }
+
+// TestServer_Realtime_DeferredPingToNonReaderDoesNotBlock checks that a
+// client sending pings without reading the pongs cannot leave the reader
+// stuck in a write: the wait for a model gives up within the control write
+// bound, and stop() releases a background reader at once.
+func TestServer_Realtime_DeferredPingToNonReaderDoesNotBlock(t *testing.T) {
+	old := realtimeControlWriteWait
+	realtimeControlWriteWait = 50 * time.Millisecond
+	defer func() { realtimeControlWriteWait = old }()
+
+	// net.Pipe has no buffer, so a pong nobody reads blocks its write.
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	go client.Write(wsFrame(0x9, true, true, []byte("p")))
+
+	cr := &clientReader{conn: server}
+	done := make(chan error, 1)
+	go func() {
+		_, err := cr.waitForModel(nil, time.Minute)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("waitForModel succeeded, want an error")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("waitForModel blocked on a pong the client never read")
+	}
+
+	// stop() must release a background reader blocked the same way, even
+	// before the write bound expires.
+	realtimeControlWriteWait = time.Minute
+	server2, client2 := net.Pipe()
+	defer server2.Close()
+	defer client2.Close()
+	cr2 := &clientReader{conn: server2}
+	stop := cr2.watch(func() {})
+	if _, err := client2.Write(wsFrame(0x9, true, true, []byte("p"))); err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan struct{})
+	go func() { stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stop() blocked on a pong the client never read")
+	}
+}
