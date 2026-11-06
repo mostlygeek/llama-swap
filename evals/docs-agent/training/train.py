@@ -249,9 +249,18 @@ def main():
 
     merged = args.out / "merged"
     model.merge_and_unload().save_pretrained(merged)
-    tokenizer.save_pretrained(merged)
-    # Serving reads the sampling settings and remote code from here.
-    for pattern in ("*.py", "generation_config.json", "chat_template.jinja", "LICENSE"):
+    # LoRA changes only the weights, so everything else stays as the base model has
+    # it. Saving would leave training settings behind, such as use_cache: false.
+    keep = (
+        "*.py",
+        "config.json",
+        "generation_config.json",
+        "chat_template.jinja",
+        "LICENSE",
+        "special_tokens_map.json",
+        "tokenizer*.json",
+    )
+    for pattern in keep:
         for path in args.model.glob(pattern):
             shutil.copy(path, merged / path.name)
     print(f"merged model in {merged}", flush=True)

@@ -5,14 +5,15 @@ to reproduce a run for a future model. The goal is a model small enough to
 download automatically, or to run in the browser, that scores as well on the
 [eval suite](../README.md) as `gemma-4-12B`.
 
-The first run is `LFM3-1.7B`, and `lfm3-v2` is the model to ship. With every
-question limited to 60 seconds, its Q4_K_M scores 95.5% on the training cases and
-96.1% on the holdout. `gemma-4-12B`, which was not measured with that limit, scores
-97.3% and 93.5%.
+The first run is `LFM3-1.7B`. Its best result, `lfm3-v2`, is published as
+[`llama-swap/LFM3-1.7B-HelpAgent`](https://huggingface.co/llama-swap/LFM3-1.7B-HelpAgent).
+With every question limited to 60 seconds, its Q4_K_M scores 95.5% on the training
+cases and 96.1% on the holdout. `gemma-4-12B`, which was not measured with that
+limit, scores 97.3% and 93.5%.
 
 `lfm3-v3` was trained on more data from a smarter teacher and did not do better.
-See [Run log](#the-lfm3-v3-experiment). [Follow-up](#follow-up) lists what is left
-before a model can ship:
+See [the experiment](#the-lfm3-v3-experiment). [Follow-up](#follow-up) lists what is
+left before llama-swap can use the model:
 
 | Step | Status |
 |---|---|
@@ -20,8 +21,9 @@ before a model can ship:
 | 2. Measure the stock model | done, on bf16 through SGLang |
 | 3. Generate training data | done, 417 conversations in `data/` |
 | 4. Train | done, `lfm3-v2` |
-| 5. Export to GGUF | done, Q4_K_M, 1.1 GB; not published |
+| 5. Export to GGUF | done, Q4_K_M, 1.1 GB |
 | 6. Measure the fine-tune | done, see [Run log](#run-log) |
+| 7. Publish | done, see [Step 7](#step-7-publish-to-hugging-face) |
 
 Update this file with what actually works on each new run.
 
@@ -61,6 +63,7 @@ repository. `download.sh` puts them in `$TRAINING_HOME`, by default `~/lfm3/`:
   data/         raw questions and conversations from the teacher
   runs/         one directory per run: adapter/, merged/
   gguf/         exported models
+  publish/      the files sent to Hugging Face
   logs/         teed output of every long run
 ```
 
@@ -326,9 +329,10 @@ Write new data to a new directory, as `data/` is the record of what `lfm3-v2`
 trained on. `filter.py` has changed since then and does not reproduce it. It does
 reproduce `data-v3/` byte for byte, apart from the manifest's date.
 
-`filter.py` needs the environment's Python for `pyyaml` and `zstandard`. Add `--report` to see what
-would be kept without writing anything. It takes several conversation files, in
-order of preference, and keeps the first passing conversation for each question.
+`filter.py` needs the environment's Python for `pyyaml` and `zstandard`. Add
+`--report` to see what would be kept without writing anything. It takes several
+conversation files, in order of preference, and keeps the first passing conversation
+for each question.
 `--forbid` names a local text file of strings that must not appear, one per line.
 
 `generate.ts --record-as <name>` sets the teacher's name in the data, for when the
@@ -466,8 +470,9 @@ settings above, gradient checkpointing, and `--max-length 16384`:
 VRAM depends on the longest turn, not on the size of the dataset. It went from 8.9
 to 9.0 GB as the data grew by half, then to 9.9 GB when the longest turn grew 16%.
 `--max-length 16384` limits that, and dropped 1 turn from `lfm3-v3`. A 12 GB card
-should fit these settings, though that has not been tested. Before the prompt logits were skipped, a 24-turn dry run
-peaked at 19.3 GB and the first full run ran out of memory on the 3090.
+should fit these settings, though that has not been tested. Before the prompt logits
+were skipped, a 24-turn dry run peaked at 19.3 GB and the first full run ran out of
+memory on the 3090.
 
 ### Reasoning
 
@@ -595,6 +600,53 @@ verdict on.
 
 Record each run below, including failures.
 
+## Step 7: Publish to Hugging Face
+
+`lfm3-v2` is published as `llama-swap/LFM3-1.7B-HelpAgent`, a name that leaves out
+the run so users are not left wondering what `v2` means. Assemble the files in a new
+directory, not from `merged/` alone:
+
+```bash
+P=~/lfm3/publish/LFM3-1.7B-HelpAgent
+mkdir -p $P
+cd ~/lfm3/base-hf
+cp LICENSE chat_template.jinja config.json configuration_lfm3.py \
+  generation_config.json lfm3_conv.py modeling_lfm3.py special_tokens_map.json \
+  tokenizer.json tokenizer_config.json $P/
+cp ~/lfm3/runs/lfm3-v2/merged/model.safetensors $P/
+
+cd ~/dev/llama.cpp
+PYTHONPATH=gguf-py ~/lfm3/train/.venv/bin/python \
+  gguf-py/gguf/scripts/gguf_new_metadata.py \
+  --general-name LFM3-1.7B-HelpAgent ~/lfm3/gguf/lfm3-v2-Q4_K_M.gguf \
+  $P/LFM3-1.7B-HelpAgent-Q4_K_M.gguf
+```
+
+- **Take the config and tokenizer from the base model.** LoRA does not change them.
+  When `lfm3-v2` was trained, `train.py` re-saved them into `merged/`, leaving
+  `use_cache: false`, which slows generation for anyone using the checkpoint, and
+  `is_local: true`. `train.py` now copies the base model's files, so this step is
+  needed only for `lfm3-v2`. Check the weights have the same keys and shapes, and
+  that prompts render the same.
+- **Set the GGUF's name.** `convert_hf_to_gguf.py` names it after the directory, so
+  `general.name` was `Merged`. The rewrite changes only that field: all 287 tensors
+  are identical to the file that was scored.
+- **Write `README.md` and `NOTICE` by hand.** See
+  [what the license requires](#license). Both are on the Hub.
+
+Then publish privately, verify, and only then go public:
+
+```bash
+hf repo create llama-swap/LFM3-1.7B-HelpAgent --private
+hf upload llama-swap/LFM3-1.7B-HelpAgent $P . --commit-message "Add LFM3-1.7B-HelpAgent"
+# Compare hashes with the local files, and run the card's llama-server command.
+hf repo settings llama-swap/LFM3-1.7B-HelpAgent --no-private
+```
+
+These are `hf` 1.4.1 commands. Newer versions use `hf repos`. A fine-grained token
+needs `repo.write` on the org: a read-only one fails with `403 Forbidden: You don't
+have the rights to create a model under the namespace`.
+
 ## Run log
 
 | Date | Model | Data | Training | Holdout | Notes |
@@ -628,7 +680,7 @@ Judge, `Q3.8-27B-rad`, on the 116 cases where all three got a verdict:
 
 ### The `lfm3-v3` experiment
 
-`lfm3-v3` did not improve on `lfm3-v2`, and it is not the model to ship. It had 26%
+`lfm3-v3` did not improve on `lfm3-v2`, so it was not published. It had 26%
 more conversations, a smarter teacher and stricter filters, including schema checks
 aimed at invented config. It scored lower on the holdout, tied on the training cases
 and on the judge, and invented just as much. Its data stays in `data-v3/` so the
@@ -671,12 +723,14 @@ few to prove it is worse, but nothing shows it is better.
 
 ## Follow-up
 
-Not part of this work, and needed before `lfm3-v2` can ship:
+Not part of this work, and needed before llama-swap can use the published model:
 
+- Download it automatically from llama-swap.
 - Test it in the browser. Whether `LFM3-1.7B` runs on WebGPU is unconfirmed, and it
   is a separate project.
-- Settle the license and the name of a released model, as below.
 - Add a client-side token limit on reasoning.
+- Link the model card to this directory once it is on `main`. It links to #1302 for
+  now.
 
 ## Doing this for a future model
 
@@ -689,9 +743,25 @@ Not part of this work, and needed before `lfm3-v2` can ship:
    tool calls and reasoning render even when the data does not change.
 6. Train, export, measure, and add a row to the run log.
 
-Check the license too. `LFM3-1.7B` is under the LFM Open License v1.0, which
-allows distributing derivatives if they include the license, mark modified files
-and keep attribution notices. It limits commercial use to organizations under
-$10M in annual revenue, and grants no rights to Liquid's trademarks, so check
-the name of a released model. Downloading a fine-tune automatically from
-llama-swap is distribution, so settle this before shipping one.
+### License
+
+Check a new model's license before training on it. `LFM3-1.7B` is under the LFM Open
+License v1.0, and [Liquid's guide](https://docs.liquid.ai/lfm/help/model-license)
+lists what distributing a fine-tune requires. Downloading one automatically from
+llama-swap is distribution too.
+
+| Requirement | `LFM3-1.7B-HelpAgent` |
+|---|---|
+| Include a copy of the license | `LICENSE`, byte-identical to Liquid's |
+| Mark modified files | `NOTICE` and the model card name the weights, the GGUF and the card |
+| Keep copyright and attribution notices | All other files are unchanged from Liquid's revision `0dc4268` |
+| Include any `NOTICE` file | Liquid ships none, so ours is new |
+
+Failing any of these ends the license automatically, and you must then delete the
+model and every derivative. Commercial use is limited to organizations under $10M in
+annual revenue, and that applies to each company using the model.
+
+The license grants no rights to Liquid's trademarks, beyond describing where a model
+came from. The published name contains `LFM3` for that reason, and the card and
+`NOTICE` say the model is not made, affiliated with or endorsed by Liquid AI. Liquid
+has not confirmed that this name is acceptable. A repository can be renamed if needed.
