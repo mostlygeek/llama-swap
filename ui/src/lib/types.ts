@@ -12,6 +12,7 @@ export interface ModelCapabilities {
   function_calling?: boolean;
   reranker?: boolean;
   embeddings?: boolean;
+  decisions?: boolean;
 }
 
 // Input/output modalities a model reports through the /v1/models

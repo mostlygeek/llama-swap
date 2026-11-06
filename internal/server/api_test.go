@@ -823,6 +823,33 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 	})
 
+	t.Run("decisions", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text"}, Out: []string{"decisions"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["decisions"] != true {
+			t.Error("expected decisions: true")
+		}
+	})
+
+	t.Run("vision_decisions", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text", "image"}, Out: []string{"decisions"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["decisions"] != true || m.Capabilities["vision"] != true {
+			t.Errorf("expected decisions and vision, got %v", m.Capabilities)
+		}
+	})
+
+	t.Run("text_output_not_decisions", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text"}, Out: []string{"text"}},
+		}))
+		if _, ok := m.Capabilities["decisions"]; ok {
+			t.Errorf("text model should not report decisions, got %v", m.Capabilities)
+		}
+	})
+
 	t.Run("empty_skip", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{}))
 		if m.Architecture != nil {
