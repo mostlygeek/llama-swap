@@ -37,6 +37,11 @@ named, an unknown model, one that fails to start) is sent as an OpenAI style
 `error` event followed by a close frame, rather than an HTTP error. The
 client has 30 seconds to send the `session.update`.
 
+The model is fixed for the life of the connection, whether it came from
+`?model=` or the first `session.update` naming one. A later `session.update`
+with a different model does not swap models: it is passed to the running
+model unchanged. To use another model, open a new connection.
+
 ## Setup
 
 ```yaml
