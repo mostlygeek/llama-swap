@@ -2,9 +2,9 @@
 title: Realtime voice chat with /v1/realtime
 summary: Proxy OpenAI Realtime API websockets to llama-server for speech to speech models like LFM3 Audio, and talk to them from the Playground.
 category: guides
-tags: [realtime, websocket, voice, speech, audio, lfm, liquid, llama-server, playground, microphone, https, secure context]
+tags: [realtime, websocket, transcription, session.update, voice, speech, audio, lfm, liquid, llama-server, playground, microphone, https, secure context]
 config_keys: [models.*.cmd, models.*.ttl, models.*.compat.ignoreWebsockets, models.*.concurrencyLimit, globalConcurrencyLimit]
-updated: 2026-11-04
+updated: 2026-11-06
 ---
 
 # Realtime voice chat with /v1/realtime
@@ -15,6 +15,32 @@ other request, then passes the websocket through untouched. llama-server
 serves it for audio models such as
 [LFM3-Audio-2B](https://huggingface.co/LiquidAI/LFM3-Audio-2B), which hear
 speech and answer with text and speech together.
+
+## Model in session.update instead of the URL
+
+OpenAI's realtime transcription clients connect to
+`/v1/realtime?intent=transcription` with no model in the URL and name it in
+their first `session.update` event. llama-swap supports this: when the URL
+has no `model`, it accepts the websocket itself, waits for a
+`session.update` naming a model, and then starts or swaps that model and
+connects the session to it. The model is read from, in order:
+
+- `session.model`
+- `session.audio.input.transcription.model`
+- `session.input_audio_transcription.model` (beta
+  `transcription_session.update`)
+
+The events received while waiting are passed on to the model unchanged. The
+rest of the URL query, such as `intent=transcription`, is kept and `model`
+is added to it. Since the websocket is already open, a failure (no model
+named, an unknown model, one that fails to start) is sent as an OpenAI style
+`error` event followed by a close frame, rather than an HTTP error. The
+client has 30 seconds to send the `session.update`.
+
+The model is fixed for the life of the connection, whether it came from
+`?model=` or the first `session.update` naming one. A later `session.update`
+with a different model does not swap models: it is passed to the running
+model unchanged. To use another model, open a new connection.
 
 ## Setup
 
@@ -114,6 +140,10 @@ Each session is one Activity row, written when it closes. See
 - **The connection drops right away.** The upgrade was refused, for example
   an unknown model or one that failed to start. Browsers only report close
   code 1006; the Activity page and llama-swap's log show the error.
+- **`error` event "no model: name it in the session.update event".** The
+  URL has no `?model=` and the first `session.update` named none either, or
+  none arrived within 30 seconds. A client that waits for `session.created`
+  before sending `session.update` needs `?model=` in the URL.
 - **Works directly, fails behind a reverse proxy.** The proxy must forward
   websocket upgrades: pass the `Upgrade` and `Connection` headers through
   (nginx: `proxy_http_version 1.1` and `proxy_set_header` for both). For a
