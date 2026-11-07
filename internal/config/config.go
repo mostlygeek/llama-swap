@@ -138,11 +138,23 @@ func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 type HooksConfig struct {
 	OnStartup HookOnStartup `yaml:"on_startup"`
+	OnUnload  HookOnUnload  `yaml:"on_unload"`
 }
 
 type HookOnStartup struct {
 	Preload []string `yaml:"preload"`
 	Profile string   `yaml:"profile"`
+}
+
+// HookOnUnload reloads default models after another model stops.
+type HookOnUnload struct {
+	// Restore lists models to load again, in order, once no model has stopped
+	// for Delay seconds. A model is only loaded when that evicts nothing, so a
+	// model someone asked for is never displaced.
+	Restore []string `yaml:"restore"`
+	// Delay is the quiet period in seconds after the last model stop before
+	// restoring. Default 30.
+	Delay int `yaml:"delay"`
 }
 
 // Store configures where llama-swap persists data.

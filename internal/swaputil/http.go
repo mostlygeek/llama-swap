@@ -30,6 +30,10 @@ type ReqContextData struct {
 	ModelID          string
 	Streaming        bool
 	SendLoadingState bool
+	// NoEvict makes the scheduler reject the request with ErrWouldEvict
+	// instead of stopping another model or queueing behind other work. Set
+	// only by internal callers (hooks.on_unload.restore), never from a client.
+	NoEvict bool
 	// Metadata is a request-scoped key/value bag that handlers may mutate
 	// while processing. The metrics middleware copies it into ActivityLogEntry.
 	Metadata map[string]string
@@ -44,6 +48,7 @@ var (
 	ErrNoPeerModelFound  = fmt.Errorf("peer model not found")
 	ErrNoLocalModelFound = fmt.Errorf("local model not found")
 	ErrInferencePaused   = fmt.Errorf("all inference is paused")
+	ErrWouldEvict        = fmt.Errorf("loading the model would evict another model")
 )
 
 // IsWebSocketUpgrade reports whether r contains a valid websocket protocol
@@ -185,6 +190,8 @@ func SendError(w http.ResponseWriter, r *http.Request, err error) {
 		SendResponse(w, r, http.StatusNotFound, "no router for requested model")
 	case errors.Is(err, ErrInferencePaused):
 		SendResponse(w, r, http.StatusServiceUnavailable, ErrInferencePaused.Error())
+	case errors.Is(err, ErrWouldEvict):
+		SendResponse(w, r, http.StatusConflict, ErrWouldEvict.Error())
 	default:
 		SendResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("unspecific error: %v", err))
 	}

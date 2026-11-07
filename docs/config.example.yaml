@@ -686,6 +686,22 @@ hooks:
     preload:
       - "llama"
 
+  # on_unload: actions to perform after a model stops
+  # - optional, default: empty dictionary
+  on_unload:
+    # restore: models to load again after another model stops (unload, ttl,
+    # eviction, crash), e.g. a default model that something swapped out
+    # - optional, default: empty list
+    # - each model is loaded only if that evicts nothing, so a model someone
+    #   requested is never displaced; it is retried after the next stop
+    # - a model that fails to start is not retried until another model stops
+    restore:
+      - "llama"
+
+    # delay: seconds without another model stopping before restoring
+    # - optional, default: 30
+    delay: 30
+
 # routing:
 # Controls how llama-swap decides which models can run at the same time and
 # which get swapped out. Choose one of three swap engines:
