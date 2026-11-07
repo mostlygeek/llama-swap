@@ -275,3 +275,6 @@ Constraints to respect while editing:
 `sippy/gemma-4-12B` and that is the score being optimized, but a case that
 fails on **every** model is usually a bad case or missing documentation rather
 than a prompt problem — and that distinction decides which surface to edit.
+
+To fine-tune a small model until it can run the Docs Agent, see
+[training/README.md](training/README.md).

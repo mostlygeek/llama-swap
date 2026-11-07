@@ -1,0 +1,344 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "code__find",
+      "description": "Find files in llama-swap's source code at main by glob pattern. Returns file paths from the repository root. Output is truncated to 1000 results or 16KB, whichever is hit first.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "Maximum number of results (default: 1000).",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Directory to search in, from the repository root (default: the whole repository).",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Glob pattern to match files, for example '*.go', 'internal/**/*.go' or 'ui/src/**/*.svelte'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "title": "Find llama-swap source files"
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "code__grep",
+      "description": "Search llama-swap's source code at main, the version this server runs, for a regular expression (RE2, ripgrep syntax). Returns matching lines as path:line: text, with paths from the repository root. Output is truncated to 100 matches or 16KB, whichever is hit first. Long lines are truncated to 500 chars. Use it to check the documentation against the code: a config key's default, how a feature behaves, where an error message comes from. It holds the Go and TypeScript source only, without tests.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "description": "Number of lines to show before and after each match (default: 0, maximum: 5).",
+            "maximum": 5,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "glob": {
+            "description": "Filter files by glob pattern, for example '*.go', '*.{ts,svelte}' or 'ui/src/**/*.ts'.",
+            "type": "string"
+          },
+          "ignore_case": {
+            "description": "Case-insensitive search (default: false).",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum number of matches to return (default: 100, maximum: 1000).",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "literal": {
+            "description": "Treat pattern as a literal string instead of a regex (default: false).",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "Directory or file to search, from the repository root, for example 'internal/process' (default: the whole repository).",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Search pattern (regex or literal string), for example 'globalTTL' or 'func \\(p \\*Process\\) Stop'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "title": "Search llama-swap source code"
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "code__ls",
+      "description": "List a directory in llama-swap's source code at main. Returns entries sorted alphabetically, with '/' after directories. Output is truncated to 500 entries or 16KB, whichever is hit first. Start here to learn the layout, then use code__read.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "Maximum number of entries to return (default: 500).",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Directory to list, from the repository root (default: the repository root).",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "title": "List a llama-swap source directory"
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "code__read",
+      "description": "Read a file from llama-swap's source code at main. The first line is a GitHub link to cite, and every line is numbered as L12: so you can cite it too. Output is truncated to 2000 lines or 16KB, whichever is hit first. Lines are returned whole. Use offset and limit for large files. When you need the full file, continue with offset until complete.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "Maximum number of lines to read.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "description": "Line number to start reading from (1-indexed). To see a grep match in context, start a few lines before it.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Path to the file from the repository root, for example 'internal/config/config.go'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "title": "Read a llama-swap source file"
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "config__get_config",
+      "description": "Query the configuration llama-swap is running right now with a jq expression. The result is YAML, with API keys and other credentials redacted. Values are fully resolved: ${env.*} and macro references are already expanded, and values equal to their defaults are omitted. Pass \"query\" to select exactly the part you need, so nothing has to be truncated; omit it for the whole document. For example: \".models | keys\" lists the configured model ids, \".models.qwen3\" shows one model, \".models | to_entries | map({id: .key, ttl: .value.ttl})\" pulls one field from every model, and \".peers\" shows the peers. Quote any id that is not a plain word: \".models[\"qwen3-8b\"]\". Use this to review or troubleshoot the active setup before suggesting changes.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "description": "jq expression selecting part of the config, for example '.models | keys', '.models.qwen3', '.models[\"qwen3-8b\"].ttl', or '.macros'. Defaults to '.', the whole config.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "title": "Query the current llama-swap configuration"
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "docs__get_config_schema",
+      "description": "Look up the JSON schema for a configuration key: its type, description, default, and direct child keys. Always call this when the user names or asks about a configuration key, even if search results already answer the question. An unknown-path error proves that key does not exist; say that explicitly before suggesting a real alternative.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "Dotted path into the config schema. Use '*' for a map's keys, for example 'models.*.filters'. Omit or leave empty for the top level.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "title": "Look up a llama-swap config key"
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "docs__get_doc",
+      "description": "Read one llama-swap document by id. Ids come from docs__list_docs or docs__search_docs. Ids starting with 'reference/config/' return that section of config.example.yaml verbatim, comments included.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "The document id, for example 'guides/model-runtime/ttl-and-unloading' or 'reference/config/models'.",
+            "enum": [
+              "examples/kubeswap-kubernetes",
+              "examples/peers-and-multi-host",
+              "guides/api-integration/api-keys-and-auth",
+              "guides/api-integration/cors",
+              "guides/api-integration/filters-and-request-rewriting",
+              "guides/api-integration/mcp-endpoint",
+              "guides/api-integration/set-if-undefined",
+              "guides/api-integration/v1-realtime",
+              "guides/configuration/configuration-overview",
+              "guides/configuration/macros",
+              "guides/connectivity/proxy-timeouts",
+              "guides/connectivity/remote-peers",
+              "guides/connectivity/request-body-size-limit",
+              "guides/connectivity/reverse-proxy-subpath",
+              "guides/connectivity/upstream-passthrough",
+              "guides/model-runtime/capabilities-and-model-listings",
+              "guides/model-runtime/client-compatibility-and-loading-feedback",
+              "guides/model-runtime/troubleshooting-model-wont-load",
+              "guides/model-runtime/ttl-and-unloading",
+              "guides/model-runtime/writing-cmd",
+              "guides/operations/building-unified-image",
+              "guides/operations/container-security",
+              "guides/operations/debugging-backends",
+              "guides/operations/observability-storage-and-activity",
+              "guides/operations/startup-preloading-and-hooks",
+              "guides/operations/storage-options-kubernetes",
+              "guides/operations/tailcat",
+              "guides/routing/capacity-and-queues",
+              "guides/routing/groups-and-matrix",
+              "guides/routing/profiles-and-selectors",
+              "guides/tools/fake-model",
+              "guides/tools/kubeswap",
+              "guides/tools/vllm-wrapper",
+              "guides/tools/vllm-wrapper-systemd",
+              "guides/tools/wol-proxy",
+              "guides/upstreams/audiocpp",
+              "guides/upstreams/comfyui",
+              "reference/config/_intro",
+              "reference/config/apiKeys",
+              "reference/config/captureBuffer",
+              "reference/config/globalConcurrencyLimit",
+              "reference/config/globalTTL",
+              "reference/config/healthCheckTimeout",
+              "reference/config/helpagent",
+              "reference/config/hooks",
+              "reference/config/includeAliasesInList",
+              "reference/config/logLevel",
+              "reference/config/logTimeFormat",
+              "reference/config/logToStdout",
+              "reference/config/macros",
+              "reference/config/maxRequestBodyMB",
+              "reference/config/metricsMaxInMemory",
+              "reference/config/models",
+              "reference/config/peers",
+              "reference/config/performance",
+              "reference/config/profiles",
+              "reference/config/routing",
+              "reference/config/security",
+              "reference/config/selectors",
+              "reference/config/sendLoadingState",
+              "reference/config/startPort",
+              "reference/config/tailcat",
+              "reference/config/ui",
+              "reference/config/unloadTimeout",
+              "reference/config/upstream",
+              "reference/readme"
+            ],
+            "type": "string"
+          },
+          "max_lines": {
+            "description": "Maximum lines to return. Defaults to 400, maximum 400.",
+            "maximum": 400,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "description": "Line to start from, for continuing a truncated document. Defaults to 0.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "title": "Read a llama-swap document"
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "docs__list_docs",
+      "description": "List the available llama-swap documentation. Returns every document's id, title and summary. Call this first to see what exists, then call docs__get_doc with an id.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "description": "Only list documents in this category.",
+            "enum": [
+              "tutorials",
+              "guides",
+              "examples",
+              "reference"
+            ],
+            "type": "string"
+          },
+          "tag": {
+            "description": "Only list documents carrying this tag, for example 'ttl' or 'docker'.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "title": "List llama-swap documentation"
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "docs__search_docs",
+      "description": "Required first step for every llama-swap question. Keyword search across all documentation, including config.example.yaml. Returns matching snippets with the document id to read next, via docs__get_doc.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "max_results": {
+            "description": "Maximum number of matches. Defaults to 5, maximum 15.",
+            "maximum": 15,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "description": "Keywords, for example 'ttl unload' or 'Docker health check'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "title": "Search llama-swap documentation"
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "sys__now",
+      "description": "Get the current date and time on the machine running llama-swap, in UTC and in the server's local timezone. Optionally also in a named timezone.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "timezone": {
+            "description": "An IANA timezone name such as 'America/Vancouver' or 'Asia/Tokyo'. Omit for UTC and server local time only.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "title": "Current date and time"
+    }
+  }
+]
