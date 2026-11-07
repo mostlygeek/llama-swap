@@ -10,7 +10,7 @@ Run multiple generative AI models on your machine and hot-swap between them on d
 Built in Go for performance and simplicity, llama-swap has zero dependencies and is incredibly easy to set up. Get started in minutes - just one binary and one configuration file.
 
 > [!TIP]
-> Got questions about configuring llama-swap? Try out the Chat agent on [llama-swap.ai](https://llama-swap.ai).
+> Got questions about configuring llama-swap? Try out the [Chat agent on llama-swap.ai](https://llama-swap.ai/docs/chat).
 > It runs entirely in your browser and is powered by [LFM3-1.7B fine tuned](https://huggingface.co/llama-swap/LFM3-1.7B-HelpAgent) on the docs.
 
 ## Features:
