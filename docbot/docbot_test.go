@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -53,15 +54,18 @@ func TestDocbot_DocsOnly(t *testing.T) {
 		t.Errorf("Tools() = %s, want %s", got, want)
 	}
 
+	// No line of the prompt may name a tool the handler does not serve,
+	// including the rule that says to check the code.
 	prompt := bot.SystemPrompt()
 	if !strings.Contains(prompt, "- `docs__search_docs`") {
 		t.Error("prompt lost the docs__search_docs line")
 	}
-	for _, gone := range []string{"- `config__get_config`", "- `sys__now`", "- `code__grep`"} {
-		if strings.Contains(prompt, gone) {
-			t.Errorf("prompt still lists %s", gone)
+	for _, m := range toolRef.FindAllStringSubmatch(prompt, -1) {
+		if !strings.HasPrefix(m[1], "docs__") {
+			t.Errorf("docs-only prompt names %s", m[1])
 		}
 	}
+	assertRulesNumbered(t, prompt)
 
 	var result mcpserver.CallToolResult
 	call(t, bot, "tools/call", map[string]any{"name": "docs__search_docs", "arguments": map[string]any{"query": "ttl"}}, &result)
@@ -80,9 +84,16 @@ func TestDocbot_WithSource(t *testing.T) {
 	if !strings.Contains(strings.Join(bot.Tools(), " "), "code__grep") {
 		t.Errorf("Tools() = %v, want code__* tools", bot.Tools())
 	}
-	if !strings.Contains(bot.SystemPrompt(), "- `code__grep`") {
-		t.Error("prompt dropped code__grep although it is served")
+	prompt := bot.SystemPrompt()
+	if !strings.Contains(prompt, "- `code__grep`") || !strings.Contains(prompt, "search the source with `code__grep`") {
+		t.Error("prompt dropped a code__grep line although it is served")
 	}
+	for _, gone := range []string{"config__get_config", "sys__now"} {
+		if strings.Contains(prompt, gone) {
+			t.Errorf("prompt still names %s", gone)
+		}
+	}
+	assertRulesNumbered(t, prompt)
 
 	var result mcpserver.CallToolResult
 	call(t, bot, "tools/call", map[string]any{"name": "code__read", "arguments": map[string]any{"path": "internal/a/a.go"}}, &result)
@@ -140,9 +151,35 @@ func TestDocbot_PseudoVersionRef(t *testing.T) {
 }
 
 func TestDocbot_FilterPrompt(t *testing.T) {
-	prompt := "## Tools\n\n- `docs__a` - one.\n- `config__b` - two.\n\nRule: never call `config__b`."
+	prompt := "## Tools\n\n- `docs__a` - one.\n- `config__b` - two.\n\n" +
+		"## Rules\n\n1. Call `docs__a` first.\n2. Then call `config__b`.\n3. Be brief.\n" +
+		"Text that mentions `config__b` outside a list stays."
 	got := filterPrompt(prompt, []string{"docs__a"})
-	if want := "## Tools\n\n- `docs__a` - one.\n\nRule: never call `config__b`."; got != want {
+	want := "## Tools\n\n- `docs__a` - one.\n\n" +
+		"## Rules\n\n1. Call `docs__a` first.\n2. Be brief.\n" +
+		"Text that mentions `config__b` outside a list stays."
+	if got != want {
 		t.Errorf("filterPrompt =\n%s\nwant\n%s", got, want)
+	}
+
+	if got := filterPrompt(prompt, []string{"docs__a", "config__b"}); got != prompt {
+		t.Errorf("filterPrompt changed a prompt whose tools are all served:\n%s", got)
+	}
+}
+
+// assertRulesNumbered checks the numbered rules run 1, 2, 3, ...
+func assertRulesNumbered(t *testing.T, prompt string) {
+	t.Helper()
+	want := 1
+	for _, line := range strings.Split(prompt, "\n") {
+		if m := listItem.FindStringSubmatch(line); m != nil && m[1] != "" {
+			if m[1] != strconv.Itoa(want) {
+				t.Errorf("rule numbered %s, want %d: %.60s", m[1], want, line)
+			}
+			want++
+		}
+	}
+	if want == 1 {
+		t.Error("prompt has no numbered rules")
 	}
 }

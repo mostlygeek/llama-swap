@@ -34,6 +34,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/docs"
@@ -160,26 +161,53 @@ func toolNames(registry *mcptools.Registry) ([]string, error) {
 	}
 }
 
-// toolLine matches a bullet in the prompt's tool list and captures the tool
-// name: "- `config__get_config` - ...".
-var toolLine = regexp.MustCompile("^- `([A-Za-z0-9_-]+__[A-Za-z0-9_-]+)`")
+// listItem matches a bullet ("- ") or numbered ("6. ") line, capturing the
+// number when there is one. Every tool description and every rule in the
+// Docs Agent prompt is one such line.
+var listItem = regexp.MustCompile(`^(?:- |(\d+)\. )`)
 
-// filterPrompt drops tool-list bullets naming a tool not in served.
-// Describing a tool the model cannot call invites it to call one anyway.
+// toolRef matches a tool name in backticks, such as `code__grep`.
+var toolRef = regexp.MustCompile("`([A-Za-z0-9_-]+__[A-Za-z0-9_-]+)`")
+
+// filterPrompt drops every list item that names a tool not in served: the
+// tool's own bullet, and any rule telling the model to call it. Describing a
+// tool the model cannot call invites it to call one anyway. Numbered rules
+// are renumbered so the list stays consecutive.
 func filterPrompt(prompt string, served []string) string {
 	available := map[string]bool{}
 	for _, name := range served {
 		available[name] = true
 	}
+
 	lines := strings.Split(prompt, "\n")
 	kept := lines[:0]
+	next := 0 // the next rule number, or 0 outside a numbered list
 	for _, line := range lines {
-		if m := toolLine.FindStringSubmatch(line); m != nil && !available[m[1]] {
+		item := listItem.FindStringSubmatch(line)
+		if item != nil && mentionsMissingTool(line, available) {
 			continue
+		}
+		if item != nil && item[1] != "" {
+			if item[1] == "1" {
+				next = 1
+			}
+			if next > 0 {
+				line = strconv.Itoa(next) + ". " + strings.TrimPrefix(line, item[0])
+				next++
+			}
 		}
 		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n")
+}
+
+func mentionsMissingTool(line string, available map[string]bool) bool {
+	for _, m := range toolRef.FindAllStringSubmatch(line, -1) {
+		if !available[m[1]] {
+			return true
+		}
+	}
+	return false
 }
 
 // pseudoRev matches the commit at the end of a pseudo-version such as
