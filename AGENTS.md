@@ -31,6 +31,14 @@
 - Run `make test-dev` afterward; `TestKB_FrontmatterIsValid` in
   `internal/docagent` checks the frontmatter and that `config_keys` resolve.
 
+### Generated copies in docs/
+
+- `docs/config-schema.json` and `docs/docs-agent-prompt.md` are copies of
+  `config-schema.json` and the prompt in `ui/src/lib/prompts/docsAgent.ts`,
+  embedded by the `docs` package for llama-swap and the public `docbot`
+  package. After changing either original run `go generate ./docs`;
+  `TestDocs_GeneratedFilesAreCurrent` fails until you do.
+
 ### Upstream servers
 
 - Before adding or changing support for an inference server (detection,

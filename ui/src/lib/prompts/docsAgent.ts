@@ -12,6 +12,10 @@
  * which agentTools.ts never calls, so it reaches external MCP clients but never
  * the Help page. Until the two are unified, keep them consistent by hand.
  *
+ * `go generate ./docs` copies this prompt to docs/docs-agent-prompt.md for the
+ * Go side (the docbot package). Run it after editing; a Go test fails until
+ * the copy matches.
+ *
  * Measure before and after with:
  *   npm run agent -- eval --repeat 3
  * See evals/docs-agent/README.md for the optimization protocol.

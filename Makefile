@@ -45,11 +45,11 @@ test-dev:
 	staticcheck ./... || true
 
 test:
-	go test -short -count=1 ./internal/...
+	go test -short -count=1 ./internal/... ./docs/... ./docbot/...
 
 # for CI - full test (takes longer)
 test-all:
-	go test -race -count=1 ./internal/...
+	go test -race -count=1 ./internal/... ./docs/... ./docbot/...
 
 # Test suites for the cmd utilities (kubeswap, vllm-wrapper). Kept
 # separate from test-all: those packages are unix-only (vllm-wrapper
