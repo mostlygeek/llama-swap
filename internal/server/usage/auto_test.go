@@ -28,6 +28,9 @@ func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 		{hint.VLLM, "/v1/chat/completions", "vllm/chat_completion_spec_decode_stream.sse"},
 		{hint.TabbyAPI, "/v1/chat/completions", "tabbyapi/chat_completion_stream.sse"},
 		{hint.OMLX, "/v1/chat/completions", "omlx/chat_completion.json"},
+		{hint.TensorFold, "/v1/chat/completions", "tensorfold/chat_completion.json"},
+		{hint.TensorFold, "/v1/chat/completions", "tensorfold/chat_completion_stream.sse"},
+		{hint.TensorFold, "/v1/chat/completions", "tensorfold/chat_completion_stream_v2.sse"},
 		{hint.Kyojin, "/v1/chat/completions", "kyojin/chat_completion_stream.sse"},
 		{hint.Radiance, "/v1/chat/completions", "radiance/chat_completion_stream.sse"},
 		{hint.Halogen, "/v1/chat/completions", "halogen/chat_completion_stream.sse"},
@@ -57,6 +60,7 @@ func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 
 func TestUsage_Auto_Precedence(t *testing.T) {
 	const omlx = `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`
+	const tensorfold = `,"tensorfold":{"prefill_s":0.4,"decode_s":2,"cached":16}`
 	const timings = `,"timings":{"prompt_n":40,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40}`
 	const metrics = `,"metrics":{"time_to_first_token_ms":200,"mean_itl_ms":10}`
 	tests := []struct {
@@ -71,6 +75,10 @@ func TestUsage_Auto_Precedence(t *testing.T) {
 		{"TabbyAPI null falls back to oMLX", `,"prompt_tokens_per_sec":null,"completion_tokens_per_sec":null` + omlx, "", 63.74, 66.38},
 		{"per field: TabbyAPI prompt, oMLX generation", `,"prompt_tokens_per_sec":35.17` + omlx, "", 35.17, 66.38},
 		{"per field: oMLX prompt, TabbyAPI generation", `,"completion_tokens_per_sec":17.11` + omlx, "", 63.74, 17.11},
+		{"TensorFold over usage rates", `,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11` + omlx, tensorfold, 100, 4},
+		{"timings over TensorFold", "", tensorfold + timings, 100, 40},
+		{"vLLM metrics over TensorFold", "", tensorfold + metrics, 200, 100},
+		{"invalid TensorFold keeps usage rates", `,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11`, `,"tensorfold":{"prefill_s":null,"decode_s":null}`, 35.17, 17.11},
 		{"timings over usage rates", omlx, timings, 100, 40},
 		{"Hipfire timings over usage rates", omlx, `,"timings":{"prefill_tok_s":200,"decode_tok_s":50}`, 200, 50},
 		{"Hipfire null preserves usage rates", omlx, `,"timings":{"prefill_tok_s":null,"decode_tok_s":null}`, 63.74, 66.38},

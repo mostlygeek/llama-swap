@@ -18,6 +18,7 @@ const (
 	VLLM             Upstream = "vllm"
 	TabbyAPI         Upstream = "tabbyapi"
 	OMLX             Upstream = "omlx"
+	TensorFold       Upstream = "tensorfold"
 	Kyojin           Upstream = "kyojin" // owned_by "yamz" in /v1/models
 	Radiance         Upstream = "radiance"
 	Halogen          Upstream = "halogen"
@@ -35,7 +36,7 @@ const (
 // not known.
 func (u Upstream) Known() bool {
 	switch u {
-	case LlamaServer, VLLM, TabbyAPI, OMLX, Kyojin, Radiance, Halogen, Hipfire, OpenAICompatible,
+	case LlamaServer, VLLM, TabbyAPI, OMLX, TensorFold, Kyojin, Radiance, Halogen, Hipfire, OpenAICompatible,
 		LlamaSwap, OpenAI, Anthropic, OpenRouter:
 		return true
 	}

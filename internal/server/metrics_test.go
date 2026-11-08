@@ -1,10 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -106,6 +110,54 @@ func TestServer_MetricsMiddleware_OMLX(t *testing.T) {
 			entry := entries[0]
 			if entry.Model != "m" || entry.Tokens.InputTokens != 56 || entry.Tokens.OutputTokens != 8 || entry.Tokens.PromptPerSecond != 63.74 || entry.Tokens.TokensPerSecond != 66.38 {
 				t.Fatalf("recorded activity = %+v", entry)
+			}
+		})
+	}
+}
+
+// TestServer_MetricsMiddleware_TensorFold runs the captured TensorFold
+// responses from #1226 through the middleware and checks the client still
+// receives them unchanged.
+func TestServer_MetricsMiddleware_TensorFold(t *testing.T) {
+	tests := []struct {
+		name, file, contentType string
+		input, output           int
+		wantPrompt, wantGen     float64
+	}{
+		{"JSON", "chat_completion.json", "application/json", 63, 64, 63 / 0.1146, 64 / 2.0696},
+		{"SSE", "chat_completion_stream.sse", "text/event-stream", 59, 32, 59 / 0.2393, 32 / 0.7758},
+		{"SSE renamed fields", "chat_completion_stream_v2.sse", "text/event-stream", 160029, 11811, 160029 / 57.476540016, 46.31119504068745},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join("usage", "testdata", "tensorfold", tt.file))
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 0)
+			cfg := config.Config{Models: map[string]config.ModelConfig{"m": {}}}
+			handler := chain.New(CreateMetricsMiddleware(mm, cfg)).ThenFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				w.Write(body)
+			})
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, chatRequest("m"))
+			if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), body) {
+				t.Fatalf("response = %d, want 200 with the fixture body", w.Code)
+			}
+			entries := metricsEntries(t, mm)
+			if len(entries) != 1 {
+				t.Fatalf("want 1 entry, got %d", len(entries))
+			}
+			got := entries[0].Tokens
+			if entries[0].Model != "m" || got.InputTokens != tt.input || got.OutputTokens != tt.output || got.CachedTokens != 0 {
+				t.Fatalf("recorded activity = %+v", entries[0])
+			}
+			if want := tt.wantPrompt; math.Abs(got.PromptPerSecond-want) > 1e-9 {
+				t.Errorf("PromptPerSecond = %v, want %v", got.PromptPerSecond, want)
+			}
+			if want := tt.wantGen; math.Abs(got.TokensPerSecond-want) > 1e-9 {
+				t.Errorf("TokensPerSecond = %v, want %v", got.TokensPerSecond, want)
 			}
 		})
 	}

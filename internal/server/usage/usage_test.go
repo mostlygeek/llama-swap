@@ -73,6 +73,7 @@ func TestUsage_ExtractorFor(t *testing.T) {
 		{hint.VLLM, vllmExtractor{}},
 		{hint.TabbyAPI, tabbyAPIExtractor{}},
 		{hint.OMLX, omlxExtractor{}},
+		{hint.TensorFold, tensorFoldExtractor{}},
 		{hint.Kyojin, kyojinExtractor{}},
 		{hint.Radiance, radianceExtractor{}},
 		{hint.OpenAI, apiExtractor{}},
