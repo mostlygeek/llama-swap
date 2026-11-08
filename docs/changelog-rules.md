@@ -2,6 +2,8 @@ Rules:
 
 - releases are tagged commits off the `main` branch
 - version numbers are sequential like v1, v2, ... v255
+- each release entry is its own file named `changelog/v<version>.md`,
+  for example `changelog/v255.md`, starting with the H2 heading below
 - determine the changes from the HEAD of `main` to the last release tag
 - read each commit's full message and its pull request description; use them
   to explain what changed, why, and what caused any fixed problem

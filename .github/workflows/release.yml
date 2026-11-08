@@ -28,21 +28,20 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c #6.4.0
         with:
           go-version-file: go.mod
-      - name: Extract release notes from CHANGELOG.md
+      - name: Extract release notes from changelog/${{ github.event.inputs.tag || github.ref_name }}.md
         env:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
           NOTES: ${{ runner.temp }}/release-notes.md
         run: |
-          # print lines after "## <tag>" or "## <tag> (Jan 2, 2026)" up to
-          # the next "## " heading
-          awk -v tag="## ${TAG}" '
-            $0 == tag || index($0, tag " ") == 1 { found = 1; next }
-            found && /^## / { exit }
-            found { print }
-          ' CHANGELOG.md > "${NOTES}"
+          # each release is one file; drop the leading "## <tag>" heading
+          if [ -f "changelog/${TAG}.md" ]; then
+            tail -n +2 "changelog/${TAG}.md" > "${NOTES}"
+          else
+            : > "${NOTES}"
+          fi
 
           if ! grep -q '[^[:space:]]' "${NOTES}"; then
-            echo "::error::no CHANGELOG.md entry for ${TAG}, run make release to generate it"
+            echo "::error::no changelog/${TAG}.md entry for ${TAG}, run make release to generate it"
             exit 1
           fi
       - name: Set up Node.js

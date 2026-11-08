@@ -160,8 +160,8 @@ release:
 	@highest_tag=$$(git tag --sort=-v:refname | grep -E '^v[0-9]+$$' | head -n 1 || echo "v0"); \
 	new_tag="v$$(( $${highest_tag#v} + 1 ))"; \
 	echo "Checking for a changelog entry for: $$new_tag"; \
-	if ! grep -qE "^## $$new_tag( |$$)" CHANGELOG.md; then \
-		echo "Error: CHANGELOG.md has no entry for $$new_tag. Add a '## $$new_tag' section and commit it." >&2; \
+	if [ ! -f "changelog/$$new_tag.md" ]; then \
+		echo "Error: changelog/$$new_tag.md does not exist. Add it (scripts/add-changelog.sh) and commit it." >&2; \
 		exit 1; \
 	fi; \
 	echo "tagging new version: $$new_tag"; \
