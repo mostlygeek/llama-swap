@@ -56,6 +56,8 @@ func extractorFor(u hint.Upstream) usageExtractor {
 		return tabbyAPIExtractor{}
 	case hint.OMLX:
 		return omlxExtractor{}
+	case hint.TensorFold:
+		return tensorFoldExtractor{}
 	case hint.Kyojin:
 		return kyojinExtractor{}
 	case hint.Radiance:
