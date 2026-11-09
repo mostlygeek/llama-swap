@@ -114,6 +114,21 @@ describe("classifyModel", () => {
       classifyModel(fixture({ reranker: true, image_generation: true }, ["image"])),
     ).toBe("rerank");
   });
+
+  it("classifies a decision model by its output modality", () => {
+    // live: Clef-Flash answers /v1/systemone and outputs no text
+    expect(classifyModel(fixture(undefined, ["decisions"], ["text"]))).toBe("decisions");
+  });
+
+  it("keeps a decision model out of chat even when it takes image input", () => {
+    // live: Clef-Flash accepts text+image and so carries the vision flag,
+    // which must not make it look like a vision chat model
+    expect(
+      classifyModel(
+        fixture({ vision: true }, ["decisions"], ["text", "image", "video"]),
+      ),
+    ).toBe("decisions");
+  });
 });
 
 describe("groupModelsByClass", () => {
@@ -146,9 +161,10 @@ describe("groupModelsByClass", () => {
       { ...fixture({ image_generation: true }, ["image"], ["text"]), id: "Anima" },
       { ...fixture(undefined, ["video"], ["text"]), id: "MiniMax-H3" },
       { ...fixture({}, ["text"], ["text"]), id: "Artemis-31B" },
+      { ...fixture({ vision: true }, ["decisions"], ["text", "image"]), id: "Clef-Flash" },
     ]);
     const nonEmpty = groups.filter((g) => g.models.length > 0);
-    expect(nonEmpty.map((g) => g.class)).toEqual(["chat", "image", "video"]);
+    expect(nonEmpty.map((g) => g.class)).toEqual(["chat", "image", "video", "decisions"]);
   });
 });
 

@@ -11,6 +11,7 @@ export const capabilityLabels: Record<string, string> = {
   function_calling: "Function Calling",
   reranker: "Reranker",
   embeddings: "Embeddings",
+  decisions: "Decisions",
 };
 
 export interface CapabilityBadge {
@@ -46,6 +47,7 @@ export const capabilityBadgeClass: Record<string, string> = {
   function_calling: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   reranker: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
   embeddings: "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+  decisions: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
   context: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
 };
 

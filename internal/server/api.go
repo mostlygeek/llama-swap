@@ -76,6 +76,9 @@ func renderCapabilities(caps config.ModelCapConfig) (arch map[string]any, capsMa
 			capsMap["vision"] = true
 		}
 	}
+	if hasOut && contains(caps.Out, "decisions") {
+		capsMap["decisions"] = true
+	}
 	if hasIn && hasOut {
 		if contains(caps.In, "audio") && contains(caps.Out, "text") {
 			capsMap["audio_transcriptions"] = true
