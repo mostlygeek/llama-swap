@@ -21,6 +21,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/genaimetrics"
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/mcptools/sourcecode"
@@ -242,6 +243,17 @@ func main() {
 	}
 
 	buildInfo := server.BuildInfo{Version: version, Commit: commit, Date: date}
+
+	// GenAI metrics over OTLP, opt-in through the OTEL_* environment. The
+	// exporter outlives config reloads so its cumulative totals do too.
+	genaiExporter, err := genaimetrics.FromEnv(os.Getenv, version, proxyLog)
+	if err != nil {
+		proxyLog.Warnf("OTLP metrics disabled: %v", err)
+	}
+	if genaiExporter != nil {
+		event.On(func(e server.ActivityLogEvent) { genaiExporter.Record(e.Metrics, e.Upstream) })
+		genaiExporter.Start()
+	}
 
 	// Indexed once and shared by every Server instance, including the ones a
 	// hot config reload creates: the documentation is immutable and does not
@@ -541,6 +553,13 @@ func main() {
 
 				if perfMon != nil {
 					perfMon.Stop()
+				}
+				if genaiExporter != nil {
+					// Push what finished since the last interval. Use what is
+					// left of the budget, but at least a second.
+					ctx, cancel := context.WithTimeout(context.Background(), max(time.Until(deadline), time.Second))
+					genaiExporter.Shutdown(ctx)
+					cancel()
 				}
 				if err := st.Close(); err != nil {
 					proxyLog.Warnf("store shutdown error: %v", err)

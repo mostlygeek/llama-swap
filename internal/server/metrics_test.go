@@ -11,9 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -520,7 +522,20 @@ func TestMetricsMonitor_RecordStoresHint(t *testing.T) {
 	copier.WriteHeader(http.StatusOK)
 	copier.Write([]byte(`{"usage":{"prompt_tokens":10,"completion_tokens":20},"metrics":{"time_to_first_token_ms":100,"mean_itl_ms":20}}`))
 
+	// The event carries the upstream for subscribers such as the OTLP
+	// exporter; the stored row does not.
+	emitted := make(chan ActivityLogEvent, 1)
+	cancel := event.On(func(e ActivityLogEvent) { emitted <- e })
+	defer cancel()
+
 	mm.record("m", hint.TaskEmbedding, r, copier, 0, nil, nil)
+
+	select {
+	case e := <-emitted:
+		assert.Equal(t, hint.VLLM, e.Upstream)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no ActivityLogEvent emitted")
+	}
 
 	entries := metricsEntries(t, mm)
 	require.Len(t, entries, 1)

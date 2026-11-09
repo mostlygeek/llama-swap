@@ -31,6 +31,9 @@ type ActivityLogEntry = store.ActivityLogEntry
 // ActivityLogEvent carries a single activity log entry to event subscribers.
 type ActivityLogEvent struct {
 	Metrics ActivityLogEntry
+	// Upstream is the kind of server that answered, as detected by the
+	// router. It is not stored with the entry.
+	Upstream hint.Upstream
 }
 
 func (e ActivityLogEvent) Type() uint32 {
@@ -147,8 +150,8 @@ func (mp *metricsMonitor) queueMetrics(metric ActivityLogEntry) (ActivityLogEntr
 }
 
 // emitMetric publishes an ActivityLogEvent for the given metric.
-func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry) {
-	event.Emit(ActivityLogEvent{Metrics: metric})
+func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry, upstream hint.Upstream) {
+	event.Emit(ActivityLogEvent{Metrics: metric, Upstream: upstream})
 }
 
 // overlayCaptureState sets HasCapture on entries whose capture is still in
@@ -283,13 +286,13 @@ func (mp *metricsMonitor) newEntry(modelID string, task hint.Task, r *http.Reque
 // duration is the whole session, and its tokens and metadata are the
 // session's tallies. No capture is kept: the traffic is mostly audio.
 func (mp *metricsMonitor) recordRealtime(modelID string, task hint.Task, r *http.Request, recorder *responseBodyCopier) {
-	tm, _ := mp.newEntry(modelID, task, r, recorder)
+	tm, upstream := mp.newEntry(modelID, task, r, recorder)
 	recorder.realtime.fill(&tm)
 	stored, ok := mp.queueMetrics(tm)
 	if !ok {
 		return
 	}
-	mp.emitMetric(stored)
+	mp.emitMetric(stored, upstream)
 }
 
 func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
@@ -301,7 +304,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 			return
 		}
 		tm = stored
-		mp.emitMetric(tm)
+		mp.emitMetric(tm, upstream)
 	}
 
 	// A client that hangs up is normal traffic, not a server fault: record the
@@ -329,7 +332,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		// Capture the request only; the failure is surfaced via ErrorMsg
 		// rather than storing the (possibly undisplayable) response body.
 		tm.HasCapture = mp.storeCapture(tm, r, recorder, cf&^captureRespBody, reqBody, reqHeaders, nil)
-		mp.emitMetric(tm)
+		mp.emitMetric(tm, upstream)
 		return
 	}
 
@@ -365,7 +368,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 	}
 	tm = stored
 	tm.HasCapture = mp.storeCapture(tm, r, recorder, cf, reqBody, reqHeaders, body)
-	mp.emitMetric(tm)
+	mp.emitMetric(tm, upstream)
 }
 
 // storeCapture assembles a ReqRespCapture for the stored activity row tm,
