@@ -470,6 +470,9 @@ type deferredUpgradeWriter struct {
 func (w *deferredUpgradeWriter) Header() http.Header { return w.header }
 
 func (w *deferredUpgradeWriter) WriteHeader(code int) {
+	if swaputil.IsInformationalStatus(code) {
+		return
+	}
 	if w.status == 0 {
 		w.status = code
 	}

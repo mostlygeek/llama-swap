@@ -87,6 +87,15 @@ func ShouldIgnoreWebsocket(r *http.Request, cfg config.Config) bool {
 // so it only ever appears in the access log and the activity store.
 const StatusClientClosedRequest = 499
 
+// IsInformationalStatus reports whether code is a 1xx interim status such as
+// 100 Continue or 103 Early Hints. These precede the final response and may be
+// sent more than once, so a response recorder must forward them without
+// treating them as the response status. 101 Switching Protocols is excluded: it
+// ends the HTTP exchange and is handled through Hijack.
+func IsInformationalStatus(code int) bool {
+	return code >= 100 && code <= 199 && code != http.StatusSwitchingProtocols
+}
+
 // StatusMarker is implemented by the response recorders in the middleware
 // chain. It lets a status be recorded for logging and metrics without writing
 // anything to the client.

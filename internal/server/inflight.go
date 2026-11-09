@@ -327,6 +327,12 @@ type inflightResponseWriter struct {
 }
 
 func (w *inflightResponseWriter) WriteHeader(statusCode int) {
+	// Forward 1xx interim responses (e.g. 100 Continue) without treating them
+	// as the final status.
+	if swaputil.IsInformationalStatus(statusCode) {
+		w.ResponseWriter.WriteHeader(statusCode)
+		return
+	}
 	if w.wroteHeader {
 		return
 	}
