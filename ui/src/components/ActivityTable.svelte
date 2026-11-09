@@ -276,16 +276,23 @@
   let cancelingInflightIds = $state<string[]>([]);
   let inflightNowMs = $state(performance.now());
 
+  // Only run the clock while the in-flight card is open.
   $effect(() => {
-    if (inflightRequests.length === 0) return;
+    if (!inflightOpen || inflightRequests.length === 0) return;
 
     // Refresh synchronously when the first request appears so the initial
     // render does not use the timestamp from when this component mounted.
+    let last = performance.now();
     inflightNowMs = performance.now();
 
+    // Throttle to 125ms; the elapsed time doesn't need updating every frame.
     let frame = 0;
     const tick = () => {
-      inflightNowMs = performance.now();
+      const now = performance.now();
+      if (now - last >= 125) {
+        last = now;
+        inflightNowMs = now;
+      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
