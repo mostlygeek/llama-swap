@@ -24,15 +24,22 @@ func TestGenAIMetrics_FromEnvOptIn(t *testing.T) {
 		"no endpoint":  {"OTEL_SERVICE_NAME": "x"},
 		"sdk disabled": {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318", "OTEL_SDK_DISABLED": "true"},
 		"exporter off": {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318", "OTEL_METRICS_EXPORTER": "none"},
+		"exporter OFF": {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318", "OTEL_METRICS_EXPORTER": "NONE"},
+		"other only":   {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318", "OTEL_METRICS_EXPORTER": "prometheus"},
 	} {
 		m, err := FromEnv(context.Background(), envOf(env), "v1", nil)
 		require.NoError(t, err, name)
 		assert.Nil(t, m, name)
 	}
 
-	// The SDK reads its settings from the real environment.
+	// The SDK reads its settings from the real environment. A malformed
+	// resource attribute (an entry with no value) must not turn the feature off.
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1")
-	m, err := FromEnv(context.Background(), envOf(map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:1"}), "v1", nil)
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment.name=homelab,oops")
+	m, err := FromEnv(context.Background(), envOf(map[string]string{
+		"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:1",
+		"OTEL_METRICS_EXPORTER":       "console, OTLP",
+	}), "v1", nil)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -55,6 +62,8 @@ func TestGenAIMetrics_Record(t *testing.T) {
 	m.Record(chat, hint.LlamaServer)
 	// A failed request: zeroed tokens are not usage, and no decode rate.
 	m.Record(store.ActivityLogEntry{Model: "qwen", Task: "chat", ReqPath: "/v1/completions", RespStatusCode: 503, DurationMs: 10}, hint.Unknown)
+	// A client hang-up is not a server error.
+	m.Record(store.ActivityLogEntry{Model: "aborted", Task: "chat", ReqPath: "/v1/chat/completions", RespStatusCode: 499, DurationMs: 10}, hint.LlamaServer)
 
 	var rm metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(context.Background(), &rm))
@@ -77,7 +86,7 @@ func TestGenAIMetrics_Record(t *testing.T) {
 
 	// 1.5 s falls in (1.28, 2.56], bucket 8.
 	duration := points[float64](t, byName["gen_ai.server.request.duration"])
-	require.Len(t, duration, 2)
+	require.Len(t, duration, 3)
 	d := duration[with()]
 	assert.Equal(t, uint64(2), d.Count)
 	assert.Equal(t, 3.0, d.Sum)
@@ -91,6 +100,9 @@ func TestGenAIMetrics_Record(t *testing.T) {
 		attribute.String("error.type", "503"),
 	)]
 	assert.Equal(t, uint64(1), failed.Count)
+
+	aborted := duration[attribute.NewSet(ok[0], ok[1], attribute.String("gen_ai.request.model", "aborted"))]
+	assert.Equal(t, uint64(1), aborted.Count)
 
 	tokens := points[int64](t, byName["gen_ai.client.token.usage"])
 	require.Len(t, tokens, 2)

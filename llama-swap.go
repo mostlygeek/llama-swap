@@ -253,7 +253,7 @@ func main() {
 		proxyLog.Warnf("OTLP metrics disabled: %v", err)
 	}
 	if genaiMetrics != nil {
-		event.On(func(e server.ActivityLogEvent) { genaiMetrics.Record(e.Metrics, e.Upstream) })
+		server.SetRequestObserver(genaiMetrics.Record)
 	}
 
 	// Indexed once and shared by every Server instance, including the ones a

@@ -9,6 +9,8 @@ package genaimetrics
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // Bucket boundaries advised by the GenAI semantic conventions. The SDK's
@@ -47,7 +50,7 @@ type Metrics struct {
 // no OTLP endpoint is set or metrics are disabled, so callers pay nothing
 // unless the user opted in.
 func FromEnv(ctx context.Context, getenv func(string) string, version string, logger *logmon.Monitor) (*Metrics, error) {
-	if strings.EqualFold(getenv("OTEL_SDK_DISABLED"), "true") || getenv("OTEL_METRICS_EXPORTER") == "none" {
+	if strings.EqualFold(getenv("OTEL_SDK_DISABLED"), "true") || !otlpSelected(getenv("OTEL_METRICS_EXPORTER")) {
 		return nil, nil
 	}
 	// The exporter would fall back to localhost:4318; require an explicit
@@ -55,28 +58,49 @@ func FromEnv(ctx context.Context, getenv func(string) string, version string, lo
 	if getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" && getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") == "" {
 		return nil, nil
 	}
-	exporter, err := newExporter(ctx, getenv, logger)
-	if err != nil {
-		return nil, err
-	}
 	// Later options win, so OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES
-	// override the defaults.
+	// override the defaults. A malformed attribute leaves a usable resource,
+	// so it is logged rather than disabling the feature.
 	res, err := resource.New(ctx,
 		resource.WithAttributes(semconv.ServiceName("llama-swap"), semconv.ServiceVersion(version)),
 		resource.WithTelemetrySDK(),
 		resource.WithFromEnv(),
 	)
+	if errors.Is(err, resource.ErrPartialResource) {
+		if logger != nil {
+			logger.Warnf("OTLP resource attributes partly ignored: %v", err)
+		}
+	} else if err != nil {
+		return nil, err
+	}
+	exporter, err := newExporter(ctx, getenv, logger)
 	if err != nil {
 		return nil, err
 	}
-	m, err := newMetrics(sdkmetric.NewMeterProvider(
+	provider := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)),
-	))
-	if err == nil && logger != nil {
+	)
+	m, err := newMetrics(provider)
+	if err != nil {
+		_ = provider.Shutdown(ctx)
+		return nil, err
+	}
+	if logger != nil {
 		logger.Info("OTLP GenAI metrics enabled")
 	}
-	return m, err
+	return m, nil
+}
+
+// otlpSelected reports whether OTEL_METRICS_EXPORTER, a comma-separated
+// list defaulting to otlp, asks for OTLP. Other exporters are not built in.
+func otlpSelected(v string) bool {
+	if strings.TrimSpace(v) == "" {
+		return true
+	}
+	return slices.ContainsFunc(strings.Split(v, ","), func(e string) bool {
+		return strings.EqualFold(strings.TrimSpace(e), "otlp")
+	})
 }
 
 // newExporter picks the OTLP transport from OTEL_EXPORTER_OTLP_PROTOCOL.
@@ -127,7 +151,8 @@ func (m *Metrics) Record(entry store.ActivityLogEntry, upstream hint.Upstream) {
 	op := operationName(entry)
 	provider := providerName(upstream)
 	model := m.duration.AttrRequestModel(entry.Model)
-	failed := entry.RespStatusCode >= 400
+	// A client hanging up is not a server error.
+	failed := entry.RespStatusCode >= 400 && entry.RespStatusCode != swaputil.StatusClientClosedRequest
 
 	// Includes loading the model when this request swapped it in.
 	attrs := []attribute.KeyValue{model}
@@ -164,8 +189,6 @@ func operationName(e store.ActivityLogEntry) genaiconv.OperationNameAttr {
 		return genaiconv.OperationNameChat
 	case hint.TaskEmbedding:
 		return genaiconv.OperationNameEmbeddings
-	case hint.TaskRealtime:
-		return "realtime_inference"
 	case hint.TaskUnknown:
 		return "unknown"
 	}
