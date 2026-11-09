@@ -395,7 +395,12 @@ func (d *discardResponseWriter) Header() http.Header {
 
 func (d *discardResponseWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-func (d *discardResponseWriter) WriteHeader(status int) { d.status = status }
+func (d *discardResponseWriter) WriteHeader(status int) {
+	if swaputil.IsInformationalStatus(status) {
+		return
+	}
+	d.status = status
+}
 
 // startPreload fires a background GET / at every model named in
 // Hooks.OnStartup.Preload so they are warm before the first real request.
