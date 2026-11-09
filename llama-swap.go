@@ -32,6 +32,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
 	"github.com/mostlygeek/llama-swap/internal/watcher"
+	"go.opentelemetry.io/otel"
 )
 
 var (
@@ -246,13 +247,13 @@ func main() {
 
 	// GenAI metrics over OTLP, opt-in through the OTEL_* environment. The
 	// exporter outlives config reloads so its cumulative totals do too.
-	genaiExporter, err := genaimetrics.FromEnv(os.Getenv, version, proxyLog)
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) { proxyLog.Warnf("otel: %v", err) }))
+	genaiMetrics, err := genaimetrics.FromEnv(context.Background(), os.Getenv, version, proxyLog)
 	if err != nil {
 		proxyLog.Warnf("OTLP metrics disabled: %v", err)
 	}
-	if genaiExporter != nil {
-		event.On(func(e server.ActivityLogEvent) { genaiExporter.Record(e.Metrics, e.Upstream) })
-		genaiExporter.Start()
+	if genaiMetrics != nil {
+		event.On(func(e server.ActivityLogEvent) { genaiMetrics.Record(e.Metrics, e.Upstream) })
 	}
 
 	// Indexed once and shared by every Server instance, including the ones a
@@ -554,11 +555,13 @@ func main() {
 				if perfMon != nil {
 					perfMon.Stop()
 				}
-				if genaiExporter != nil {
+				if genaiMetrics != nil {
 					// Push what finished since the last interval. Use what is
 					// left of the budget, but at least a second.
 					ctx, cancel := context.WithTimeout(context.Background(), max(time.Until(deadline), time.Second))
-					genaiExporter.Shutdown(ctx)
+					if err := genaiMetrics.Shutdown(ctx); err != nil {
+						proxyLog.Warnf("OTLP metrics shutdown error: %v", err)
+					}
 					cancel()
 				}
 				if err := st.Close(); err != nil {

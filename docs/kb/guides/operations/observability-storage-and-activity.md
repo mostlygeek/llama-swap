@@ -61,18 +61,20 @@ Histograms, labeled with `gen_ai.operation.name`, `gen_ai.provider.name` and
 - `gen_ai.server.time_per_output_token` (s): successful requests with a known
   decode rate (the Activity view's Decode column).
 
-Supported variables: `OTEL_EXPORTER_OTLP_ENDPOINT` (`/v1/metrics` is
-appended), `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` (used as-is),
-`OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME` (default `llama-swap`),
-`OTEL_RESOURCE_ATTRIBUTES`, `OTEL_METRIC_EXPORT_INTERVAL` (ms, default 60000),
-`OTEL_EXPORTER_OTLP_TIMEOUT` (ms, default 10000), and `OTEL_SDK_DISABLED=true`
-or `OTEL_METRICS_EXPORTER=none` to turn it off.
+It uses the OpenTelemetry Go SDK, which reads the standard variables:
+`OTEL_EXPORTER_OTLP_ENDPOINT` (`/v1/metrics` is appended),
+`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` (used as-is),
+`OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_COMPRESSION`,
+`OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_SERVICE_NAME` (default `llama-swap`),
+`OTEL_RESOURCE_ATTRIBUTES`, `OTEL_METRIC_EXPORT_INTERVAL` (ms, default
+60000), and `OTEL_SDK_DISABLED=true` or `OTEL_METRICS_EXPORTER=none` to turn
+it off.
 
 What goes wrong:
 
-- Only `http/json` is sent. Point the endpoint at the collector's OTLP/HTTP
-  port (4318), not the gRPC port (4317). `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`
-  only logs a warning.
+- Metrics are sent as OTLP/HTTP protobuf. Point the endpoint at the
+  collector's OTLP/HTTP port (4318), not the gRPC port (4317).
+  `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` only logs a warning.
 - Totals are cumulative from llama-swap's start and survive config reloads,
   but reset on restart. A failed push is logged and retried with the totals
   at the next interval.
