@@ -869,32 +869,39 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 	})
 
-	t.Run("metadata_precedence", func(t *testing.T) {
+	t.Run("metadata_passthrough_with_caps", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
-			Capabilities: config.ModelCapConfig{In: []string{"text"}},
+			Capabilities: config.ModelCapConfig{In: []string{"text"}, Context: 4096},
 			Metadata: map[string]any{
-				"architecture":   "should-be-dropped",
-				"custom_field":   "should-remain",
-				"capabilities":   "also-dropped",
-				"context_window": "also-dropped",
-				"other_metadata": "also-remain",
+				"architecture":   "preserved",
+				"custom_field":   "preserved",
+				"capabilities":   "preserved",
+				"context_window": 8192,
 			},
 		}))
+		// generated top-level fields come from capabilities, not metadata
 		if m.Architecture == nil || m.Architecture["input_modalities"] == nil {
 			t.Fatal("architecture should be rendered, not from metadata")
+		}
+		if m.ContextWindow != 4096 {
+			t.Errorf("top-level context_window = %d, want 4096", m.ContextWindow)
 		}
 		if m.Meta == nil || m.Meta["llamaswap"] == nil {
 			t.Fatal("meta.llamaswap should exist")
 		}
+		// custom metadata is kept as configured under meta.llamaswap
 		meta := m.Meta["llamaswap"].(map[string]any)
-		if _, ok := meta["architecture"]; ok {
-			t.Error("architecture should be filtered from metadata")
+		if meta["architecture"] != "preserved" {
+			t.Errorf("architecture = %v, want preserved", meta["architecture"])
 		}
-		if _, ok := meta["custom_field"]; !ok {
-			t.Error("custom_field should remain in metadata")
+		if meta["capabilities"] != "preserved" {
+			t.Errorf("capabilities = %v, want preserved", meta["capabilities"])
 		}
-		if _, ok := meta["context_window"]; ok {
-			t.Error("context_window should be filtered from metadata when caps are set")
+		if meta["custom_field"] != "preserved" {
+			t.Errorf("custom_field = %v, want preserved", meta["custom_field"])
+		}
+		if meta["context_window"] != float64(8192) { // JSON numbers decode as float64
+			t.Errorf("context_window = %v, want 8192", meta["context_window"])
 		}
 	})
 
