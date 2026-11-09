@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -42,7 +43,7 @@ type Metrics struct {
 	tpot     genaiconv.ServerTimePerOutputToken
 }
 
-// FromEnv builds Metrics exporting over OTLP/HTTP. It returns nil, nil when
+// FromEnv builds Metrics exporting over OTLP. It returns nil, nil when
 // no OTLP endpoint is set or metrics are disabled, so callers pay nothing
 // unless the user opted in.
 func FromEnv(ctx context.Context, getenv func(string) string, version string, logger *logmon.Monitor) (*Metrics, error) {
@@ -54,15 +55,7 @@ func FromEnv(ctx context.Context, getenv func(string) string, version string, lo
 	if getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" && getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") == "" {
 		return nil, nil
 	}
-	protocol := getenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL")
-	if protocol == "" {
-		protocol = getenv("OTEL_EXPORTER_OTLP_PROTOCOL")
-	}
-	if protocol != "" && protocol != "http/protobuf" && logger != nil {
-		logger.Warnf("OTLP protocol %q is not supported, sending metrics as http/protobuf", protocol)
-	}
-
-	exporter, err := otlpmetrichttp.New(ctx)
+	exporter, err := newExporter(ctx, getenv, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +77,25 @@ func FromEnv(ctx context.Context, getenv func(string) string, version string, lo
 		logger.Info("OTLP GenAI metrics enabled")
 	}
 	return m, err
+}
+
+// newExporter picks the OTLP transport from OTEL_EXPORTER_OTLP_PROTOCOL.
+// The default is http/protobuf, as the OTLP exporter specification advises.
+func newExporter(ctx context.Context, getenv func(string) string, logger *logmon.Monitor) (sdkmetric.Exporter, error) {
+	protocol := getenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL")
+	if protocol == "" {
+		protocol = getenv("OTEL_EXPORTER_OTLP_PROTOCOL")
+	}
+	switch protocol {
+	case "grpc":
+		return otlpmetricgrpc.New(ctx)
+	case "", "http/protobuf":
+	default:
+		if logger != nil {
+			logger.Warnf("OTLP protocol %q is not supported, sending metrics as http/protobuf", protocol)
+		}
+	}
+	return otlpmetrichttp.New(ctx)
 }
 
 func newMetrics(provider *sdkmetric.MeterProvider) (*Metrics, error) {

@@ -400,6 +400,8 @@ go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/otel v1.47.0 h1:j7ALJ/zgkS7Z6aeJW09p8VC9804bC+PpeTfCD4XPnOM=
 go.opentelemetry.io/otel v1.47.0/go.mod h1:8wS9O2qfXrYrzp6hIF/HOYJJf/wIhFPhR2xLuP+iXQU=
+go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.47.0 h1:LaLVGJtIzHcvHjVs2OftmKcc+M9mdOqS8vZ1fBD1Yes=
+go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.47.0/go.mod h1:vF6H5sNDuQBJWgSX00iZgbIqk2MZZoVMH0ar5t5bOpw=
 go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.47.0 h1:7kszRN4Ze5GeAkUnBjBSUIunVBMA+mZIG04auueqguM=
 go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.47.0/go.mod h1:CLzakYy8jOdkBfcveCWYkeKJxujcF4xPhh2Z7IfE98U=
 go.opentelemetry.io/otel/log v1.47.0 h1:cOTS1CcLbSQeZKanGJ+0JpF/+t4PELi3O3bbl2lqCcI=

@@ -2,6 +2,7 @@ package genaimetrics
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -112,4 +113,25 @@ func points[N int64 | float64](t *testing.T, m metricdata.Metrics) map[attribute
 		out[p.Attributes] = p
 	}
 	return out
+}
+
+func TestGenAIMetrics_ExporterProtocol(t *testing.T) {
+	for protocol, want := range map[string]string{
+		"":              "*otlpmetrichttp.Exporter",
+		"http/protobuf": "*otlpmetrichttp.Exporter",
+		"http/json":     "*otlpmetrichttp.Exporter", // unsupported: falls back with a warning
+		"grpc":          "*otlpmetricgrpc.Exporter",
+	} {
+		exp, err := newExporter(context.Background(), envOf(map[string]string{"OTEL_EXPORTER_OTLP_PROTOCOL": protocol}), nil)
+		require.NoError(t, err, protocol)
+		assert.Equal(t, want, fmt.Sprintf("%T", exp), protocol)
+	}
+
+	// The signal-specific variable wins.
+	exp, err := newExporter(context.Background(), envOf(map[string]string{
+		"OTEL_EXPORTER_OTLP_PROTOCOL":         "http/protobuf",
+		"OTEL_EXPORTER_OTLP_METRICS_PROTOCOL": "grpc",
+	}), nil)
+	require.NoError(t, err)
+	assert.Equal(t, "*otlpmetricgrpc.Exporter", fmt.Sprintf("%T", exp))
 }

@@ -38,7 +38,7 @@ length or tool/vision capabilities; configure those manually when needed.
 ## OpenTelemetry (OTLP) metrics
 
 llama-swap can push per-request metrics that follow the OpenTelemetry GenAI
-semantic conventions to an OTLP/HTTP endpoint, such as an OpenTelemetry
+semantic conventions to an OTLP endpoint, such as an OpenTelemetry
 Collector. They come from the same record as the Activity view, so requests
 served by a model that has since been swapped out are still counted. It is
 off unless an OTLP endpoint is set in the environment; there is no config
@@ -62,7 +62,8 @@ Histograms, labeled with `gen_ai.operation.name`, `gen_ai.provider.name` and
   decode rate (the Activity view's Decode column).
 
 It uses the OpenTelemetry Go SDK, which reads the standard variables:
-`OTEL_EXPORTER_OTLP_ENDPOINT` (`/v1/metrics` is appended),
+`OTEL_EXPORTER_OTLP_ENDPOINT` (`/v1/metrics` is appended for HTTP),
+`OTEL_EXPORTER_OTLP_PROTOCOL` (`http/protobuf`, the default, or `grpc`),
 `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` (used as-is),
 `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_COMPRESSION`,
 `OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_SERVICE_NAME` (default `llama-swap`),
@@ -72,9 +73,10 @@ it off.
 
 What goes wrong:
 
-- Metrics are sent as OTLP/HTTP protobuf. Point the endpoint at the
-  collector's OTLP/HTTP port (4318), not the gRPC port (4317).
-  `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` only logs a warning.
+- The endpoint port must match the protocol: 4318 for the default
+  `http/protobuf`, 4317 for `grpc`. A mismatch shows up as failed exports in
+  the proxy log. `http/json` is not supported and falls back to
+  `http/protobuf` with a warning.
 - Totals are cumulative from llama-swap's start and survive config reloads,
   but reset on restart. A failed push is logged and retried with the totals
   at the next interval.

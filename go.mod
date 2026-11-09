@@ -20,6 +20,7 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/yusufpapurcu/wmi v1.2.4
 	go.opentelemetry.io/otel v1.47.0
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.47.0
 	go.opentelemetry.io/otel/metric v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
