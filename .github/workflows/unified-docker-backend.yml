@@ -138,11 +138,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      # Hosted runners of the same label vary in speed: the same ik_llama.cpp
+      # compile has taken 3h on one and over 5.5h on another. Logged so a slow
+      # build can be told apart from a slow upstream change.
+      - name: Runner hardware
+        run: |
+          echo "CPUs: $(nproc)"
+          lscpu | grep -E '^(Model name|Thread\(s\) per core|Core\(s\) per socket|Socket\(s\))' || true
+          free -h | head -2
+
       # Skipped entirely when this project's upstream commit and recipe are
       # both unchanged since a previous run published them.
+      #
+      # COMPILE_TIMEOUT_MINUTES stops the compile well inside the job's 330
+      # minutes. A compile stopped there still publishes its ccache, so the
+      # next run picks up where it left off. A job cancelled by the timeout
+      # above publishes nothing and the next run starts over.
       - name: Build and publish artifacts
         env:
           PLATFORM: ${{ inputs.platform }}
+          COMPILE_TIMEOUT_MINUTES: "285"
           LLAMA_REF: ${{ inputs.llama_hash }}
           WHISPER_REF: ${{ inputs.whisper_hash }}
           SD_REF: ${{ inputs.sd_hash }}

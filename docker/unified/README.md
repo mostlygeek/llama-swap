@@ -48,7 +48,8 @@ CMake build directories are keyed on the backend, so the two CUDA variants share
 them. Building one right after the other on the same machine reconfigures and
 recompiles from scratch — correct, because every install script clears
 `CMakeCache.txt` before configuring, but not incremental. CI is unaffected: each
-variant's jobs get their own runners and start cold anyway.
+variant's jobs get their own runners and seed ccache from that variant's
+published cache (see [Compiler cache](#compiler-cache)).
 
 ### Platforms
 
@@ -142,6 +143,7 @@ Which gives, concretely:
 |---|---|
 | `runtime.Dockerfile`, `rootless.Dockerfile`, this README | nothing |
 | `install-sd.sh` or `sd.Dockerfile` | sd, all three variants |
+| `ccache-build.sh` | all 5 projects of every variant |
 | `base-cuda.Dockerfile` | the base and all 5 projects of **both** CUDA variants; no Vulkan |
 | `CMAKE_CUDA_ARCHITECTURES` or `CUDA_VERSION` env var | the base and all 5 projects of the one variant being built, and its runtime image |
 | the built-in `CMAKE_CUDA_ARCHITECTURES`/`CUDA_VERSION` default for one variant, in `build-image.sh` | that variant only, and only the platform whose default changed |
@@ -150,6 +152,34 @@ Which gives, concretely:
 and means a project that overruns its own job no longer discards the ones that
 finished, reruns are idempotent, and a failed assemble can be retried without
 recompiling anything.
+
+### Compiler cache
+
+CI creates a new buildx builder for every job, so the BuildKit cache mount
+holding ccache starts empty each time. Without anything else, every nightly
+build would compile ik_llama.cpp's ~430 CUDA files from scratch: about 3h on a
+typical runner and over 5.5h on a slow one, which is longer than the job limit.
+
+`--stage=<project>` therefore keeps ccache in the registry, one mutable tag per
+project, variant and platform: `:ccache-<project>-<variant>[-<arch>]`. Each run:
+
+1. seeds `/ccache` from that tag, pinned by digest, when it exists
+2. compiles, stopping after `COMPILE_TIMEOUT_MINUTES` if it is set (CI uses 285)
+3. publishes the updated cache to the tag (the `ccache` stage of the project's
+   Dockerfile), even when the compile failed or ran out of time
+4. publishes the artifacts image, which fails if the compile did not finish
+
+`ccache-build.sh` wraps the install script to do steps 1–3 inside the build,
+and logs the runner's CPU count and model, the compile time and the ccache hit
+rate. A compile stopped by the time limit fails that night's build, but the
+objects it compiled are kept, so the next run continues from there. A job
+cancelled by GitHub's own timeout publishes nothing. That is why
+`COMPILE_TIMEOUT_MINUTES` is set well below the job's `timeout-minutes`.
+
+The cache is not keyed on the upstream commit, since the point is to reuse
+objects across commits. ccache checks the compiler and every input of each
+object itself. An upstream change to a header that every CUDA file includes
+still means a full recompile.
 
 ### Driving it by hand
 

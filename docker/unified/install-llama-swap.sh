@@ -52,7 +52,9 @@ esac
 URL="https://github.com/${REPO}/releases/download/v${VERSION}/llama-swap_${VERSION}_linux_${ARCH}.tar.gz"
 echo "=== Downloading llama-swap v${VERSION} ==="
 echo "URL: $URL"
-curl -fSL -o /tmp/llama-swap.tar.gz "$URL"
+# GitHub's release download returns an occasional 502/504; retry those rather
+# than failing an assemble job that has already waited hours on the compiles.
+curl -fSL --retry 5 --retry-all-errors --retry-delay 10 -o /tmp/llama-swap.tar.gz "$URL"
 tar -xzf /tmp/llama-swap.tar.gz -C /install/bin/
 rm /tmp/llama-swap.tar.gz
 

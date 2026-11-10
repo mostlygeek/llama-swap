@@ -89,6 +89,12 @@ ARTIFACT_REPO="${ARTIFACT_REPO:-ghcr.io/mostlygeek/llama-swap-build}"
 # Upstream projects compiled into the image.
 ALL_PROJECTS=(whisper sd audio llama ik-llama)
 
+# Minutes a --stage compile may run before it is stopped. Empty means no limit.
+# CI sets it below the job's own timeout: a compile stopped here still
+# publishes the ccache it built up, so the next run continues from there, while
+# a job cancelled by GitHub publishes nothing. See ccache-build.sh.
+COMPILE_TIMEOUT_MINUTES="${COMPILE_TIMEOUT_MINUTES:-}"
+
 for arg in "$@"; do
     case $arg in
         --cuda)    BACKEND="cuda";   VARIANT="cuda" ;;
@@ -145,6 +151,8 @@ for arg in "$@"; do
             echo "  DATE_TAG             Date suffix for published tags (default: today, UTC)"
             echo "  ARTIFACT_REPO        Registry for base and artifacts images"
             echo "                       (default: ghcr.io/mostlygeek/llama-swap-build)"
+            echo "  COMPILE_TIMEOUT_MINUTES  Stop a --stage compile after this many minutes,"
+            echo "                       keeping its ccache for the next run (default: no limit)"
             exit 0
             ;;
     esac
@@ -368,10 +376,19 @@ artifact_tag() {
     recipe="$( {
         cat "${SCRIPT_DIR}/${project}.Dockerfile"
         cat "${SCRIPT_DIR}/install-${project}.sh"
+        cat "${SCRIPT_DIR}/ccache-build.sh"
         echo "base=$(base_tag)"
         echo "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
     } | sha256sum | cut -c1-8 )"
     echo "${ARTIFACT_REPO}:art-${project}-${VARIANT}${ARCH_TAG}-${commit:0:12}-${recipe}"
+}
+
+# Where --stage keeps a project's compiler cache between runs. One mutable tag
+# per project, variant and platform: each run seeds from it and overwrites it.
+# Not keyed on the commit, since the point is to reuse objects across commits;
+# ccache itself checks the compiler and every input of each object.
+ccache_tag() {
+    echo "${ARTIFACT_REPO}:ccache-${1}-${VARIANT}${ARCH_TAG}"
 }
 
 image_exists() {
@@ -583,20 +600,35 @@ build_base() {
         "${SCRIPT_DIR}"
 }
 
+# The ccache image a project build seeds from. --stage sets it to the
+# previously published cache when there is one; otherwise it is the builder
+# base, which has no cache in it, and the compile starts cold.
+CCACHE_SEED=""
+# 1 makes the compile stage copy its cache out for the `ccache` target.
+CCACHE_EXPORT=""
+
+# build_project <project> <tag> <target> <output flags...>
+# An empty target builds the Dockerfile's last stage, the artifacts image.
 build_project() {
-    local project="$1"; shift
+    local project="$1" tag="$2" target="$3"; shift 3
     local output=("$@")
-    local tag
-    tag="$(artifact_tag "${project}")"
+    local target_args=()
+    if [[ -n "${target}" ]]; then
+        target_args+=(--target "${target}")
+    fi
     echo ""
     echo "=========================================="
-    echo "Building ${project} artifacts (${VARIANT})..."
+    echo "Building ${project} ${target:-artifacts} (${VARIANT})..."
     echo "=========================================="
     echo ""
     DOCKER_BUILDKIT=1 docker buildx build "${output[@]}" \
         -f "${SCRIPT_DIR}/${project}.Dockerfile" \
         -t "${tag}" \
+        "${target_args[@]}" \
         --build-arg "BUILDER_BASE=${BASE_TAG}" \
+        --build-arg "CCACHE_SEED=${CCACHE_SEED:-${BASE_TAG}}" \
+        --build-arg "CCACHE_EXPORT=${CCACHE_EXPORT}" \
+        --build-arg "COMPILE_TIMEOUT_MINUTES=${COMPILE_TIMEOUT_MINUTES}" \
         --build-arg "BACKEND=${BACKEND}" \
         --build-arg "WHISPER_FFMPEG=${WHISPER_FFMPEG}" \
         --build-arg "WHISPER_COMMIT_HASH=${WHISPER_HASH}" \
@@ -687,7 +719,32 @@ if [[ "$MODE" == "stage" ]]; then
             echo "  Run: build-image.sh --${VARIANT} --stage=base" >&2
             exit 1
         fi
-        build_project "${STAGE_TARGET}" --push
+        # Two builds from one compile. The first publishes the compiler cache
+        # and succeeds even when the compile failed or ran out of time, so the
+        # next run can start from it. The second reuses that compile from the
+        # builder's cache and publishes the artifacts, failing if the install
+        # did not complete.
+        CCACHE_TAG="$(ccache_tag "${STAGE_TARGET}")"
+        if seed_digest="$(docker buildx imagetools inspect "${CCACHE_TAG}" --format '{{.Manifest.Digest}}' 2>/dev/null)" \
+            && [[ -n "${seed_digest}" ]]; then
+            # Pinned by digest: the first build overwrites this tag, and the
+            # second has to resolve the same seed to reuse the compile rather
+            # than run it again.
+            CCACHE_SEED="${CCACHE_TAG}@${seed_digest}"
+            echo "Seeding the compiler cache from ${CCACHE_SEED}"
+        else
+            echo "No compiler cache published at ${CCACHE_TAG} yet, compiling cold"
+        fi
+        CCACHE_EXPORT=1
+        if build_project "${STAGE_TARGET}" "${CCACHE_TAG}" ccache --push; then
+            echo "Published compiler cache: ${CCACHE_TAG}"
+        else
+            echo "WARNING: could not publish the compiler cache, the next run compiles cold" >&2
+        fi
+        # --no-cache already applied to the compile above; repeating it here
+        # would compile everything a second time.
+        CACHE_ARGS=()
+        build_project "${STAGE_TARGET}" "${TARGET_TAG}" "" --push
     fi
 
     echo ""
@@ -722,7 +779,7 @@ else
     # Unified: compile everything locally, then assemble from the local images.
     build_base --load
     while read -r project; do
-        build_project "${project}" --load
+        build_project "${project}" "$(artifact_tag "${project}")" "" --load
     done < <(backend_projects)
 fi
 
