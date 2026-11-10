@@ -1009,3 +1009,30 @@ func TestFetchContext_BodyOverSizeCap(t *testing.T) {
 		t.Fatalf("err = %v, want it to wrap *http.MaxBytesError with Limit 10", err)
 	}
 }
+
+func TestIsAutoloadDisabled(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		target string
+		want   bool
+	}{
+		{"false", http.MethodGet, "/props?model=m&autoload=false", true},
+		{"zero", http.MethodGet, "/props?model=m&autoload=0", true},
+		{"garbage", http.MethodGet, "/props?model=m&autoload=nope", true},
+		{"true", http.MethodGet, "/props?model=m&autoload=true", false},
+		{"one", http.MethodGet, "/props?model=m&autoload=1", false},
+		{"absent", http.MethodGet, "/props?model=m", false},
+		{"empty", http.MethodGet, "/props?model=m&autoload=", false},
+		{"other path", http.MethodGet, "/v1/audio/voices?model=m&autoload=false", false},
+		{"post", http.MethodPost, "/props?model=m&autoload=false", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(tc.method, tc.target, nil)
+			if got := IsAutoloadDisabled(r); got != tc.want {
+				t.Errorf("IsAutoloadDisabled(%s %s) = %v, want %v", tc.method, tc.target, got, tc.want)
+			}
+		})
+	}
+}

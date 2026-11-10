@@ -137,6 +137,26 @@ the server actually serves is decided by its command line. Without the
 flag an embedding model that reports `text -> text` from `/props` is
 indistinguishable from a chat model in the listing.
 
+## Reading /props without loading the model
+
+`GET /props?model=<id>` is forwarded to the model, so by default it starts
+the model, and under a tight `capacity` pool it stops another model to make
+room. A client that reads the context size of every model in the list, such
+as the llama.vscode extension, would load them one after another.
+
+Add `autoload=false`, the same parameter llama-server's router mode takes, to
+read `/props` only from a model that is already running:
+
+```bash
+curl -i "localhost:8080/props?model=my-model&autoload=false"
+```
+
+A model that is ready or still starting answers as usual. Any other model is
+not started and nothing is stopped; the request gets `409 Conflict`. The
+client can then use `context_length` from `/v1/models`, which is filled in
+after the model has been loaded once. Only `true` and `1` mean autoload, so
+`autoload=0` also skips loading. Other endpoints ignore the parameter.
+
 ## Turning discovery off
 
 A field set to its zero value (`false`, `0`, `[]`) cannot be told apart from
