@@ -79,19 +79,6 @@ func ShouldIgnoreWebsocket(r *http.Request, cfg config.Config) bool {
 	return ok && mc.Compat.IgnoreWebsockets
 }
 
-// IsAutoloadDisabled reports whether r is a GET /props request that opted out
-// of starting its model with autoload=false, as llama-server's router mode
-// allows. Clients that probe every listed model use it to read a model's
-// settings without loading it. Only "true" and "1" mean autoload; an empty or
-// absent parameter keeps the default of loading the model.
-func IsAutoloadDisabled(r *http.Request) bool {
-	if r.Method != http.MethodGet || r.URL.Path != "/props" {
-		return false
-	}
-	v := r.URL.Query().Get("autoload")
-	return v != "" && v != "true" && v != "1"
-}
-
 // StatusClientClosedRequest mirrors nginx's non-standard 499 "Client Closed
 // Request". llama-swap records it when a client disconnects before any
 // response was written, so an abandoned request is not filed as a success (a

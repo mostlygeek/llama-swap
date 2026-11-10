@@ -548,23 +548,6 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// GET /props?autoload=false must not start a model or evict another one
-	// to make room. Like the ignored websocket above, the check sits outside
-	// the scheduler. A model that is starting is let through: the request
-	// waits for it like any other and causes no swap.
-	if swaputil.IsAutoloadDisabled(req) {
-		p, ok := b.processes[data.ModelID]
-		if !ok {
-			swaputil.SendError(w, req, scheduler.ErrModelNotFound)
-			return
-		}
-		if st := p.State(); st != process.StateReady && st != process.StateStarting {
-			swaputil.SendResponse(w, req, http.StatusConflict,
-				fmt.Sprintf("model %s is not loaded; autoload=false requests cannot start it", data.ModelID))
-			return
-		}
-	}
-
 	hr := scheduler.HandlerReq{
 		Model: data.ModelID,
 		Ctx:   req.Context(),
