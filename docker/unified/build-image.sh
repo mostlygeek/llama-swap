@@ -86,6 +86,14 @@ DATE_TAG="${DATE_TAG:-}"
 # in containers.yml, which is scoped to `package: llama-swap`.
 ARTIFACT_REPO="${ARTIFACT_REPO:-ghcr.io/mostlygeek/llama-swap-build}"
 
+# Registry holding each project's compiler cache between --stage runs.
+#
+# A package of its own because a cache tag is overwritten every run, leaving the
+# previous version untagged. Kept apart from ARTIFACT_REPO, every version here
+# that has no tag is garbage, so CI deletes them after each run without any risk
+# to the base and artifacts images.
+CCACHE_REPO="${CCACHE_REPO:-ghcr.io/mostlygeek/llama-swap-ccache}"
+
 # Upstream projects compiled into the image.
 ALL_PROJECTS=(whisper sd audio llama ik-llama)
 
@@ -151,6 +159,8 @@ for arg in "$@"; do
             echo "  DATE_TAG             Date suffix for published tags (default: today, UTC)"
             echo "  ARTIFACT_REPO        Registry for base and artifacts images"
             echo "                       (default: ghcr.io/mostlygeek/llama-swap-build)"
+            echo "  CCACHE_REPO          Registry for --stage compiler caches"
+            echo "                       (default: ghcr.io/mostlygeek/llama-swap-ccache)"
             echo "  COMPILE_TIMEOUT_MINUTES  Stop a --stage compile after this many minutes,"
             echo "                       keeping its ccache for the next run (default: no limit)"
             exit 0
@@ -388,7 +398,7 @@ artifact_tag() {
 # Not keyed on the commit, since the point is to reuse objects across commits;
 # ccache itself checks the compiler and every input of each object.
 ccache_tag() {
-    echo "${ARTIFACT_REPO}:ccache-${1}-${VARIANT}${ARCH_TAG}"
+    echo "${CCACHE_REPO}:ccache-${1}-${VARIANT}${ARCH_TAG}"
 }
 
 image_exists() {
@@ -736,7 +746,9 @@ if [[ "$MODE" == "stage" ]]; then
             echo "No compiler cache published at ${CCACHE_TAG} yet, compiling cold"
         fi
         CCACHE_EXPORT=1
-        if build_project "${STAGE_TARGET}" "${CCACHE_TAG}" ccache --push; then
+        # No provenance attestation: it would turn the cache into an index with
+        # untagged children, which the untagged-version cleanup would delete.
+        if build_project "${STAGE_TARGET}" "${CCACHE_TAG}" ccache --push --provenance=false; then
             echo "Published compiler cache: ${CCACHE_TAG}"
         else
             echo "WARNING: could not publish the compiler cache, the next run compiles cold" >&2

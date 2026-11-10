@@ -161,7 +161,8 @@ build would compile ik_llama.cpp's ~430 CUDA files from scratch: about 3h on a
 typical runner and over 5.5h on a slow one, which is longer than the job limit.
 
 `--stage=<project>` therefore keeps ccache in the registry, one mutable tag per
-project, variant and platform: `:ccache-<project>-<variant>[-<arch>]`. Each run:
+project, variant and platform: `:ccache-<project>-<variant>[-<arch>]` in
+`CCACHE_REPO` (default `ghcr.io/mostlygeek/llama-swap-ccache`). Each run:
 
 1. seeds `/ccache` from that tag, pinned by digest, when it exists
 2. compiles, stopping after `COMPILE_TIMEOUT_MINUTES` if it is set (CI uses 285)
@@ -175,6 +176,11 @@ rate. A compile stopped by the time limit fails that night's build, but the
 objects it compiled are kept, so the next run continues from there. A job
 cancelled by GitHub's own timeout publishes nothing. That is why
 `COMPILE_TIMEOUT_MINUTES` is set well below the job's `timeout-minutes`.
+
+Overwriting a tag leaves the previous cache image untagged. Those are in a
+package of their own so the `delete-stale-ccache` job in `unified-docker.yml`
+can delete every untagged version after each run without touching the base and
+artifacts images in `llama-swap-build`.
 
 The cache is not keyed on the upstream commit, since the point is to reuse
 objects across commits. ccache checks the compiler and every input of each
