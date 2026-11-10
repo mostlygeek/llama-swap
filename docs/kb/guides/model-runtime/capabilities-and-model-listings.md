@@ -151,11 +151,15 @@ read `/props` only from a model that is already running:
 curl -i "localhost:8080/props?model=my-model&autoload=false"
 ```
 
-A model that is ready or still starting answers as usual. Any other model is
-not started and nothing is stopped; the request gets `409 Conflict`. The
-client can then use `context_length` from `/v1/models`, which is filled in
-after the model has been loaded once. Only `true` and `1` mean autoload, so
-`autoload=0` also skips loading. Other endpoints ignore the parameter.
+A local model that is ready or still starting answers as usual. A local model
+in any other state is not started and nothing is stopped; the request gets
+`409 Conflict`. The client can then use `context_length` from `/v1/models`,
+which is filled in after the model has been loaded once.
+
+Only `autoload=false` and other values that are not `true` or `1` skip loading,
+so `autoload=0` does too. Leaving the parameter out, or empty, loads the model
+as before. Only `/props` checks it, and only for local models. A request for a
+peer model is forwarded unchanged, and the peer decides what to do with it.
 
 ## Turning discovery off
 
