@@ -5,7 +5,7 @@ FROM ${BUILDER_BASE} AS build
 ARG BACKEND=cuda
 ARG AUDIO_COMMIT_HASH=main
 COPY install-audio.sh /build/
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN { apt-get update || { sleep 30; apt-get update; } || { sleep 90; apt-get update; }; } && apt-get install -y --no-install-recommends \
     libmp3lame-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \

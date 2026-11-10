@@ -27,7 +27,7 @@ ENV CCACHE_DIR=/ccache
 ENV CCACHE_MAXSIZE=2G
 ENV PATH="/usr/lib/ccache:${PATH}"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN { apt-get update || { sleep 30; apt-get update; } || { sleep 90; apt-get update; }; } && apt-get install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
     curl ca-certificates ccache make wget \
     pkg-config libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
