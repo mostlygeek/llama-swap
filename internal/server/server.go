@@ -435,10 +435,14 @@ func (s *Server) routes() {
 	}
 	for _, path := range modelGetRoutes {
 		h := modelChain.Then(dispatch)
-		if path == "/v1/realtime" {
+		switch path {
+		case "/v1/realtime":
 			// Realtime transcription clients name the model in a
 			// session.update event rather than the URL; see realtime_defer.go.
 			h = deferRealtimeModel(authMW, h)
+		case "/props":
+			// autoload=false must not start the model; see props.go.
+			h = modelChain.ThenFunc(s.handleProps)
 		}
 		mux.Handle("GET "+path, h)
 	}
