@@ -15,10 +15,11 @@ import (
 // another. Every other request, and every model that is running, goes to the
 // normal dispatch.
 //
-// A model that is starting is let through: the request waits for it like any
-// other and causes no swap.
+// Only "true" and "1" mean autoload, matching llama-server; an empty or absent
+// parameter keeps the default of loading the model. A model that is starting is
+// let through: the request waits for it like any other and causes no swap.
 func (s *Server) handleProps(w http.ResponseWriter, r *http.Request) {
-	if autoloadDisabled(r) {
+	if v := r.URL.Query().Get("autoload"); v != "" && v != "true" && v != "1" {
 		if data, err := swaputil.FetchContext(r, s.cfg); err == nil && s.local.Handles(data.ModelID) {
 			state := s.local.RunningModels()[data.ModelID]
 			if state != process.StateReady && state != process.StateStarting {
@@ -29,12 +30,4 @@ func (s *Server) handleProps(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.localPeerHandler(w, r)
-}
-
-// autoloadDisabled reports whether r asks not to load its model. Only "true"
-// and "1" mean autoload, matching llama-server; an empty or absent parameter
-// keeps the default of loading the model.
-func autoloadDisabled(r *http.Request) bool {
-	v := r.URL.Query().Get("autoload")
-	return v != "" && v != "true" && v != "1"
 }
