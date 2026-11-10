@@ -367,7 +367,7 @@ from `nvcc` altogether and those cards still need an image:
 |---|---|---|---|---|
 | `unified-cuda` | amd64 | 12.9.1 | `60;61;70;75;86;89` | Pascal (P100, GTX 10xx, P40), Volta (V100), Turing, Ampere, Ada |
 | `unified-cuda13` | amd64 | 13.3.1 | `75;80;86;89;90;100;120` | Turing (RTX 20xx, GTX 16xx, Quadro T-series), Ampere (A100, RTX 30xx), Ada (RTX 40xx), Hopper (H100), Blackwell (100 on datacenter parts, 120 on GeForce RTX 50xx and RTX PRO) |
-| `unified-cuda13` | arm64 | 13.3.1 | `90;100;120;121` | GB10 (DGX Spark) at 121, GH200 at 90, GB200 at 100, and a discrete GeForce or RTX PRO card in an aarch64 host at 120 |
+| `unified-cuda13` | arm64 | 13.3.1 | `100;120;121` | Blackwell only: GB10 (DGX Spark) at 121, GB200 at 100, and a discrete GeForce or RTX PRO card in an aarch64 host at 120. Hopper's GH200 is not supported |
 
 Those are the compute capabilities compiled as SASS. For most entries CMake also
 emits PTX, so an architecture above one of them still runs by JIT-compiling that

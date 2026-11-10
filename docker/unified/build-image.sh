@@ -153,7 +153,7 @@ for arg in "$@"; do
             echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
             echo "                       (default: 60;61;70;75;86;89 for --cuda,"
             echo "                       75;80;86;89;90;100;120 for --cuda13 on amd64,"
-            echo "                       90;100;120;121 for --cuda13 on arm64)"
+            echo "                       100;120;121 for --cuda13 on arm64)"
             echo "  CUDA_VERSION         CUDA toolkit/runtime version as an nvidia/cuda image tag"
             echo "                       (default: 12.9.1 for --cuda, 13.3.1 for --cuda13)"
             echo "  DATE_TAG             Date suffix for published tags (default: today, UTC)"
@@ -216,10 +216,11 @@ fi
 #
 # The architecture lists differ by platform because the hardware does. On amd64
 # the range is Turing through Blackwell on PCIe cards. On arm64 the only NVIDIA
-# parts that exist are Grace pairings, so Pascal through Ada are pointless and
-# 121 -- GB10, the Blackwell GPU in DGX Spark, and the whole reason for an arm64
-# image -- is essential. 90 is GH200, 100 is GB200, 120 covers a discrete
-# GeForce or RTX PRO card in an aarch64 host.
+# parts that exist are Grace pairings, so the list is Blackwell only. 121 --
+# GB10, the Blackwell GPU in DGX Spark, and the whole reason for an arm64 image
+# -- is essential. 100 is GB200, 120 covers a discrete GeForce or RTX PRO card in
+# an aarch64 host. Hopper's GH200 (90) is left out to save compile time; with
+# nothing below 100 in the list, a GH200 cannot run this image.
 #
 # Two things about Blackwell shape these lists. It spans two CUDA major versions
 # -- datacenter parts are compute 10.x (100, 103), GeForce, RTX PRO and GB10 are
@@ -238,7 +239,7 @@ fi
 case "${VARIANT}:${ARCH}" in
     cuda13:arm64)
         CUDA_VERSION="${CUDA_VERSION:-13.3.1}"
-        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-90;100;120;121}"
+        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-100;120;121}"
         ;;
     cuda13:*)
         CUDA_VERSION="${CUDA_VERSION:-13.3.1}"
