@@ -33,7 +33,7 @@ func TestChangelog_Versions(t *testing.T) {
 	require.Len(t, versions, len(names))
 	// oldest first, newest last, in ascending version number
 	require.Equal(t, "v200", versions[0])
-	require.Equal(t, "v271", versions[len(versions)-1])
+	require.Equal(t, "v272", versions[len(versions)-1])
 	for i := 1; i < len(versions); i++ {
 		prev, err := strconv.Atoi(versions[i-1][1:])
 		require.NoError(t, err)

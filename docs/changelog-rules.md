@@ -19,9 +19,13 @@ Template Example:
 ```
 ## v255 (Jan 2, 2026)
 
+A very short one line summary of the key changes in this release.
+
 > maintainer notes
 
-- [PR #1](https://github.com/mostlygeek/llama-swap/pull/1) Title from PR: one line summary of changes [@contributor](https://github.com/contributor)
-- [PR #2](https://github.com/mostlygeek/llama-swap/pull/2) Title from PR: one line summary of changes [@contributor](https://github.com/contributor)
+----
+
+- [PR #1](https://github.com/mostlygeek/llama-swap/pull/1) Title from PR: one line, very short summary of changes.  [@contributor](https://github.com/contributor)
+- [PR #2](https://github.com/mostlygeek/llama-swap/pull/1) Title from PR: one line, very short summary of changes.  [@contributor](https://github.com/contributor)
 - ...
 ```
