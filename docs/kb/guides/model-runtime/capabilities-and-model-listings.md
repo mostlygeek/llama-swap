@@ -3,8 +3,8 @@ title: Model capabilities and model listings
 summary: Advertise images, tools and context length in /v1/models, automatically or by hand.
 category: guides
 tags: [capabilities, voices, speech, models, tools, vision, context, autodetect, embeddings, reranker, llama-server, vllm, halogen, playground, decisions]
-config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, models.*.capabilities.voices, models.*.capabilities.embeddings, models.*.capabilities.reranker, store.path]
-updated: 2026-11-06
+config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, models.*.capabilities.voices, models.*.capabilities.embeddings, models.*.capabilities.reranker, models.*.metadata, store.path]
+updated: 2026-11-10
 ---
 
 # Model capabilities and model listings
@@ -185,6 +185,45 @@ answer, and voices are not shown in `/v1/models`.
 When `voices` is empty or unset there is no override, and the request goes to
 the upstream server as before, which starts the model if it is not running.
 This applies to local models only, not peers.
+
+## Custom metadata in model listings
+
+A model's `metadata` block is copied into `/v1/models` as written, under
+`meta.llamaswap`. It is separate from the fields generated from
+capabilities, which sit at the top level of the model entry, so the two never
+overwrite each other:
+
+```yaml
+models:
+  example:
+    cmd: llama-server -m model.gguf --port ${PORT}
+    metadata:
+      context_window: 59940
+      reasoning: true
+```
+
+Once the model has been loaded and its capabilities discovered, the listing
+looks like this:
+
+```json
+{
+  "id": "example",
+  "context_length": 60160,
+  "context_window": 60160,
+  "meta": {
+    "llamaswap": { "context_window": 59940, "reasoning": true },
+    "n_ctx": 60160
+  }
+}
+```
+
+Top-level `context_window` is the discovered value and
+`meta.llamaswap.context_window` is yours. Clients that read your own key must
+look under `meta.llamaswap`. Metadata is the same before and after discovery.
+
+llama-swap adds a few keys of its own to `meta.llamaswap` (`type`, `aliases`,
+`upstream`, and `modelID` on alias entries). If your `metadata` uses one of
+those names, llama-swap's value wins.
 
 ## How the Playground uses this
 
