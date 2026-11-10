@@ -44,12 +44,14 @@ if [ "${CCACHE_EXPORT:-}" = 1 ]; then
     export CCACHE_MAXSIZE="${CCACHE_EXPORT_MAXSIZE:-6G}"
 fi
 
+# Informational only, so nothing in here may fail the build. lscpu rather than
+# /proc/cpuinfo: ARM kernels have no "model name" line there.
 host_info() {
     local cpus model mem
-    cpus="$(nproc)"
-    model="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//')"
-    mem="$(awk '/MemTotal/ {printf "%.1f GiB", $2 / 1048576}' /proc/meminfo)"
-    echo "=== Build host: ${cpus} CPUs, ${model:-unknown CPU model}, ${mem} RAM ==="
+    cpus="$(nproc 2>/dev/null || echo '?')"
+    model="$(lscpu 2>/dev/null | sed -n 's/^Model name: *//p' | head -1 || true)"
+    mem="$(awk '/MemTotal/ {printf "%.1f GiB", $2 / 1048576}' /proc/meminfo 2>/dev/null || true)"
+    echo "=== Build host: ${cpus} CPUs, ${model:-unknown CPU model}, ${mem:-unknown} RAM ==="
 }
 
 case "${1:-}" in
@@ -60,7 +62,7 @@ case "${1:-}" in
             exit 2
         fi
 
-        host_info
+        host_info || true
         mkdir -p "${CCACHE_DIR}"
         if [ -f "${SEED_DIR}/${MARKER}" ]; then
             echo "=== Seeding ccache from the previous build ($(du -sh "${SEED_DIR}" | cut -f1)) ==="
