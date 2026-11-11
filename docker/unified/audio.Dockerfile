@@ -12,7 +12,7 @@ ARG AUDIO_COMMIT_HASH=main
 ARG COMPILE_TIMEOUT_MINUTES=
 ARG CCACHE_EXPORT=
 COPY ccache-build.sh install-audio.sh /build/
-RUN for i in 1 2 3 4 5; do apt-get -o Acquire::Retries=5 update && break; \
+RUN for i in 1 2 3 4 5; do apt-get -o Acquire::Retries=5 update --error-on=any && break; \
       [ "$i" -lt 5 ] || exit 1; echo "apt-get update failed, retrying in $((i * 30))s"; sleep $((i * 30)); \
     done \
     && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \

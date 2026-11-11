@@ -187,6 +187,12 @@ objects across commits. ccache checks the compiler and every input of each
 object itself. An upstream change to a header that every CUDA file includes
 still means a full recompile.
 
+Editing `base-<backend>.Dockerfile` also empties every cache in practice. The
+rebuilt base gives the compilers new file timestamps, and ccache's default
+`compiler_check=mtime` treats that as a different compiler, so the next run
+compiles everything cold. Expect the nightly after a base change to take as
+long as a build without the cache.
+
 ### Driving it by hand
 
 ```bash
