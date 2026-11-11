@@ -81,7 +81,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 ENV PATH="/usr/local/bin:${PATH}"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN for i in 1 2 3 4 5; do apt-get -o Acquire::Retries=5 update --error-on=any && break; \
+      [ "$i" -lt 5 ] || exit 1; echo "apt-get update failed, retrying in $((i * 30))s"; sleep $((i * 30)); \
+    done \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     libgomp1 python3 curl ca-certificates \
     libavcodec60 libavformat60 libavutil58 libswresample4 \
     ffmpeg libmp3lame0 \
@@ -98,7 +101,10 @@ FROM ubuntu:24.04 AS runtime-vulkan
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/usr/local/bin:${PATH}"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN for i in 1 2 3 4 5; do apt-get -o Acquire::Retries=5 update --error-on=any && break; \
+      [ "$i" -lt 5 ] || exit 1; echo "apt-get update failed, retrying in $((i * 30))s"; sleep $((i * 30)); \
+    done \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     libgomp1 libvulkan1 mesa-vulkan-drivers \
     rocm-smi \
     python3 curl ca-certificates \
@@ -122,7 +128,10 @@ ARG CUDA_VERSION
 ARG CMAKE_CUDA_ARCHITECTURES=
 ARG RUN_UID=0
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN for i in 1 2 3 4 5; do apt-get -o Acquire::Retries=5 update --error-on=any && break; \
+      [ "$i" -lt 5 ] || exit 1; echo "apt-get update failed, retrying in $((i * 30))s"; sleep $((i * 30)); \
+    done \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     python3-numpy python3-sentencepiece python3-pip \
     && rm -rf /var/lib/apt/lists/*
 

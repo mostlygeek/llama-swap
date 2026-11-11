@@ -18,7 +18,7 @@ resolve_latest_version() {
     local repo="$1"
     local version=""
 
-    version=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null \
+    version=$(curl -fsSL --retry 3 --retry-delay 5 "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null \
         | grep '"tag_name"' | head -1 | cut -d'"' -f4 | sed 's/^v//') || true
 
     if [ -z "${version}" ]; then
