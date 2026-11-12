@@ -9,6 +9,7 @@
   import { playgroundStores } from "../../stores/playgroundActivity";
   import type { ChatMessage, ContentPart } from "../../lib/types";
   import { isSubmitEnter } from "../../lib/ime";
+  import { appendImageFiles, pasteImageFiles } from "../../lib/chatImages";
   import ChatMessageComponent from "./ChatMessage.svelte";
   import ModelSelector from "./ModelSelector.svelte";
   import ChatComposer from "./ChatComposer.svelte";
@@ -355,51 +356,12 @@
     }
   }
 
-  const ACCEPTED_IMAGE_FORMATS = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-  const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
-  const MAX_IMAGES_PER_MESSAGE = 5;
-
-  function validateImageFile(file: File): string | null {
-    if (!ACCEPTED_IMAGE_FORMATS.includes(file.type)) {
-      return `Invalid file type: ${file.type}. Accepted formats: JPG, PNG, GIF, WEBP`;
-    }
-    if (file.size > MAX_IMAGE_SIZE) {
-      return `File too large: ${(file.size / 1024 / 1024).toFixed(1)}MB. Maximum size: 20MB`;
-    }
-    return null;
-  }
-
-  function fileToDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsDataURL(file);
-    });
-  }
-
   async function processImageFiles(files: File[]): Promise<void> {
     imageError = null;
-
-    if (attachedImages.length + files.length > MAX_IMAGES_PER_MESSAGE) {
-      imageError = `Maximum ${MAX_IMAGES_PER_MESSAGE} images per message`;
-      return;
-    }
-
-    for (const file of files) {
-      const error = validateImageFile(file);
-      if (error) {
-        imageError = error;
-        return;
-      }
-    }
-
-    try {
-      const dataUrls = await Promise.all(files.map(fileToDataUrl));
-      attachedImages = [...attachedImages, ...dataUrls];
-    } catch (error) {
-      imageError = error instanceof Error ? error.message : "Failed to process images";
-    }
+    const error = await appendImageFiles(files, () => attachedImages, (images) => {
+      attachedImages = images;
+    });
+    if (error) imageError = error;
   }
 
   function handleImageSelect(event: Event) {
@@ -409,6 +371,10 @@
     }
     // Reset the input so the same file can be selected again
     input.value = "";
+  }
+
+  function handleImagePaste(event: ClipboardEvent) {
+    pasteImageFiles(event, processImageFiles);
   }
 
   function removeImage(idx: number) {
@@ -619,6 +585,7 @@
         bind:value={userInput}
         placeholder="Type a message..."
         onkeydown={handleKeyDown}
+        onpaste={handleImagePaste}
         disabled={isStreaming || !$selectedModelStore}
         streaming={isStreaming}
         canSend={Boolean(userInput.trim()) || attachedImages.length > 0}
@@ -661,7 +628,7 @@
             class="text-muted-foreground shrink-0 rounded-full"
             onclick={() => fileInput?.click()}
             disabled={isStreaming || !$selectedModelStore}
-            title="Attach image"
+            title="Attach image or paste it into the message box"
             aria-label="Attach image"
           >
             <Paperclip />
