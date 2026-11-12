@@ -23,6 +23,7 @@
     onsend: () => void;
     onstop?: () => void;
     onkeydown?: (event: KeyboardEvent) => void;
+    onpaste?: (event: ClipboardEvent) => void;
     /** Buttons before the text, e.g. an attach button. */
     leading?: Snippet;
     /** Content above the text, e.g. attachment previews and errors. */
@@ -39,6 +40,7 @@
     onsend,
     onstop,
     onkeydown,
+    onpaste,
     leading,
     attachments,
   }: Props = $props();
@@ -81,6 +83,7 @@
       {placeholder}
       {disabled}
       {onkeydown}
+      {onpaste}
       enterkeyhint="send"
     ></textarea>
     <Button

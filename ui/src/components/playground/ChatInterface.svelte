@@ -396,6 +396,10 @@
 
     try {
       const dataUrls = await Promise.all(files.map(fileToDataUrl));
+      if (attachedImages.length + dataUrls.length > MAX_IMAGES_PER_MESSAGE) {
+        imageError = `Maximum ${MAX_IMAGES_PER_MESSAGE} images per message`;
+        return;
+      }
       attachedImages = [...attachedImages, ...dataUrls];
     } catch (error) {
       imageError = error instanceof Error ? error.message : "Failed to process images";
@@ -409,6 +413,15 @@
     }
     // Reset the input so the same file can be selected again
     input.value = "";
+  }
+
+  function handleImagePaste(event: ClipboardEvent) {
+    const clipboard = event.clipboardData;
+    if (!clipboard) return;
+    const files = Array.from(clipboard.files).filter((file) => file.type.startsWith("image/"));
+    if (files.length === 0) return;
+    event.preventDefault();
+    void processImageFiles(files);
   }
 
   function removeImage(idx: number) {
@@ -619,6 +632,7 @@
         bind:value={userInput}
         placeholder="Type a message..."
         onkeydown={handleKeyDown}
+        onpaste={handleImagePaste}
         disabled={isStreaming || !$selectedModelStore}
         streaming={isStreaming}
         canSend={Boolean(userInput.trim()) || attachedImages.length > 0}
@@ -661,7 +675,7 @@
             class="text-muted-foreground shrink-0 rounded-full"
             onclick={() => fileInput?.click()}
             disabled={isStreaming || !$selectedModelStore}
-            title="Attach image"
+            title="Attach image or paste it into the message box"
             aria-label="Attach image"
           >
             <Paperclip />
