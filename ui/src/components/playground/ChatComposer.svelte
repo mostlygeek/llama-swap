@@ -68,7 +68,7 @@
   class="bg-card focus-within:border-ring focus-within:ring-ring/50 rounded-2xl border shadow-xs transition-[color,box-shadow] focus-within:ring-3"
   class:opacity-60={disabled && !streaming}
 >
-  {#if attachments}
+  {#if attachments && !isExpanded}
     {@render attachments()}
   {/if}
   <div class="flex items-end gap-1 p-1.5">
@@ -123,5 +123,12 @@
 </div>
 
 {#if isExpanded}
-  <TextEditDialog {value} {placeholder} onsave={saveExpanded} oncancel={() => (isExpanded = false)} />
+  <TextEditDialog
+    {value}
+    {placeholder}
+    {onpaste}
+    {attachments}
+    onsave={saveExpanded}
+    oncancel={() => (isExpanded = false)}
+  />
 {/if}

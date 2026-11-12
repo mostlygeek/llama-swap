@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { untrack, type Snippet } from "svelte";
   import { X } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
@@ -20,11 +20,16 @@
     title?: string;
     placeholder?: string;
     saveLabel?: string;
+    onpaste?: (event: ClipboardEvent) => void;
+    attachments?: Snippet;
     onsave: (value: string) => void;
     oncancel: () => void;
   }
 
-  let { value, title = "Edit Text", placeholder = "", saveLabel = "Done", onsave, oncancel }: Props = $props();
+  let {
+    value, title = "Edit Text", placeholder = "", saveLabel = "Done",
+    onpaste, attachments, onsave, oncancel,
+  }: Props = $props();
 
   // The dialog is mounted to open, so the prop is only a starting point.
   let draft = $state(untrack(() => value));
@@ -91,6 +96,11 @@
         <X />
       </Button>
     </div>
+    {#if attachments}
+      <div class="shrink-0 px-1">
+        {@render attachments()}
+      </div>
+    {/if}
     <div class="min-h-0 flex-1 p-3 sm:p-4">
       <Textarea
         bind:ref={textarea}
@@ -98,6 +108,7 @@
         {placeholder}
         bind:value={draft}
         onkeydown={handleKeyDown}
+        {onpaste}
       />
     </div>
     <div class="flex shrink-0 justify-end gap-2 border-t p-3 sm:p-4">
