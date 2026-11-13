@@ -520,7 +520,25 @@ func TestMetricsMonitor_RecordStoresHint(t *testing.T) {
 	copier.WriteHeader(http.StatusOK)
 	copier.Write([]byte(`{"usage":{"prompt_tokens":10,"completion_tokens":20},"metrics":{"time_to_first_token_ms":100,"mean_itl_ms":20}}`))
 
+	// The request observer (the OTLP exporter) gets the upstream; the stored
+	// row does not. It runs synchronously, before record returns.
+	observed := make(chan hint.Upstream, 1)
+	SetRequestObserver(func(_ ActivityLogEntry, u hint.Upstream) {
+		select {
+		case observed <- u:
+		default:
+		}
+	})
+	defer SetRequestObserver(nil)
+
 	mm.record("m", hint.TaskEmbedding, r, copier, 0, nil, nil)
+
+	select {
+	case u := <-observed:
+		assert.Equal(t, hint.VLLM, u)
+	default:
+		t.Fatal("request observer not called")
+	}
 
 	entries := metricsEntries(t, mm)
 	require.Len(t, entries, 1)
