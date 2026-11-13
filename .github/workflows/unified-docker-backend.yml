@@ -26,7 +26,7 @@ on:
         required: true
         type: string
       projects:
-        description: "JSON array of projects to build for this variant"
+        description: "JSON array of projects to build for this variant. Only these are compiled and assembled into the image"
         required: true
         type: string
       push_to_ghcr:
@@ -34,19 +34,29 @@ on:
         required: true
         type: boolean
       llama_hash:
-        required: true
+        description: "Resolved commit, or empty when the project is not built"
+        required: false
+        default: ""
         type: string
       whisper_hash:
-        required: true
+        description: "Resolved commit, or empty when the project is not built"
+        required: false
+        default: ""
         type: string
       sd_hash:
-        required: true
+        description: "Resolved commit, or empty when the project is not built"
+        required: false
+        default: ""
         type: string
       audio_hash:
-        required: true
+        description: "Resolved commit, or empty when the project is not built"
+        required: false
+        default: ""
         type: string
       ik_llama_hash:
-        required: true
+        description: "Resolved commit, or empty when the project is not built"
+        required: false
+        default: ""
         type: string
       ls_hash:
         required: true
@@ -213,6 +223,9 @@ jobs:
         env:
           PLATFORM: ${{ inputs.platform }}
           DATE_TAG: ${{ inputs.date_tag }}
+          # The same projects the artifacts job compiled, so the runtime image
+          # copies in only those and verifies only their binaries.
+          PROJECTS: ${{ join(fromJSON(inputs.projects), ',') }}
           LLAMA_REF: ${{ inputs.llama_hash }}
           WHISPER_REF: ${{ inputs.whisper_hash }}
           SD_REF: ${{ inputs.sd_hash }}

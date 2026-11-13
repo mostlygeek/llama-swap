@@ -3,7 +3,7 @@ title: Building the unified llama-swap image
 summary: How the unified image is assembled from per-project Dockerfiles, how to build it and pin the source revision (LS_VERSION), add an engine, and verify kubeswap is inside.
 category: guides
 tags: [kubeswap, unified-image, docker, build, llama-server, sd-server, whisper, audiocpp, ls-version, custom-engine]
-updated: 2026-09-12
+updated: 2026-11-13
 ---
 
 # Building the unified llama-swap image
@@ -53,9 +53,27 @@ rather than silently producing an image without the wrapper.
 | `runtime.Dockerfile` | the final image, copying those `/install` trees into `/usr/local/bin` |
 
 `runtime.Dockerfile` is the assembly point: each project gets a `FROM
-${PROJECT_IMAGE}` stage, and the runtime section `COPY`s the binaries out.
-The kubeswap stage builds from the `LS_VERSION` source in a `golang`
-container and lands at `/usr/local/bin/kubeswap`.
+${PROJECT_IMAGE}` stage, and the runtime section copies its whole `/install`
+tree into `/usr/local`. A project with no artifacts image falls back to an
+empty `/install`, which is how a server is left out (see below). The kubeswap
+stage builds from the `LS_VERSION` source in a `golang` container and lands at
+`/usr/local/bin/kubeswap`.
+
+### Leaving servers out
+
+By default the image has every server. To build one without some of them, name
+the ones you want:
+
+```bash
+./build-image.sh --vulkan --projects=llama,whisper
+```
+
+The names are `llama`, `whisper`, `sd`, `audio` and `ik-llama`. Servers that
+are not named are not compiled or copied into the image, and the build checks
+that their binaries are absent. llama-swap, vllm-wrapper and kubeswap are always
+included. In GitHub Actions the same choice is the `build_<project>` checkboxes
+of a manual run, or the `UNIFIED_DISABLED_PROJECTS` repository variable for the
+nightly run. A model whose `cmd` calls a server you left out fails to start.
 
 ### Adding an engine
 
@@ -63,12 +81,13 @@ container and lands at `/usr/local/bin/kubeswap`.
    image with `/install/bin/<server>`).
 2. Write `install-<project>.sh` (clone/pin/build — the two files are the
    project's complete build inputs; look at `whisper` for the smallest
-   example).
-3. In `runtime.Dockerfile`: add the `FROM ${PROJECT_IMAGE} AS
-   project-src` stage and `COPY --from=project-src /install/bin/<server>
-   /usr/local/bin/` lines.
-4. Register the stage in `build-image.sh` (and the CI workflow if you use
-   it).
+   example). Put only what should ship under `/install`.
+3. In `runtime.Dockerfile`: add an `ARG PROJECT_IMAGE=empty`, a `FROM
+   ${PROJECT_IMAGE} AS project-src` stage and a `COPY --from=project-src
+   /install/ /usr/local/` line.
+4. Register the project in `build-image.sh` (`ALL_PROJECTS`, `project_hash`,
+   `project_image_arg`, `project_binaries`) and in the CI workflow (the `all`
+   list and a `build_<project>` input in `unified-docker.yml`).
 
 In a model's `cmd`, the new binary is then selected with
 `--command <server>` — no other kubeswap concept changes.
