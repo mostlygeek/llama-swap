@@ -1,20 +1,32 @@
 <script lang="ts">
-  import type { ReqRespCapture } from "../lib/types";
+  import type { ActivityLogEntry, ReqRespCapture } from "../lib/types";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Tabs from "$lib/components/ui/tabs/index.js";
   import { copyText } from "../lib/clipboard";
+  import {
+    formatAbsoluteTime,
+    formatDuration,
+    formatFileSize,
+    formatSpeed,
+  } from "../lib/format";
 
   interface Props {
     capture: ReqRespCapture | null;
+    /** The activity row the capture belongs to; shown on the Summary tab. */
+    activity?: ActivityLogEntry | null;
     open: boolean;
     onclose: () => void;
   }
 
-  let { capture, open, onclose }: Props = $props();
+  let { capture, activity = null, open, onclose }: Props = $props();
 
   // The clipboard fallback used on plain http has to live inside the dialog;
   // see copyText.
   let contentEl = $state<HTMLElement | null>(null);
+
+  type DialogTab = "summary" | "request" | "response";
+  let dialogTab: DialogTab = $state("summary");
 
   type BodyTab = "raw" | "pretty" | "chat";
   let reqBodyTab: BodyTab = $state("pretty");
@@ -25,6 +37,7 @@
   // Reset tabs when capture changes
   $effect(() => {
     if (capture) {
+      dialogTab = "summary";
       const reqCt = getContentType(capture.req_headers);
       const respCt = getContentType(capture.resp_headers);
       reqBodyTab = reqCt.includes("json") ? "pretty" : "raw";
@@ -80,6 +93,15 @@
   function getImageDataUrl(body: string, contentType: string): string {
     const mimeType = contentType.split(";")[0].trim();
     return `data:${mimeType};base64,${body}`;
+  }
+
+  /** Byte length of a base64 payload, used for the summary sizes. */
+  function base64ByteLength(body: string | null | undefined): number {
+    if (!body) return 0;
+    let padding = 0;
+    if (body.endsWith("==")) padding = 2;
+    else if (body.endsWith("=")) padding = 1;
+    return Math.max(0, Math.floor((body.length * 3) / 4) - padding);
   }
 
   interface SSEChat {
@@ -177,6 +199,41 @@
     if (respBodyTab === "pretty") return responseBodyPretty;
     return responseBodyRaw;
   });
+
+  // Summary derivations
+  let reqHeaders = $derived(capture ? Object.entries(capture.req_headers || {}) : []);
+  let respHeaders = $derived(capture ? Object.entries(capture.resp_headers || {}) : []);
+  let reqBodySize = $derived(
+    capture ? base64ByteLength(capture.req_body) : 0,
+  );
+  let respBodySize = $derived(
+    capture ? base64ByteLength(capture.resp_body) : 0,
+  );
+  let metadataEntries = $derived(
+    activity ? Object.entries(activity.metadata || {}) : [],
+  );
+  let tokenRows = $derived.by(() => {
+    const t = activity?.tokens;
+    if (!t) return [];
+    const rows: [string, string][] = [
+      ["Input", (t.input_tokens || 0).toLocaleString()],
+      ["Output", (t.output_tokens || 0).toLocaleString()],
+    ];
+    if (t.cache_tokens) rows.push(["Cached", t.cache_tokens.toLocaleString()]);
+    if (t.draft_tokens) rows.push(["Draft", t.draft_tokens.toLocaleString()]);
+    if (t.draft_acc_tokens)
+      rows.push(["Draft accepted", t.draft_acc_tokens.toLocaleString()]);
+    rows.push(["Prefill speed", formatSpeed(t.prompt_per_second)]);
+    rows.push(["Decode speed", formatSpeed(t.tokens_per_second)]);
+    return rows;
+  });
+
+  function statusClass(code: number): string {
+    if (code >= 500) return "text-destructive";
+    if (code >= 400) return "text-yellow-500";
+    if (code >= 200 && code < 300) return "text-green-600 dark:text-green-400";
+    return "";
+  }
 </script>
 
 <Dialog.Root
@@ -190,6 +247,41 @@
     class="flex max-h-[90vh] w-[90%] sm:max-w-[90%] flex-col gap-0 p-0"
   >
     {#if capture}
+      {#snippet headerTable(headers: [string, string][])}
+        <div class="rounded-md border border-border">
+          <table class="w-full text-sm">
+            <tbody>
+              {#each headers as [key, value]}
+                <tr class="border-b border-border last:border-0">
+                  <td
+                    class="px-3 py-1 font-mono text-primary whitespace-nowrap align-top"
+                  >{key}</td
+                  >
+                  <td class="px-3 py-1 font-mono break-all">{value}</td>
+                </tr>
+              {:else}
+                <tr>
+                  <td class="px-3 py-1 text-sm text-muted-foreground italic">
+                    (no headers)
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/snippet}
+
+      {#snippet field(label: string, value: string, valueClass = "")}
+        <div class="min-w-0">
+          <div
+            class="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+          >
+            {label}
+          </div>
+          <div class="mt-0.5 font-mono break-all {valueClass}">{value}</div>
+        </div>
+      {/snippet}
+
       <Dialog.Header class="border-b border-border px-4 py-3">
         <Dialog.Title class="text-lg font-bold">
           Capture #{capture.id}{#if capture.req_path}
@@ -197,41 +289,172 @@
         </Dialog.Title>
       </Dialog.Header>
 
-      <div class="min-h-0 flex-1 overflow-y-auto space-y-4 p-4">
-        <!-- Request Headers -->
-        <details class="group" open>
-          <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          >
-            Request Headers
-          </summary>
-          <div
-            class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-48"
-          >
-            <table class="w-full text-sm">
-              <tbody>
-                {#each Object.entries(capture.req_headers || {}) as [key, value]}
-                  <tr class="border-b border-border last:border-0">
-                    <td class="px-3 py-1 font-mono text-primary whitespace-nowrap"
-                      >{key}</td
-                    >
-                    <td class="px-3 py-1 font-mono break-all">{value}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        </details>
+      <Tabs.Root
+        bind:value={dialogTab}
+        class="min-h-0 flex-1 overflow-hidden"
+      >
+        <Tabs.List variant="line" class="mx-4 mt-2 border-b border-border">
+          <Tabs.Trigger value="summary">Summary</Tabs.Trigger>
+          <Tabs.Trigger value="request">Request</Tabs.Trigger>
+          <Tabs.Trigger value="response">Response</Tabs.Trigger>
+        </Tabs.List>
 
-        <!-- Request Body -->
-        <details class="group" open>
-          <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          >
-            Request Body
-          </summary>
-          {#if requestBodyRaw}
-            <div class="mt-2 flex items-center justify-between">
+        <Tabs.Content
+          value="summary"
+          class="min-h-0 overflow-y-auto p-4 space-y-4"
+        >
+          {#if activity}
+            <section class="grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-4">
+              {@render field("Time", formatAbsoluteTime(activity.timestamp))}
+              {@render field("Source", activity.src || "-")}
+              {@render field("Model", activity.model || "-")}
+              {@render field("Task", activity.task || "-")}
+              {@render field(
+                "Status",
+                String(activity.resp_status_code),
+                statusClass(activity.resp_status_code),
+              )}
+              {@render field("Duration", formatDuration(activity.duration_ms))}
+              {@render field("Response Type", activity.resp_content_type || "-")}
+              {@render field("Request Path", activity.req_path || "-")}
+            </section>
+
+            <section>
+              <div
+                class="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Tokens
+              </div>
+              <div class="rounded-md border border-border">
+                <table class="w-full text-sm">
+                  <tbody>
+                    {#each tokenRows as [label, value]}
+                      <tr class="border-b border-border last:border-0">
+                        <td
+                          class="w-40 px-3 py-1 text-muted-foreground"
+                        >{label}</td
+                        >
+                        <td class="px-3 py-1 font-mono">{value}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            {#if activity.error_msg}
+              <section>
+                <div
+                  class="mb-1 text-xs font-semibold uppercase tracking-wider text-destructive"
+                >
+                  Error
+                </div>
+                <div
+                  class="rounded-md border border-border bg-background p-3 font-mono whitespace-pre-wrap break-all"
+                >
+                  {activity.error_msg}
+                </div>
+              </section>
+            {/if}
+
+            {#if metadataEntries.length > 0}
+              <section>
+                <div
+                  class="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                >
+                  Metadata
+                </div>
+                <div class="rounded-md border border-border">
+                  <table class="w-full text-sm">
+                    <tbody>
+                      {#each metadataEntries as [key, value]}
+                        <tr class="border-b border-border last:border-0">
+                          <td
+                            class="w-40 px-3 py-1 font-mono text-primary whitespace-nowrap"
+                          >{key}</td
+                          >
+                          <td class="px-3 py-1 font-mono break-all">{value}</td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            {/if}
+          {:else}
+            <p class="text-sm text-muted-foreground">
+              No activity record is available for this capture.
+            </p>
+          {/if}
+
+          <section>
+            <div
+              class="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              Capture
+            </div>
+            <div class="rounded-md border border-border">
+              <table class="w-full text-sm">
+                <tbody>
+                  <tr class="border-b border-border last:border-0">
+                    <td class="w-40 px-3 py-1 text-muted-foreground">ID</td>
+                    <td class="px-3 py-1 font-mono">{capture.id}</td>
+                  </tr>
+                  <tr class="border-b border-border last:border-0">
+                    <td class="w-40 px-3 py-1 text-muted-foreground">
+                      Request
+                    </td>
+                    <td class="px-3 py-1 font-mono break-all">
+                      {reqHeaders.length} headers,
+                      {reqBodySize ? formatFileSize(reqBodySize) : "no body"}
+                    </td>
+                  </tr>
+                  <tr class="border-b border-border last:border-0">
+                    <td class="w-40 px-3 py-1 text-muted-foreground">
+                      Response
+                    </td>
+                    <td class="px-3 py-1 font-mono break-all">
+                      {respHeaders.length} headers,
+                      {respBodySize ? formatFileSize(respBodySize) : "no body"}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </Tabs.Content>
+
+        <Tabs.Content
+          value="request"
+          class="min-h-0 overflow-y-auto p-4 space-y-4"
+        >
+          <section>
+            <div
+              class="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              Endpoint
+            </div>
+            <div class="rounded-md border border-border bg-background p-3 font-mono break-all">
+              {capture.req_path || "-"}
+            </div>
+          </section>
+
+          <details class="group" open>
+            <summary
+              class="mb-1 cursor-pointer text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+            >
+              Headers ({reqHeaders.length})
+            </summary>
+            {@render headerTable(reqHeaders)}
+          </details>
+
+          <section>
+            <div class="mb-1 flex items-center justify-between">
+              <div
+                class="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Body{#if reqBodySize} ({formatFileSize(reqBodySize)}){/if}
+              </div>
               <div class="flex gap-1">
                 {#if isRequestJson}
                   <button
@@ -245,171 +468,167 @@
                     onclick={() => (reqBodyTab = "raw")}>Raw</button
                   >
                 {/if}
+                <button
+                  class="tab-btn"
+                  onclick={() => copyToClipboard(displayedRequestBody, "req")}
+                >
+                  {#if copiedReq}
+                    Copied!
+                  {:else}
+                    Copy
+                  {/if}
+                </button>
               </div>
-              <button
-                class="tab-btn"
-                onclick={() =>
-                  copyToClipboard(displayedRequestBody, "req")}
-              >
-                {#if copiedReq}
-                  Copied!
-                {:else}
-                  Copy
-                {/if}
-              </button>
             </div>
-            <div
-              class="mt-1 bg-background rounded-md border border-border overflow-auto max-h-96"
-            >
+            <div class="rounded-md border border-border bg-background">
               <pre
-                class="p-3 text-sm font-mono whitespace-pre-wrap break-all">{displayedRequestBody}</pre>
-            </div>
-          {:else}
-            <div
-              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
-            >
-              <pre class="p-3 text-sm font-mono whitespace-pre-wrap break-all"
-                >(empty)</pre
+                class="p-3 text-sm font-mono whitespace-pre-wrap break-all">{displayedRequestBody || "(empty)"}</pre
               >
             </div>
-          {/if}
-        </details>
+          </section>
+        </Tabs.Content>
 
-        <!-- Response Headers -->
-        <details class="group" open>
-          <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          >
-            Response Headers
-          </summary>
-          <div
-            class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-48"
-          >
-            <table class="w-full text-sm">
-              <tbody>
-                {#each Object.entries(capture.resp_headers || {}) as [key, value]}
-                  <tr class="border-b border-border last:border-0">
-                    <td class="px-3 py-1 font-mono text-primary whitespace-nowrap"
-                      >{key}</td
-                    >
-                    <td class="px-3 py-1 font-mono break-all">{value}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        </details>
-
-        <!-- Response Body -->
-        <details class="group" open>
-          <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          >
-            Response Body
-          </summary>
-          {#if isResponseImage && capture.resp_body}
+        <Tabs.Content
+          value="response"
+          class="min-h-0 overflow-y-auto p-4 space-y-4"
+        >
+          <section>
             <div
-              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
+              class="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
             >
-              <div class="p-3 flex justify-center">
-                <img
-                  src={getImageDataUrl(capture.resp_body, responseContentType)}
-                  alt="Response"
-                  class="max-w-full h-auto"
-                />
-              </div>
+              Status
             </div>
-          {:else if isSSE || isResponseText}
-            <div class="mt-2 flex items-center justify-between">
-              <div class="flex gap-1">
-                {#if isSSE}
-                  <button
-                    class="tab-btn"
-                    class:tab-btn-active={respBodyTab === "chat"}
-                    onclick={() => (respBodyTab = "chat")}>Chat</button
-                  >
-                {/if}
-                {#if isResponseJson}
-                  <button
-                    class="tab-btn"
-                    class:tab-btn-active={respBodyTab === "pretty"}
-                    onclick={() => (respBodyTab = "pretty")}>Pretty</button
-                  >
-                {/if}
-                {#if isSSE || isResponseJson}
-                  <button
-                    class="tab-btn"
-                    class:tab-btn-active={respBodyTab === "raw"}
-                    onclick={() => (respBodyTab = "raw")}>Raw</button
-                  >
-                {/if}
-              </div>
-              <button
-                class="tab-btn"
-                onclick={() => copyToClipboard(getCopyText(), "resp")}
-              >
-                {#if copiedResp}
-                  Copied!
-                {:else}
-                  Copy
-                {/if}
-              </button>
-            </div>
-            <div
-              class="mt-1 bg-background rounded-md border border-border overflow-auto max-h-96"
-            >
-              {#if respBodyTab === "chat"}
-                <div class="p-3 text-sm space-y-3">
-                  {#if sseChat.reasoning}
-                    <div>
-                      <div
-                        class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1"
-                      >
-                        Reasoning
-                      </div>
-                      <pre
-                        class="font-mono whitespace-pre-wrap break-all text-muted-foreground">{sseChat.reasoning}</pre>
-                    </div>
-                  {/if}
-                  {#if sseChat.content}
-                    <div>
-                      {#if sseChat.reasoning}
-                        <div
-                          class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1"
-                        >
-                          Response
-                        </div>
-                      {/if}
-                      <pre
-                        class="font-mono whitespace-pre-wrap break-all">{sseChat.content}</pre>
-                    </div>
-                  {/if}
-                  {#if !sseChat.reasoning && !sseChat.content}
-                    <pre class="font-mono">(empty)</pre>
-                  {/if}
-                </div>
-              {:else}
-                <pre
-                  class="p-3 text-sm font-mono whitespace-pre-wrap break-all">{displayedResponseBody || "(empty)"}</pre>
+            <div class="rounded-md border border-border bg-background p-3 font-mono">
+              <span class={statusClass(activity?.resp_status_code ?? 0)}>
+                {activity ? activity.resp_status_code : "—"}
+              </span>
+              {#if activity?.duration_ms != null}
+                <span class="text-muted-foreground">
+                  · {formatDuration(activity.duration_ms)}</span
+                >
               {/if}
             </div>
-          {:else if responseBodyRaw}
-            <div
-              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
+          </section>
+
+          <details class="group" open>
+            <summary
+              class="mb-1 cursor-pointer text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
             >
-              <div class="p-3 text-sm text-muted-foreground italic">
-                (binary data - {responseContentType || "unknown content type"})
+              Headers ({respHeaders.length})
+            </summary>
+            {@render headerTable(respHeaders)}
+          </details>
+
+          <section>
+            <div class="mb-1 flex items-center justify-between">
+              <div
+                class="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Body{#if respBodySize} ({formatFileSize(respBodySize)}){/if}
               </div>
+              {#if isResponseImage}
+                <span></span>
+              {:else}
+                <div class="flex gap-1">
+                  {#if isSSE}
+                    <button
+                      class="tab-btn"
+                      class:tab-btn-active={respBodyTab === "chat"}
+                      onclick={() => (respBodyTab = "chat")}>Chat</button
+                    >
+                  {/if}
+                  {#if isResponseJson}
+                    <button
+                      class="tab-btn"
+                      class:tab-btn-active={respBodyTab === "pretty"}
+                      onclick={() => (respBodyTab = "pretty")}>Pretty</button
+                    >
+                  {/if}
+                  {#if isSSE || isResponseJson}
+                    <button
+                      class="tab-btn"
+                      class:tab-btn-active={respBodyTab === "raw"}
+                      onclick={() => (respBodyTab = "raw")}>Raw</button
+                    >
+                  {/if}
+                  <button
+                    class="tab-btn"
+                    onclick={() => copyToClipboard(getCopyText(), "resp")}
+                  >
+                    {#if copiedResp}
+                      Copied!
+                    {:else}
+                      Copy
+                    {/if}
+                  </button>
+                </div>
+              {/if}
             </div>
-          {:else}
-            <div
-              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
-            >
-              <pre class="p-3 text-sm font-mono">(empty)</pre>
-            </div>
-          {/if}
-        </details>
-      </div>
+
+            {#if isResponseImage && capture.resp_body}
+              <div class="rounded-md border border-border bg-background">
+                <div class="flex justify-center p-3">
+                  <img
+                    src={getImageDataUrl(capture.resp_body, responseContentType)}
+                    alt="Response"
+                    class="h-auto max-w-full"
+                  />
+                </div>
+              </div>
+            {:else if isSSE || isResponseText}
+              <div class="rounded-md border border-border bg-background">
+                {#if respBodyTab === "chat"}
+                  <div class="space-y-3 p-3 text-sm">
+                    {#if sseChat.reasoning}
+                      <div>
+                        <div
+                          class="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                        >
+                          Reasoning
+                        </div>
+                        <pre
+                          class="font-mono whitespace-pre-wrap break-all text-muted-foreground">{sseChat.reasoning}</pre
+                        >
+                      </div>
+                    {/if}
+                    {#if sseChat.content}
+                      <div>
+                        {#if sseChat.reasoning}
+                          <div
+                            class="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                          >
+                            Response
+                          </div>
+                        {/if}
+                        <pre
+                          class="font-mono whitespace-pre-wrap break-all">{sseChat.content}</pre
+                        >
+                      </div>
+                    {/if}
+                    {#if !sseChat.reasoning && !sseChat.content}
+                      <pre class="font-mono">(empty)</pre>
+                    {/if}
+                  </div>
+                {:else}
+                  <pre
+                    class="p-3 text-sm font-mono whitespace-pre-wrap break-all">{displayedResponseBody || "(empty)"}</pre
+                  >
+                {/if}
+              </div>
+            {:else if responseBodyRaw}
+              <div class="rounded-md border border-border bg-background">
+                <div class="p-3 text-sm text-muted-foreground italic">
+                  (binary data - {responseContentType || "unknown content type"})
+                </div>
+              </div>
+            {:else}
+              <div class="rounded-md border border-border bg-background">
+                <pre class="p-3 text-sm font-mono">(empty)</pre>
+              </div>
+            {/if}
+          </section>
+        </Tabs.Content>
+      </Tabs.Root>
 
       <Dialog.Footer class="border-t border-border px-4 py-3 sm:justify-end">
         <Button variant="outline" onclick={onclose}>Close</Button>
