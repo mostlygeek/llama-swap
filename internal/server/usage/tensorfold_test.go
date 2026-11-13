@@ -13,10 +13,12 @@ func TestUsage_TensorFold_ChatCompletion(t *testing.T) {
 		input, output int
 		wantPrompt    float64
 		wantGen       float64
+		wantDraft     int
+		wantAcc       int
 	}{
-		{"tensorfold/chat_completion.json", 63, 64, 63 / 0.1146, 64 / 2.0696},
-		{"tensorfold/chat_completion_stream.sse", 59, 32, 59 / 0.2393, 32 / 0.7758},
-		{"tensorfold/chat_completion_stream_v2.sse", 160029, 11811, 160029 / 57.476540016, 46.31119504068745},
+		{"tensorfold/chat_completion.json", 63, 64, 63 / 0.1146, 64 / 2.0696, 63, 36},
+		{"tensorfold/chat_completion_stream.sse", 59, 32, 59 / 0.2393, 32 / 0.7758, 34, 22},
+		{"tensorfold/chat_completion_stream_v2.sse", 160029, 11811, 160029 / 57.476540016, 46.31119504068745, 9952, 5713},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -27,8 +29,8 @@ func TestUsage_TensorFold_ChatCompletion(t *testing.T) {
 			assert.Equal(t, 0, u.Tokens.CachedTokens)
 			assert.InDelta(t, tt.wantPrompt, u.Tokens.PromptPerSecond, 1e-9, "uncached prompt / prefill duration")
 			assert.InDelta(t, tt.wantGen, u.Tokens.TokensPerSecond, 1e-9, "server rate or output / decode_s")
-			assert.Equal(t, -1, u.Tokens.DraftTokens, "drafted/accepted are not mapped")
-			assert.Equal(t, -1, u.Tokens.DraftAccTokens)
+			assert.Equal(t, tt.wantDraft, u.Tokens.DraftTokens, "drafted")
+			assert.Equal(t, tt.wantAcc, u.Tokens.DraftAccTokens, "accepted")
 		})
 	}
 }
@@ -71,6 +73,44 @@ func TestUsage_TensorFold_Values(t *testing.T) {
 			assert.Equal(t, tt.wantCached, u.Tokens.CachedTokens)
 			assert.Equal(t, tt.wantPrompt, u.Tokens.PromptPerSecond)
 			assert.Equal(t, tt.wantGen, u.Tokens.TokensPerSecond)
+		}
+		t.Run(tt.name+"/JSON", func(t *testing.T) {
+			check(t, parseUsageJSON(t, hint.TensorFold, "/v1/chat/completions", body))
+		})
+		t.Run(tt.name+"/SSE", func(t *testing.T) {
+			check(t, parseUsageStream(t, hint.TensorFold, "/v1/chat/completions", contentChunk, body))
+		})
+	}
+}
+
+func TestUsage_TensorFold_Drafts(t *testing.T) {
+	tests := []struct {
+		name        string
+		tensorfold  string
+		speculative string
+		wantDraft   int
+		wantAcc     int
+	}{
+		{"speculative object", `{"prefill_s":0.5}`, `{"rounds":6102,"drafted":9952,"accepted":5713}`, 9952, 5713},
+		{"older block", `{"drafted":63,"accepted":36,"rounds":27}`, ``, 63, 36},
+		{"speculative wins", `{"drafted":63,"accepted":36}`, `{"drafted":10,"accepted":4}`, 10, 4},
+		{"drafts off reports zero", `{}`, `{"rounds":9,"drafted":0,"accepted":0}`, 0, 0},
+		{"accepted exceeds drafted", `{}`, `{"drafted":4,"accepted":5}`, -1, -1},
+		{"half object", `{"drafted":63}`, `{"drafted":10}`, -1, -1},
+		{"nulls", `{"drafted":null,"accepted":null}`, `{"drafted":null,"accepted":null}`, -1, -1},
+		{"strings", `{}`, `{"drafted":"10","accepted":"4"}`, -1, -1},
+		{"negatives", `{}`, `{"drafted":-1,"accepted":0}`, -1, -1},
+		{"absent", `{}`, ``, -1, -1},
+	}
+	for _, tt := range tests {
+		body := `{"usage":{"prompt_tokens":56,"completion_tokens":8},"tensorfold":` + tt.tensorfold
+		if tt.speculative != "" {
+			body += `,"speculative":` + tt.speculative
+		}
+		body += `}`
+		check := func(t *testing.T, u Usage) {
+			assert.Equal(t, tt.wantDraft, u.Tokens.DraftTokens)
+			assert.Equal(t, tt.wantAcc, u.Tokens.DraftAccTokens)
 		}
 		t.Run(tt.name+"/JSON", func(t *testing.T) {
 			check(t, parseUsageJSON(t, hint.TensorFold, "/v1/chat/completions", body))

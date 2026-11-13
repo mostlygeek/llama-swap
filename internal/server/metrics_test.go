@@ -123,10 +123,11 @@ func TestServer_MetricsMiddleware_TensorFold(t *testing.T) {
 		name, file, contentType string
 		input, output           int
 		wantPrompt, wantGen     float64
+		wantDraft, wantAcc      int
 	}{
-		{"JSON", "chat_completion.json", "application/json", 63, 64, 63 / 0.1146, 64 / 2.0696},
-		{"SSE", "chat_completion_stream.sse", "text/event-stream", 59, 32, 59 / 0.2393, 32 / 0.7758},
-		{"SSE renamed fields", "chat_completion_stream_v2.sse", "text/event-stream", 160029, 11811, 160029 / 57.476540016, 46.31119504068745},
+		{"JSON", "chat_completion.json", "application/json", 63, 64, 63 / 0.1146, 64 / 2.0696, 63, 36},
+		{"SSE", "chat_completion_stream.sse", "text/event-stream", 59, 32, 59 / 0.2393, 32 / 0.7758, 34, 22},
+		{"SSE renamed fields", "chat_completion_stream_v2.sse", "text/event-stream", 160029, 11811, 160029 / 57.476540016, 46.31119504068745, 9952, 5713},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -158,6 +159,9 @@ func TestServer_MetricsMiddleware_TensorFold(t *testing.T) {
 			}
 			if want := tt.wantGen; math.Abs(got.TokensPerSecond-want) > 1e-9 {
 				t.Errorf("TokensPerSecond = %v, want %v", got.TokensPerSecond, want)
+			}
+			if got.DraftTokens != tt.wantDraft || got.DraftAccTokens != tt.wantAcc {
+				t.Errorf("drafts = %d/%d, want %d/%d", got.DraftAccTokens, got.DraftTokens, tt.wantAcc, tt.wantDraft)
 			}
 		})
 	}
