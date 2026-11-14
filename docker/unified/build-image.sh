@@ -195,9 +195,17 @@ if [[ -z "${PROJECTS//[[:space:],]/}" ]]; then
     SELECTED_PROJECTS=("${ALL_PROJECTS[@]}")
 else
     REQUESTED_PROJECTS="${PROJECTS//[[:space:]]/}"
-    for project in ${REQUESTED_PROJECTS//,/ }; do
-        if ! printf '%s\n' "${ALL_PROJECTS[@]}" | grep -qx -- "${project}"; then
-            echo "ERROR: unknown project '${project}' in PROJECTS / --projects" >&2
+    # Names are compared as plain strings, never as patterns: a name like
+    # `llama.*` must be rejected, not match nothing.
+    IFS=, read -ra REQUESTED_LIST <<< "${REQUESTED_PROJECTS}"
+    for requested in "${REQUESTED_LIST[@]}"; do
+        [[ -n "${requested}" ]] || continue
+        known=false
+        for project in "${ALL_PROJECTS[@]}"; do
+            [[ "${requested}" == "${project}" ]] && known=true
+        done
+        if [[ "${known}" != true ]]; then
+            echo "ERROR: unknown project '${requested}' in PROJECTS / --projects" >&2
             echo "  Known projects: ${ALL_PROJECTS[*]}" >&2
             exit 1
         fi
@@ -207,6 +215,10 @@ else
             SELECTED_PROJECTS+=("${project}")
         fi
     done
+    if [[ ${#SELECTED_PROJECTS[@]} -eq 0 ]]; then
+        echo "ERROR: PROJECTS / --projects '${PROJECTS}' selects no project" >&2
+        exit 1
+    fi
 fi
 
 # The architecture being built for. Every stage compiles natively on a machine

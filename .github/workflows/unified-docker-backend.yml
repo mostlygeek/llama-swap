@@ -106,6 +106,9 @@ jobs:
       - name: Build and publish builder base
         env:
           PLATFORM: ${{ inputs.platform }}
+          # Without it the script looks up the latest commit of every project,
+          # including the ones left out of this build.
+          PROJECTS: ${{ join(fromJSON(inputs.projects), ',') }}
         run: |
           chmod +x docker/unified/build-image.sh
           docker/unified/build-image.sh --${{ inputs.variant }} --stage=base
@@ -167,6 +170,10 @@ jobs:
       - name: Build and publish artifacts
         env:
           PLATFORM: ${{ inputs.platform }}
+          # Same selection as setup and assemble, so a project left out is not
+          # looked up here either: its hash input is empty and would otherwise
+          # trigger a fresh `git ls-remote` of its repository.
+          PROJECTS: ${{ join(fromJSON(inputs.projects), ',') }}
           COMPILE_TIMEOUT_MINUTES: "285"
           LLAMA_REF: ${{ inputs.llama_hash }}
           WHISPER_REF: ${{ inputs.whisper_hash }}
