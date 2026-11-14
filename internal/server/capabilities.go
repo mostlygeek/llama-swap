@@ -69,7 +69,9 @@ func (s *Server) localUpstream(ctx context.Context, modelID string, mc config.Mo
 
 // resolveCapabilities returns the capabilities to advertise for a local model:
 // what the config sets, with anything it leaves unset filled in from the last
-// successful probe.
+// successful probe, and for a model that has never been probed from the one
+// field the config's own command line states: the -c/--ctx-size flag of a
+// llama-server-style entry (see capcompat.EstimateOffline).
 //
 // Configured values win field by field, so a model that hand-sets one field
 // still benefits from discovery for the rest. A model with
@@ -81,6 +83,9 @@ func (s *Server) resolveCapabilities(ctx context.Context, modelID string, mc con
 	}
 	auto, found := s.capcompat.Lookup(ctx, capcompat.LocalKey(modelID, mc))
 	if !found {
+		if offline, ok := capcompat.EstimateOffline(mc); ok {
+			return caps.Merge(offline)
+		}
 		return caps
 	}
 	return caps.Merge(auto)
