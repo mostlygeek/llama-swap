@@ -204,7 +204,7 @@ are not in the image. llama-swap, vllm-wrapper and kubeswap are always included.
 | where | how |
 |---|---|
 | manual run of `unified-docker.yml` | untick `build_ik_llama`, `build_whisper`, `build_sd`, `build_audio` or `build_llama` |
-| scheduled (nightly) run | set the repository variable `UNIFIED_DISABLED_PROJECTS` to a comma separated list, e.g. `ik-llama` (Settings → Secrets and variables → Actions → Variables); clear it to build everything again |
+| scheduled (nightly) run | always builds everything; it has no inputs |
 | `build-image.sh` | `--projects=llama,whisper` or `PROJECTS=llama,whisper` — the servers to **build** (default: all) |
 
 Project names are `whisper`, `sd`, `audio`, `llama` and `ik-llama`. The workflow

@@ -140,15 +140,12 @@ jobs:
 
       # Which servers go into the images. A server left out is not resolved,
       # compiled or copied into the runtime image, so the assembled image holds
-      # only what was built. workflow_dispatch picks them with the build_* inputs;
-      # a scheduled run has no inputs, so it reads the repository variable
-      # UNIFIED_DISABLED_PROJECTS (Settings > Secrets and variables > Actions >
-      # Variables): a comma separated list such as `ik-llama`. Unset means all.
+      # only what was built. workflow_dispatch picks them with the build_* inputs,
+      # which default to on. A scheduled run has no inputs and builds everything.
       - name: Select projects
         id: projects
         env:
           EVENT_NAME: ${{ github.event_name }}
-          DISABLED_VAR: ${{ vars.UNIFIED_DISABLED_PROJECTS }}
           BUILD_LLAMA: ${{ inputs.build_llama }}
           BUILD_WHISPER: ${{ inputs.build_whisper }}
           BUILD_SD: ${{ inputs.build_sd }}
@@ -158,15 +155,8 @@ jobs:
           all=(whisper sd audio llama ik-llama)
           disabled=()
 
-          if [[ "${EVENT_NAME}" == "schedule" ]]; then
-            for name in ${DISABLED_VAR//,/ }; do
-              if [[ ! " ${all[*]} " == *" ${name} "* ]]; then
-                echo "::error::UNIFIED_DISABLED_PROJECTS names an unknown project '${name}' (known: ${all[*]})"
-                exit 1
-              fi
-              disabled+=("${name}")
-            done
-          else
+          # schedule uses defaults (build all); workflow_dispatch respects inputs
+          if [[ "${EVENT_NAME}" != "schedule" ]]; then
             [[ "${BUILD_LLAMA}"    == "true" ]] || disabled+=(llama)
             [[ "${BUILD_WHISPER}"  == "true" ]] || disabled+=(whisper)
             [[ "${BUILD_SD}"       == "true" ]] || disabled+=(sd)

@@ -72,8 +72,8 @@ The names are `llama`, `whisper`, `sd`, `audio` and `ik-llama`. Servers that
 are not named are not compiled or copied into the image, and the build checks
 that their binaries are absent. llama-swap, vllm-wrapper and kubeswap are always
 included. In GitHub Actions the same choice is the `build_<project>` checkboxes
-of a manual run, or the `UNIFIED_DISABLED_PROJECTS` repository variable for the
-nightly run. A model whose `cmd` calls a server you left out fails to start.
+of a manual run, which default to on; the nightly run always builds everything.
+A model whose `cmd` calls a server you left out fails to start.
 
 ### Adding an engine
 
