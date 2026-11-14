@@ -193,6 +193,33 @@ rebuilt base gives the compilers new file timestamps, and ccache's default
 compiles everything cold. Expect the nightly after a base change to take as
 long as a build without the cache.
 
+### Leaving servers out
+
+Every image carries llama.cpp, whisper.cpp, stable-diffusion.cpp, audio.cpp and
+ik_llama.cpp by default. Any of them can be left out, and the assemble job then
+builds an image with only the servers that were compiled — a server left out is
+not resolved, compiled or copied in, and `--assemble` checks that its binaries
+are not in the image. llama-swap, vllm-wrapper and kubeswap are always included.
+
+| where | how |
+|---|---|
+| manual run of `unified-docker.yml` | untick `build_ik_llama`, `build_whisper`, `build_sd`, `build_audio` or `build_llama` |
+| scheduled (nightly) run | always builds everything; it has no inputs |
+| `build-image.sh` | `--projects=llama,whisper` or `PROJECTS=llama,whisper` — the servers to **build** (default: all) |
+
+Project names are `whisper`, `sd`, `audio`, `llama` and `ik-llama`. The workflow
+turns its choices into one JSON list that is handed to every variant's artifacts
+and assemble jobs, and into `PROJECTS` for the scripts, so all of them agree on
+what the image contains. `/versions.txt` lists only the servers that are in it.
+
+The published `:unified-<variant>` tags are overwritten by whatever the run
+built. A manual run with `push_to_ghcr` ticked and a server unticked publishes
+an image without that server under the normal tags. Untick `push_to_ghcr` to
+try a subset without publishing it.
+
+A skipped project's artifacts image and compiler cache stay where they are, so
+turning it back on picks up where it left off.
+
 ### Driving it by hand
 
 ```bash
@@ -200,6 +227,7 @@ long as a build without the cache.
 ./build-image.sh --cuda --stage=base      # build + push the builder base
 ./build-image.sh --cuda --stage=llama     # build + push one project's artifacts
 ./build-image.sh --cuda --assemble        # assemble one platform from published images
+PROJECTS=llama,whisper ./build-image.sh --cuda --assemble   # ... with only those servers
 ./build-image.sh --cuda --manifest        # join the platforms into one tag
 ```
 

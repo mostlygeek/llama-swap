@@ -30,6 +30,31 @@ on:
         description: "llama-swap version (e.g. v198, latest, main)"
         required: false
         default: "main"
+      build_llama:
+        description: "Include llama.cpp (llama-server and friends) in the image"
+        type: boolean
+        required: false
+        default: true
+      build_whisper:
+        description: "Include whisper.cpp (whisper-server) in the image"
+        type: boolean
+        required: false
+        default: true
+      build_sd:
+        description: "Include stable-diffusion.cpp (sd-server) in the image"
+        type: boolean
+        required: false
+        default: true
+      build_audio:
+        description: "Include audio.cpp (audiocpp_server) in the image"
+        type: boolean
+        required: false
+        default: true
+      build_ik_llama:
+        description: "Include ik_llama.cpp (ik-llama-server) in the image. Its compile takes hours"
+        type: boolean
+        required: false
+        default: true
       build_cuda:
         description: "Build CUDA 12 image (Pascal through Ada)"
         type: boolean
@@ -98,8 +123,7 @@ jobs:
       build_cuda: ${{ steps.plan.outputs.build_cuda }}
       build_cuda13: ${{ steps.plan.outputs.build_cuda13 }}
       build_vulkan: ${{ steps.plan.outputs.build_vulkan }}
-      cuda_projects: ${{ steps.plan.outputs.cuda_projects }}
-      vulkan_projects: ${{ steps.plan.outputs.vulkan_projects }}
+      projects: ${{ steps.projects.outputs.projects }}
       amd64_only: ${{ steps.plan.outputs.amd64_only }}
       cuda13_platforms: ${{ steps.plan.outputs.cuda13_platforms }}
       date_tag: ${{ steps.plan.outputs.date_tag }}
@@ -113,6 +137,53 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+
+      # Which servers go into the images. A server left out is not resolved,
+      # compiled or copied into the runtime image, so the assembled image holds
+      # only what was built. workflow_dispatch picks them with the build_* inputs,
+      # which default to on. A scheduled run has no inputs and builds everything.
+      - name: Select projects
+        id: projects
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BUILD_LLAMA: ${{ inputs.build_llama }}
+          BUILD_WHISPER: ${{ inputs.build_whisper }}
+          BUILD_SD: ${{ inputs.build_sd }}
+          BUILD_AUDIO: ${{ inputs.build_audio }}
+          BUILD_IK_LLAMA: ${{ inputs.build_ik_llama }}
+        run: |
+          all=(whisper sd audio llama ik-llama)
+          disabled=()
+
+          # schedule uses defaults (build all); workflow_dispatch respects inputs
+          if [[ "${EVENT_NAME}" != "schedule" ]]; then
+            [[ "${BUILD_LLAMA}"    == "true" ]] || disabled+=(llama)
+            [[ "${BUILD_WHISPER}"  == "true" ]] || disabled+=(whisper)
+            [[ "${BUILD_SD}"       == "true" ]] || disabled+=(sd)
+            [[ "${BUILD_AUDIO}"    == "true" ]] || disabled+=(audio)
+            [[ "${BUILD_IK_LLAMA}" == "true" ]] || disabled+=(ik-llama)
+          fi
+
+          enabled=()
+          for name in "${all[@]}"; do
+            [[ " ${disabled[*]-} " == *" ${name} "* ]] || enabled+=("${name}")
+          done
+
+          if [[ ${#enabled[@]} -eq 0 ]]; then
+            echo "::error::Every project is disabled, so there is nothing to build"
+            exit 1
+          fi
+
+          list="$(IFS=,; echo "${enabled[*]}")"
+          json="$(printf '%s\n' "${enabled[@]}" | jq -R . | jq -sc .)"
+          echo "projects=${json}" >> "$GITHUB_OUTPUT"
+          echo "PROJECTS=${list}" >> "$GITHUB_ENV"
+
+          {
+            echo "### Projects in the image"
+            echo "Built: \`${list}\`"
+            echo "Left out: \`${disabled[*]:-none}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Resolve every ref once, here. The build and assemble jobs are handed
       # full commit hashes, so a branch that moves mid-run cannot leave two
@@ -128,6 +199,7 @@ jobs:
           LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
         run: |
           chmod +x docker/unified/build-image.sh
+          # PROJECTS (set above) keeps refs of left-out projects from being resolved.
           docker/unified/build-image.sh --cuda --resolve | tee -a "$GITHUB_OUTPUT"
 
       - name: Plan variants
@@ -157,8 +229,6 @@ jobs:
             echo "build_cuda13=${build_cuda13}"
             echo "build_vulkan=${build_vulkan}"
             echo "push_to_ghcr=${push}"
-            echo 'cuda_projects=["whisper","sd","audio","llama","ik-llama"]'
-            echo 'vulkan_projects=["whisper","sd","audio","llama","ik-llama"]'
             echo 'amd64_only=["linux/amd64"]'
             echo "cuda13_platforms=${cuda13_platforms}"
             # Resolved once so every platform's image and the manifest that
@@ -180,7 +250,7 @@ jobs:
     with:
       variant: cuda
       platform: ${{ matrix.platform }}
-      projects: ${{ needs.setup.outputs.cuda_projects }}
+      projects: ${{ needs.setup.outputs.projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
       date_tag: ${{ needs.setup.outputs.date_tag }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
@@ -216,7 +286,7 @@ jobs:
     with:
       variant: cuda13
       platform: ${{ matrix.platform }}
-      projects: ${{ needs.setup.outputs.cuda_projects }}
+      projects: ${{ needs.setup.outputs.projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
       date_tag: ${{ needs.setup.outputs.date_tag }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
@@ -252,7 +322,7 @@ jobs:
     with:
       variant: vulkan
       platform: ${{ matrix.platform }}
-      projects: ${{ needs.setup.outputs.vulkan_projects }}
+      projects: ${{ needs.setup.outputs.projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
       date_tag: ${{ needs.setup.outputs.date_tag }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}

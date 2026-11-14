@@ -15,6 +15,8 @@
 #   AUDIO_REF=main ./build-image.sh --cuda               # Pin audio.cpp to a branch
 #   LS_VERSION=170 ./build-image.sh --cuda               # Override llama-swap version
 #   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to main branch
+#   ./build-image.sh --cuda --projects=llama,whisper     # Only build and ship these servers
+#   PROJECTS=llama,sd ./build-image.sh --vulkan          # Same, from the environment
 #
 # The build is one Dockerfile per piece:
 #
@@ -94,8 +96,15 @@ ARTIFACT_REPO="${ARTIFACT_REPO:-ghcr.io/mostlygeek/llama-swap-build}"
 # to the base and artifacts images.
 CCACHE_REPO="${CCACHE_REPO:-ghcr.io/mostlygeek/llama-swap-ccache}"
 
-# Upstream projects compiled into the image.
+# Every upstream project the build knows how to compile.
 ALL_PROJECTS=(whisper sd audio llama ik-llama)
+
+# The projects that go into this image, comma separated. Empty means all of
+# them. Only these are resolved, compiled and copied into the runtime image, so
+# a server left out of the list is absent from the result rather than present
+# and unused. llama-swap, vllm-wrapper and kubeswap are not projects in this
+# sense and are always included.
+PROJECTS="${PROJECTS:-}"
 
 # Minutes a --stage compile may run before it is stopped. Empty means no limit.
 # CI sets it below the job's own timeout: a compile stopped here still
@@ -115,6 +124,7 @@ for arg in "$@"; do
         --manifest) MODE="manifest" ;;
         --platform=*)  PLATFORM="${arg#*=}" ;;
         --platforms=*) MANIFEST_PLATFORMS="${arg#*=}" ;;
+        --projects=*)  PROJECTS="${arg#*=}" ;;
         --stage=*)
             MODE="stage"
             STAGE_TARGET="${arg#*=}"
@@ -128,6 +138,8 @@ for arg in "$@"; do
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
             echo "  --platform=PLATFORM  linux/amd64 or linux/arm64 (default: this host)"
+            echo "  --projects=LIST      Comma separated servers to build and ship (default: all)"
+            echo "                       (${ALL_PROJECTS[*]})"
             echo "  --help, -h  Show this help message"
             echo ""
             echo "Split build (CI only):"
@@ -149,6 +161,7 @@ for arg in "$@"; do
             echo "  AUDIO_REF            Pin audio.cpp to a commit, tag, or branch"
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
+            echo "  PROJECTS             Same as --projects"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
             echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
             echo "                       (default: 60;61;70;75;86;89 for --cuda,"
@@ -173,6 +186,39 @@ if [[ -z "$BACKEND" ]]; then
     echo ""
     echo "Usage: ./build-image.sh --cuda|--cuda13|--vulkan [--no-cache]"
     exit 1
+fi
+
+# Work out which projects were asked for. The order is always ALL_PROJECTS', so
+# the same selection gives the same build however it was spelled.
+SELECTED_PROJECTS=()
+if [[ -z "${PROJECTS//[[:space:],]/}" ]]; then
+    SELECTED_PROJECTS=("${ALL_PROJECTS[@]}")
+else
+    REQUESTED_PROJECTS="${PROJECTS//[[:space:]]/}"
+    # Names are compared as plain strings, never as patterns: a name like
+    # `llama.*` must be rejected, not match nothing.
+    IFS=, read -ra REQUESTED_LIST <<< "${REQUESTED_PROJECTS}"
+    for requested in "${REQUESTED_LIST[@]}"; do
+        [[ -n "${requested}" ]] || continue
+        known=false
+        for project in "${ALL_PROJECTS[@]}"; do
+            [[ "${requested}" == "${project}" ]] && known=true
+        done
+        if [[ "${known}" != true ]]; then
+            echo "ERROR: unknown project '${requested}' in PROJECTS / --projects" >&2
+            echo "  Known projects: ${ALL_PROJECTS[*]}" >&2
+            exit 1
+        fi
+    done
+    for project in "${ALL_PROJECTS[@]}"; do
+        if [[ ",${REQUESTED_PROJECTS}," == *",${project},"* ]]; then
+            SELECTED_PROJECTS+=("${project}")
+        fi
+    done
+    if [[ ${#SELECTED_PROJECTS[@]} -eq 0 ]]; then
+        echo "ERROR: PROJECTS / --projects '${PROJECTS}' selects no project" >&2
+        exit 1
+    fi
 fi
 
 # The architecture being built for. Every stage compiles natively on a machine
@@ -326,14 +372,35 @@ get_latest_hash() {
     git ls-remote "${1}" HEAD 2>/dev/null | head -1 | cut -f1
 }
 
-# Projects built for this backend. Every project currently builds on every
-# backend; this stays a function rather than a plain reference to
-# ALL_PROJECTS so a future backend-specific project has one place to skip.
+# Projects built for this backend: the selected ones. Every project currently
+# builds on every backend; a future backend-specific project has one place to
+# skip here.
 backend_projects() {
     local project
-    for project in "${ALL_PROJECTS[@]}"; do
+    for project in "${SELECTED_PROJECTS[@]}"; do
         echo "${project}"
     done
+}
+
+# project_selected <project>: is it part of this build?
+project_selected() {
+    local project
+    for project in "${SELECTED_PROJECTS[@]}"; do
+        [[ "${project}" == "$1" ]] && return 0
+    done
+    return 1
+}
+
+# The binaries a project puts on the PATH, which is what --assemble verifies.
+project_binaries() {
+    case "$1" in
+        whisper)  echo "whisper-server whisper-cli" ;;
+        sd)       echo "sd-server sd-cli" ;;
+        audio)    echo "audiocpp_server audiocpp_cli" ;;
+        llama)    echo "llama-server llama-cli llama-bench" ;;
+        ik-llama) echo "ik-llama-server" ;;
+        *) echo "ERROR: unknown project '$1'" >&2; return 1 ;;
+    esac
 }
 
 project_hash() {
@@ -422,8 +489,8 @@ if [[ "$MODE" == "stage" && "$STAGE_TARGET" != "base" ]]; then
         echo "  Known targets: base ${ALL_PROJECTS[*]}" >&2
         exit 1
     fi
-    if ! backend_projects | grep -qx -- "${STAGE_TARGET}"; then
-        echo "ERROR: project '${STAGE_TARGET}' is not built for the ${VARIANT} variant" >&2
+    if ! project_selected "${STAGE_TARGET}"; then
+        echo "ERROR: project '${STAGE_TARGET}' is not selected (PROJECTS=${SELECTED_PROJECTS[*]})" >&2
         exit 1
     fi
 fi
@@ -500,7 +567,10 @@ fi
 # assemble jobs. That keeps a moving branch from resolving differently in each
 # job and assembling an image out of mismatched artifacts.
 
-if [[ -n "${LLAMA_REF:-}" ]]; then
+if ! project_selected llama; then
+    LLAMA_HASH=""
+    log "llama.cpp: not selected, skipped"
+elif [[ -n "${LLAMA_REF:-}" ]]; then
     LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_REF}") || exit 1
     log "llama.cpp: ${LLAMA_REF} -> ${LLAMA_HASH}"
 else
@@ -509,7 +579,10 @@ else
     log "llama.cpp: latest HEAD: ${LLAMA_HASH}"
 fi
 
-if [[ -n "${WHISPER_REF:-}" ]]; then
+if ! project_selected whisper; then
+    WHISPER_HASH=""
+    log "whisper.cpp: not selected, skipped"
+elif [[ -n "${WHISPER_REF:-}" ]]; then
     WHISPER_HASH=$(resolve_ref "${WHISPER_REPO}" "${WHISPER_REF}") || exit 1
     log "whisper.cpp: ${WHISPER_REF} -> ${WHISPER_HASH}"
 else
@@ -518,7 +591,10 @@ else
     log "whisper.cpp: latest HEAD: ${WHISPER_HASH}"
 fi
 
-if [[ -n "${SD_REF:-}" ]]; then
+if ! project_selected sd; then
+    SD_HASH=""
+    log "stable-diffusion.cpp: not selected, skipped"
+elif [[ -n "${SD_REF:-}" ]]; then
     SD_HASH=$(resolve_ref "${SD_REPO}" "${SD_REF}") || exit 1
     log "stable-diffusion.cpp: ${SD_REF} -> ${SD_HASH}"
 else
@@ -527,7 +603,10 @@ else
     log "stable-diffusion.cpp: latest HEAD: ${SD_HASH}"
 fi
 
-if [[ -n "${AUDIO_REF:-}" ]]; then
+if ! project_selected audio; then
+    AUDIO_HASH=""
+    log "audio.cpp: not selected, skipped"
+elif [[ -n "${AUDIO_REF:-}" ]]; then
     AUDIO_HASH=$(resolve_ref "${AUDIO_REPO}" "${AUDIO_REF}") || exit 1
     log "audio.cpp: ${AUDIO_REF} -> ${AUDIO_HASH}"
 else
@@ -536,7 +615,10 @@ else
     log "audio.cpp: latest HEAD: ${AUDIO_HASH}"
 fi
 
-if [[ -n "${IK_LLAMA_REF:-}" ]]; then
+if ! project_selected ik-llama; then
+    IK_LLAMA_HASH=""
+    log "ik_llama.cpp: not selected, skipped"
+elif [[ -n "${IK_LLAMA_REF:-}" ]]; then
     IK_LLAMA_HASH=$(resolve_ref "${IK_LLAMA_REPO}" "${IK_LLAMA_REF}") || exit 1
     log "ik_llama.cpp: ${IK_LLAMA_REF} -> ${IK_LLAMA_HASH}"
 else
@@ -666,6 +748,8 @@ build_runtime() {
         --build-arg "CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
         --build-arg "VARIANT=${VARIANT}"
     )
+    # Only the selected projects get an artifacts image. The others keep the
+    # runtime Dockerfile's default, an empty /install, so they add nothing.
     local project
     while read -r project; do
         args+=(--build-arg "$(project_image_arg "${project}")=$(artifact_tag "${project}")")
@@ -804,7 +888,17 @@ echo "Verifying build artifacts..."
 echo "=========================================="
 echo ""
 
-EXPECTED_BINARIES=(llama-server llama-cli llama-bench whisper-server whisper-cli sd-server sd-cli audiocpp_server audiocpp_cli llama-swap vllm-wrapper ik-llama-server)
+# llama-swap and vllm-wrapper are always in the image; each selected project adds
+# its own binaries. A project left out must not be there at all.
+EXPECTED_BINARIES=(llama-swap vllm-wrapper)
+UNEXPECTED_BINARIES=()
+for project in "${ALL_PROJECTS[@]}"; do
+    if project_selected "${project}"; then
+        EXPECTED_BINARIES+=($(project_binaries "${project}"))
+    else
+        UNEXPECTED_BINARIES+=($(project_binaries "${project}"))
+    fi
+done
 
 MISSING_BINARIES=()
 for binary in "${EXPECTED_BINARIES[@]}"; do
@@ -824,51 +918,71 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
     exit 1
 fi
 
-VERIFIED_LIST="llama-server, llama-cli, llama-bench, whisper-server, whisper-cli, sd-server, sd-cli, audiocpp_server, audiocpp_cli, llama-swap, vllm-wrapper, ik-llama-server"
-echo "All expected binaries verified: ${VERIFIED_LIST}"
+LEFTOVER_BINARIES=()
+for binary in "${UNEXPECTED_BINARIES[@]+"${UNEXPECTED_BINARIES[@]}"}"; do
+    if docker run --rm --entrypoint which "${RUNTIME_TAG}" "${binary}" >/dev/null 2>&1; then
+        LEFTOVER_BINARIES+=("${binary}")
+    fi
+done
 
-# audio.cpp must be a deployment build: the model_specs catalog is compiled into
-# the binaries, since the image ships no model_specs/ directory for the runtime
-# to discover. Without it every load of a package without an embedded spec fails
-# with "model spec not found for family ...". The compiled catalog is raw JSON in
-# .rodata, so grepping the binary for a known spec confirms it is there.
-if ! docker run --rm --entrypoint grep "${RUNTIME_TAG}" \
-        -aq '"family": "pocket_tts"' /usr/local/bin/audiocpp_server; then
-    echo "ERROR: audiocpp_server was not built with AUDIOCPP_DEPLOYMENT_BUILD=ON;"
-    echo "       its compiled model spec catalog is missing."
+if [[ ${#LEFTOVER_BINARIES[@]} -gt 0 ]]; then
+    echo "ERROR: the image has binaries of projects that were not selected:"
+    for binary in "${LEFTOVER_BINARIES[@]}"; do
+        echo "  - ${binary}"
+    done
     exit 1
 fi
 
-# Run the binary so a missing runtime library is caught here rather than on a
-# user's first request. CUDA builds link libcuda.so.1, which the NVIDIA
-# container runtime only injects with --gpus; point at the stub copied into the
-# image so this works on a build machine with no GPU.
-SMOKE_ARGS=(--rm)
-if [[ "$BACKEND" == "cuda" ]]; then
-    SMOKE_ARGS+=(-e "LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:/usr/local/cuda/lib64")
+VERIFIED_LIST="$(IFS=,; echo "${EXPECTED_BINARIES[*]}")"
+echo "All expected binaries verified: ${VERIFIED_LIST//,/, }"
+if [[ ${#UNEXPECTED_BINARIES[@]} -gt 0 ]]; then
+    echo "Confirmed absent (not selected): ${UNEXPECTED_BINARIES[*]}"
 fi
 
-if ! docker run "${SMOKE_ARGS[@]}" --entrypoint audiocpp_server "${RUNTIME_TAG}" --help >/dev/null; then
-    echo "ERROR: audiocpp_server --help failed; the binary or its runtime"
-    echo "       libraries are broken in the image."
-    exit 1
-fi
+if project_selected audio; then
+    # audio.cpp must be a deployment build: the model_specs catalog is compiled into
+    # the binaries, since the image ships no model_specs/ directory for the runtime
+    # to discover. Without it every load of a package without an embedded spec fails
+    # with "model spec not found for family ...". The compiled catalog is raw JSON in
+    # .rodata, so grepping the binary for a known spec confirms it is there.
+    if ! docker run --rm --entrypoint grep "${RUNTIME_TAG}" \
+            -aq '"family": "pocket_tts"' /usr/local/bin/audiocpp_server; then
+        echo "ERROR: audiocpp_server was not built with AUDIOCPP_DEPLOYMENT_BUILD=ON;"
+        echo "       its compiled model spec catalog is missing."
+        exit 1
+    fi
 
-# Kokoro, SanoTTS and Inflect phonemize with the eSpeak-ng linked into
-# audio.cpp. It reads its data from espeak-ng-data next to the executable; a
-# packed espeak-ng-data.bin there would be used instead and unpacked into
-# $HOME/.cache, which is not writable in every image.
-if ! docker run --rm --entrypoint sh "${RUNTIME_TAG}" -c \
-        'test -f /usr/local/bin/espeak-ng-data/phontab &&
-         test -f /usr/local/bin/espeak-ng-data/en_dict &&
-         test ! -e /usr/local/bin/espeak-ng-data.bin &&
-         test -f /usr/local/share/audiocpp/licenses/espeak-ng/COPYING'; then
-    echo "ERROR: eSpeak-ng data or license files are missing from the image;"
-    echo "       Kokoro and other eSpeak-based audio.cpp models will fail."
-    exit 1
-fi
+    # Run the binary so a missing runtime library is caught here rather than on a
+    # user's first request. CUDA builds link libcuda.so.1, which the NVIDIA
+    # container runtime only injects with --gpus; point at the stub copied into the
+    # image so this works on a build machine with no GPU.
+    SMOKE_ARGS=(--rm)
+    if [[ "$BACKEND" == "cuda" ]]; then
+        SMOKE_ARGS+=(-e "LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:/usr/local/cuda/lib64")
+    fi
 
-echo "audio.cpp verified: deployment build (compiled model spec catalog), eSpeak-ng data, binary runs"
+    if ! docker run "${SMOKE_ARGS[@]}" --entrypoint audiocpp_server "${RUNTIME_TAG}" --help >/dev/null; then
+        echo "ERROR: audiocpp_server --help failed; the binary or its runtime"
+        echo "       libraries are broken in the image."
+        exit 1
+    fi
+
+    # Kokoro, SanoTTS and Inflect phonemize with the eSpeak-ng linked into
+    # audio.cpp. It reads its data from espeak-ng-data next to the executable; a
+    # packed espeak-ng-data.bin there would be used instead and unpacked into
+    # $HOME/.cache, which is not writable in every image.
+    if ! docker run --rm --entrypoint sh "${RUNTIME_TAG}" -c \
+            'test -f /usr/local/bin/espeak-ng-data/phontab &&
+             test -f /usr/local/bin/espeak-ng-data/en_dict &&
+             test ! -e /usr/local/bin/espeak-ng-data.bin &&
+             test -f /usr/local/share/audiocpp/licenses/espeak-ng/COPYING'; then
+        echo "ERROR: eSpeak-ng data or license files are missing from the image;"
+        echo "       Kokoro and other eSpeak-based audio.cpp models will fail."
+        exit 1
+    fi
+
+    echo "audio.cpp verified: deployment build (compiled model spec catalog), eSpeak-ng data, binary runs"
+fi
 
 # The entrypoint turns LLAMA_SWAP_* variables into flags. Point -config at a path
 # that cannot exist and look for it in llama-swap's own output: nothing but
@@ -943,11 +1057,11 @@ echo "  ${ROOTLESS_TAG}"
 echo ""
 echo "Built with:"
 echo "  platform:             linux/${ARCH}"
-echo "  llama.cpp:            ${LLAMA_HASH}"
-echo "  whisper.cpp:          ${WHISPER_HASH}"
-echo "  stable-diffusion.cpp: ${SD_HASH}"
-echo "  audio.cpp:            ${AUDIO_HASH}"
-echo "  ik_llama.cpp:         ${IK_LLAMA_HASH}"
+echo "  llama.cpp:            ${LLAMA_HASH:-not built}"
+echo "  whisper.cpp:          ${WHISPER_HASH:-not built}"
+echo "  stable-diffusion.cpp: ${SD_HASH:-not built}"
+echo "  audio.cpp:            ${AUDIO_HASH:-not built}"
+echo "  ik_llama.cpp:         ${IK_LLAMA_HASH:-not built}"
 if [[ "$BACKEND" == "cuda" ]]; then
     echo "  CUDA version:         ${CUDA_VERSION}"
     echo "  CUDA architectures:   ${CMAKE_CUDA_ARCHITECTURES}"
