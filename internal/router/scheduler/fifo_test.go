@@ -1011,3 +1011,102 @@ func TestFIFO_ConcurrencyLimit_CancelledQueuedWaiterReleasesReservation(t *testi
 		t.Fatalf("queue len=%d want 1 after cancel and retry", got)
 	}
 }
+
+func noEvictReq(model string) HandlerReq {
+	r := req(model)
+	r.NoEvict = true
+	return r
+}
+
+func TestFIFO_NoEvict_StartsWhenNothingIsEvicted(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateStopped
+	s := newFIFO(&stubPlanner{}, eff)
+
+	r := noEvictReq("a")
+	s.OnRequest(r)
+
+	assertAdmitted(t, r)
+	if got := eff.startsFor("a"); got != 1 {
+		t.Fatalf("StartSwap(a)=%d want 1", got)
+	}
+}
+
+func TestFIFO_NoEvict_RejectsWhenEvictionNeeded(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	eff.states["b"] = process.StateStopped
+	s := newFIFO(&stubPlanner{evict: map[string][]string{"b": {"a"}}}, eff)
+
+	r := noEvictReq("b")
+	s.OnRequest(r)
+
+	if err := admitErr(t, r); !errors.Is(err, swaputil.ErrWouldEvict) {
+		t.Fatalf("admission err=%v want ErrWouldEvict", err)
+	}
+	if got := len(eff.starts); got != 0 {
+		t.Errorf("StartSwap calls=%d want 0", got)
+	}
+	if got := len(s.queued); got != 0 {
+		t.Errorf("queue len=%d want 0 (no-evict requests never queue)", got)
+	}
+}
+
+func TestFIFO_NoEvict_RejectsWhileOthersAreQueued(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateStopped
+	eff.states["b"] = process.StateStopped
+	eff.states["c"] = process.StateStopped
+	// b evicts a, so b queues behind a's swap.
+	s := newFIFO(&stubPlanner{evict: map[string][]string{"b": {"a"}}}, eff)
+	s.OnRequest(req("a"))
+	s.OnRequest(req("b"))
+	if got := len(s.queued); got != 1 {
+		t.Fatalf("queue len=%d want 1", got)
+	}
+
+	r := noEvictReq("c")
+	s.OnRequest(r)
+
+	if err := admitErr(t, r); !errors.Is(err, swaputil.ErrWouldEvict) {
+		t.Fatalf("admission err=%v want ErrWouldEvict (must not jump the queue)", err)
+	}
+	if got := eff.startsFor("c"); got != 0 {
+		t.Errorf("StartSwap(c)=%d want 0", got)
+	}
+}
+
+func TestFIFO_NoEvict_ServesReadyModel(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	s := newFIFO(&stubPlanner{}, eff)
+
+	s.OnRequest(noEvictReq("a"))
+
+	if got := eff.served("a"); got != 1 {
+		t.Errorf("served(a)=%d want 1", got)
+	}
+}
+
+func TestFIFO_NoEvict_JoinsInFlightSwap(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateStopped
+	eff.states["b"] = process.StateStopped
+	// Starting a evicts b; a no-evict request for a joins the swap a client
+	// already started instead of being refused.
+	s := newFIFO(&stubPlanner{evict: map[string][]string{"a": {"b"}}}, eff)
+	s.OnRequest(req("a"))
+
+	r := noEvictReq("a")
+	s.OnRequest(r)
+
+	assertAdmitted(t, r)
+	if got := eff.startsFor("a"); got != 1 {
+		t.Fatalf("StartSwap(a)=%d want 1 (shared swap)", got)
+	}
+	eff.states["a"] = process.StateReady
+	s.OnSwapDone(eff.swapDone("a", nil))
+	if got := eff.served("a"); got != 2 {
+		t.Errorf("served(a)=%d want 2", got)
+	}
+}

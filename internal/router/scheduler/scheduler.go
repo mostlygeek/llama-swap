@@ -117,6 +117,11 @@ type HandlerReq struct {
 	Admit      chan error
 	Respond    chan HandlerResp
 	PositionCh chan int
+	// NoEvict rejects the request at admission with swaputil.ErrWouldEvict
+	// when serving it would stop another model, wait behind an in-flight swap
+	// or jump the queue. A ready model, or a swap already starting it, is
+	// served as usual.
+	NoEvict bool
 }
 
 // HandlerResp is the routing decision returned to a HandlerReq's caller: either

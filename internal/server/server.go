@@ -63,6 +63,10 @@ type Server struct {
 	// alongside the new one.
 	capcompatCancel context.CancelFunc
 
+	// restore reloads hooks.on_unload.restore models after other models stop.
+	// nil when the hook is not configured. See restore.go.
+	restore *restorer
+
 	// tools is the MCP tool surface served at /api/mcp. Providers are
 	// aggregated here rather than enumerated in the handler, so a future
 	// provider that proxies an upstream MCP endpoint plugs in without
@@ -334,6 +338,7 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 
 	s.routes()
 	s.startPreload()
+	s.startRestore()
 	return s, nil
 }
 
@@ -683,6 +688,7 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 	if s.capcompatCancel != nil {
 		s.capcompatCancel()
 	}
+	s.restore.stop()
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex

@@ -104,6 +104,12 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 		return
 	}
 
+	if req.NoEvict && !s.loadsWithoutEviction(req.Model) {
+		s.logger.Debugf("%s: no-evict request for model %s rejected (would evict, collide or queue)", s.name, req.Model)
+		s.rejectAdmission(req, swaputil.ErrWouldEvict)
+		return
+	}
+
 	if !s.admit(req) {
 		return
 	}
@@ -489,6 +495,21 @@ func activeTargets(active map[string]*activeSwap, exclude string) []string {
 		out = append(out, id)
 	}
 	return out
+}
+
+// loadsWithoutEviction reports whether a request for model can be served
+// without stopping another model and without waiting behind other work: it is
+// joining a swap already starting it, or nothing is queued, the planner evicts
+// nothing and no in-flight swap would stop it.
+func (s *FIFO) loadsWithoutEviction(model string) bool {
+	if _, joining := s.active[model]; joining {
+		return true
+	}
+	if len(s.queued) > 0 {
+		return false
+	}
+	evict := s.planner.EvictionFor(model, s.runningSet(model))
+	return len(evict) == 0 && !collidesWith(model, evict, s.active)
 }
 
 // collidesWith reports whether a new swap with this target and evict set can

@@ -302,6 +302,30 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.Hooks.OnStartup.Preload = toPreload
 	}
 
+	// Validate hooks restore: unlike preload, an unknown model is an error,
+	// since a typo would otherwise silently disable the hook.
+	if len(config.Hooks.OnUnload.Restore) > 0 {
+		var toRestore []string
+		for _, modelID := range config.Hooks.OnUnload.Restore {
+			modelID = strings.TrimSpace(modelID)
+			if modelID == "" {
+				continue
+			}
+			real, found := config.RealModelName(modelID)
+			if !found {
+				return Config{}, fmt.Errorf("hooks.on_unload.restore references unknown model %q", modelID)
+			}
+			toRestore = append(toRestore, real)
+		}
+		config.Hooks.OnUnload.Restore = toRestore
+	}
+	if config.Hooks.OnUnload.Delay < 0 {
+		return Config{}, fmt.Errorf("hooks.on_unload.delay must be >= 0, got %d", config.Hooks.OnUnload.Delay)
+	}
+	if len(config.Hooks.OnUnload.Restore) > 0 && config.Hooks.OnUnload.Delay == 0 {
+		config.Hooks.OnUnload.Delay = 30
+	}
+
 	// Validate API keys (env macros already substituted at string level)
 	for i, apikey := range config.RequiredAPIKeys {
 		if apikey == "" {
