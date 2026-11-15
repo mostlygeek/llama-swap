@@ -9,6 +9,7 @@
     formatDuration,
     formatFileSize,
     formatSpeed,
+    formatTokenCount,
   } from "../lib/format";
 
   interface Props {
@@ -216,12 +217,14 @@
     const t = activity?.tokens;
     if (!t) return [];
     const rows: [string, string][] = [
-      ["Input", (t.input_tokens || 0).toLocaleString()],
-      ["Output", (t.output_tokens || 0).toLocaleString()],
+      ["Input", formatTokenCount(t.input_tokens)],
+      ["Output", formatTokenCount(t.output_tokens)],
     ];
-    if (t.cache_tokens) rows.push(["Cached", t.cache_tokens.toLocaleString()]);
-    if (t.draft_tokens) rows.push(["Draft", t.draft_tokens.toLocaleString()]);
-    if (t.draft_acc_tokens)
+    // Optional counts are only reported by some servers; the server uses -1
+    // for "not reported", so hide those rows rather than showing a negative.
+    if (t.cache_tokens > 0) rows.push(["Cached", t.cache_tokens.toLocaleString()]);
+    if (t.draft_tokens > 0) rows.push(["Draft", t.draft_tokens.toLocaleString()]);
+    if (t.draft_acc_tokens > 0)
       rows.push(["Draft accepted", t.draft_acc_tokens.toLocaleString()]);
     rows.push(["Prefill speed", formatSpeed(t.prompt_per_second)]);
     rows.push(["Decode speed", formatSpeed(t.tokens_per_second)]);

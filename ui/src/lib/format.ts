@@ -21,6 +21,14 @@ export function formatSpeed(speed: number): string {
   return speed < 0 ? "unknown" : speed.toFixed(2) + " t/s";
 }
 
+/**
+ * Format a token count; the server reports -1 for counts it never received,
+ * those are rendered as "unknown" instead of a negative number.
+ */
+export function formatTokenCount(count: number): string {
+  return count < 0 ? "unknown" : count.toLocaleString();
+}
+
 /** Format a byte count as B / KB / MB. */
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + " B";
