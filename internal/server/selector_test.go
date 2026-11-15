@@ -621,6 +621,10 @@ models:
     cmd: echo ${PORT}
   b:
     cmd: echo ${PORT}
+peers:
+  remote:
+    proxy: http://example.com
+    models: [any]
 selectors:
   any:
     strategy: fit
@@ -637,14 +641,27 @@ selectors:
 		served = append(served, data.ModelID)
 		w.WriteHeader(http.StatusOK)
 	}
-	s := selectorTestServer(t, cfg, local)
+	// The peer shares the disabled selector's bare name and must not get
+	// its requests.
+	peer := newStubRouter([]string{"any", "remote/any"}, "")
+	peerServed := false
+	peer.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		peerServed = true
+		w.WriteHeader(http.StatusOK)
+	}
+	s := newTestServer(local, peer)
+	s.cfg = cfg
+	s.routes()
+	t.Cleanup(func() { s.store.Close() })
 
 	assert.Contains(t, string(s.logs.ProxyLogs.GetHistory()), "ignoring fit selectors [any]")
 
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, chatRequest("any"))
 	assert.Equal(t, http.StatusNotFound, w.Code, "ignored fit selector must not resolve")
+	assert.Contains(t, w.Body.String(), `selector \"any\" is disabled`)
 	assert.Empty(t, served)
+	assert.False(t, peerServed, "disabled selector must not fall through to a peer")
 
 	w = httptest.NewRecorder()
 	s.ServeHTTP(w, chatRequest("pinned"))

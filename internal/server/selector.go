@@ -118,8 +118,15 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 				return
 			}
 			selector, found := s.cfg.Selectors[model]
-			if !found || !s.cfg.SelectorEnabled(selector) {
+			if !found {
 				next.ServeHTTP(w, r)
+				return
+			}
+			if !s.cfg.SelectorEnabled(selector) {
+				// Answer here: passing it on could reach a peer model that
+				// shares the selector's bare name.
+				swaputil.SendResponse(w, r, http.StatusNotFound,
+					fmt.Sprintf("selector %q is disabled: strategy %q requires routing.router.use: capacity", model, selector.Strategy))
 				return
 			}
 
