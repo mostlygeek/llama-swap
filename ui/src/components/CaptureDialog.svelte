@@ -633,9 +633,6 @@
         </Tabs.Content>
       </Tabs.Root>
 
-      <Dialog.Footer class="border-t border-border px-4 py-3 sm:justify-end">
-        <Button variant="outline" onclick={onclose}>Close</Button>
-      </Dialog.Footer>
     {:else}
       <div class="flex flex-col items-center justify-center p-12">
         <p class="text-lg text-muted-foreground">Capture not found</p>
