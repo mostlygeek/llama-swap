@@ -15,6 +15,10 @@
   import ChatComposer from "./ChatComposer.svelte";
   import EmptyState from "../EmptyState.svelte";
   import { Settings, Paperclip, SquarePen } from "@lucide/svelte";
+  import HistoryMenu from "./HistoryMenu.svelte";
+  import HistorySettings from "./HistorySettings.svelte";
+  import { createChatHistory } from "../../stores/chatHistory";
+  import { useConversation } from "../../lib/hooks/conversation.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
@@ -43,23 +47,28 @@
   /** Chat holds no tool turns; the Docs tab is where tool calling lives. */
   type PlainMessage = ChatMessage & { role: "user" | "assistant" | "system" };
 
-  function loadMessages(): PlainMessage[] {
-    try {
-      const saved = localStorage.getItem("playground-messages");
-      const parsed = saved ? JSON.parse(saved) : [];
-      if (!Array.isArray(parsed)) return [];
-      // A history left over from when this tab was agentic still holds tool
-      // turns this tab cannot render or replay. Sending one upstream is a hard
-      // 400, so they are dropped on load.
-      return parsed.filter(
-        (msg: ChatMessage): msg is PlainMessage => msg?.role !== "tool" && !msg?.tool_calls?.length
-      );
-    } catch {
-      return [];
-    }
+  /** What a saved conversation brings back with its messages. */
+  interface ChatSettings {
+    model: string;
+    systemPrompt: string;
+    endpoint: Endpoint;
+    temperature: number;
+    maxTokens: number;
+    topP: number;
+    topK: number;
+    minP: number;
   }
 
-  let messages = $state<PlainMessage[]>(loadMessages());
+  // Tool turns are not part of this tab; see PlainMessage. They are dropped
+  // when a conversation loads, since sending one upstream is a hard 400.
+  const history = createChatHistory<ChatSettings>({
+    namespace: "chat",
+    legacyKeys: ["playground-messages"],
+    defaultLimit: 1,
+    sanitize: (msgs) => msgs.filter((msg) => msg.role !== "tool" && !msg.tool_calls?.length),
+  });
+
+  let messages = $state<PlainMessage[]>([]);
   let userInput = $state("");
   let isStreaming = $state(false);
   let isReasoning = $state(false);
@@ -150,26 +159,64 @@
     }
   });
 
-  // Persist messages to localStorage (throttled to once per 2s)
-  let lastSaveTime = 0;
-  $effect(() => {
-    const json = JSON.stringify(messages);
-    const elapsed = Date.now() - lastSaveTime;
-    const save = () => {
-      try { localStorage.setItem("playground-messages", json); } catch {}
-      lastSaveTime = Date.now();
+  let historyNotice = $state<string | null>(null);
+
+  function currentSettings(): ChatSettings {
+    return {
+      model: $selectedModelStore,
+      systemPrompt: $systemPromptStore,
+      endpoint: $endpointStore,
+      temperature: $temperatureStore,
+      maxTokens: $maxTokensStore,
+      topP: $topPStore,
+      topK: $topKStore,
+      minP: $minPStore,
     };
-    if (elapsed >= 2000) {
-      save();
-      return;
+  }
+
+  function applySettings(settings: ChatSettings) {
+    historyNotice = null;
+    const known = get(playgroundModels);
+    const gone =
+      Boolean(settings.model) &&
+      known.length > 0 &&
+      !known.some((m) => m.id === settings.model || m.aliases?.includes(settings.model));
+    if (gone) {
+      historyNotice = `Model "${settings.model}" is no longer available; using the selected model instead.`;
+    } else {
+      selectedModelStore.set(settings.model);
     }
-    const timer = setTimeout(save, 2000 - elapsed);
-    return () => clearTimeout(timer);
+    systemPromptStore.set(settings.systemPrompt);
+    endpointStore.set(settings.endpoint);
+    temperatureStore.set(settings.temperature);
+    maxTokensStore.set(settings.maxTokens);
+    topPStore.set(settings.topP);
+    topKStore.set(settings.topK);
+    minPStore.set(settings.minP);
+  }
+
+  const conversation = useConversation<ChatSettings>({
+    history,
+    getMessages: () => messages,
+    setMessages: (next) => (messages = next as PlainMessage[]),
+    getSettings: currentSettings,
+    applySettings,
+    isStreaming: () => isStreaming,
   });
+
+  function selectHistory(id: string) {
+    void conversation.open(id).then((ok) => {
+      if (ok) {
+        isReasoning = false;
+        reasoningStartTime = 0;
+        userScrolledUp = false;
+      }
+    });
+  }
 
   async function sendMessage() {
     const trimmedInput = userInput.trim();
-    if ((!trimmedInput && attachedImages.length === 0) || !$selectedModelStore || isStreaming) return;
+    if ((!trimmedInput && attachedImages.length === 0) || !$selectedModelStore || isStreaming || conversation.loading) return;
 
     userScrolledUp = false;
 
@@ -206,7 +253,8 @@
     if (isStreaming) {
       cancelStreaming();
     }
-    messages = [];
+    historyNotice = null;
+    void conversation.newChat();
     isReasoning = false;
     reasoningStartTime = 0;
   }
@@ -338,7 +386,7 @@
   }
 
   async function editMessage(idx: number, newContent: string) {
-    if (isStreaming || !$selectedModelStore) return;
+    if (isStreaming || conversation.loading || !$selectedModelStore) return;
 
     // Update the user message at the specified index
     messages = messages.map((msg, i) =>
@@ -386,6 +434,7 @@
 <div class="flex flex-col h-full">
   <!-- Model selector and controls -->
   <div class="mb-3 flex shrink-0 gap-2">
+    <HistoryMenu {history} disabled={isStreaming} onSelect={selectHistory} onCleared={conversation.detach} />
     <ModelSelector
       bind:value={$selectedModelStore}
       placeholder="Select a model..."
@@ -402,6 +451,10 @@
       </Button>
     </div>
   </div>
+
+  {#if historyNotice}
+    <p class="text-muted-foreground mb-2 shrink-0 px-1 text-xs">{historyNotice}</p>
+  {/if}
 
   <!-- Settings dialog -->
   <Dialog.Root bind:open={showSettings}>
@@ -420,6 +473,7 @@
         <TabsList variant="line" class="justify-start">
           <TabsTrigger value="prompt">Prompt</TabsTrigger>
           <TabsTrigger value="params">Parameters</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
         <TabsContent value="prompt">
@@ -523,6 +577,10 @@
             <p class="text-muted-foreground mt-1 text-xs">Required for /v1/messages.</p>
           </div>
         </TabsContent>
+
+        <TabsContent value="history">
+          <HistorySettings {history} disabled={isStreaming} onCleared={conversation.detach} />
+        </TabsContent>
       </Tabs>
 
       <Dialog.Footer>
@@ -544,7 +602,9 @@
       onscroll={handleMessagesScroll}
     >
       {#if messages.length === 0}
-        <EmptyState full message="Start a conversation by typing a message below." />
+        {#if !conversation.loading}
+          <EmptyState full message="Start a conversation by typing a message below." />
+        {/if}
       {:else}
         <div class="mx-auto w-full max-w-3xl py-2">
         {#each messages as message, idx (idx)}
@@ -559,7 +619,7 @@
             statsLive={statsLiveFor(idx)}
             onEdit={message.role === "user" ? (newContent) => editMessage(idx, newContent) : undefined}
             interrupted={message.interrupted}
-            onRegenerate={!isStreaming && message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
+            onRegenerate={!isStreaming && !conversation.loading && message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
               ? () => regenerateFromIndex(idx - 1)
               : undefined}
           />
@@ -586,7 +646,7 @@
         placeholder="Type a message..."
         onkeydown={handleKeyDown}
         onpaste={handleImagePaste}
-        disabled={isStreaming || !$selectedModelStore}
+        disabled={isStreaming || conversation.loading || !$selectedModelStore}
         streaming={isStreaming}
         canSend={Boolean(userInput.trim()) || attachedImages.length > 0}
         onsend={sendMessage}
@@ -627,7 +687,7 @@
             size="icon-lg"
             class="text-muted-foreground shrink-0 rounded-full"
             onclick={() => fileInput?.click()}
-            disabled={isStreaming || !$selectedModelStore}
+            disabled={isStreaming || conversation.loading || !$selectedModelStore}
             title="Attach image or paste it into the message box"
             aria-label="Attach image"
           >

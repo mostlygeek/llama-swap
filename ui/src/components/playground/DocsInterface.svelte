@@ -18,6 +18,9 @@
   import ChatComposer from "./ChatComposer.svelte";
   import EmptyState from "../EmptyState.svelte";
   import { RefreshCw, SquarePen, TriangleAlert, X } from "@lucide/svelte";
+  import HistoryMenu from "./HistoryMenu.svelte";
+  import { createChatHistory } from "../../stores/chatHistory";
+  import { useConversation } from "../../lib/hooks/conversation.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
 
   /**
@@ -42,19 +45,18 @@
     return $playgroundModels.find((model) => model.id === id || model.aliases?.includes(id))?.context_length;
   }
 
-  function loadMessages(): ChatMessage[] {
-    try {
-      const saved = localStorage.getItem("playground-docs-messages");
-      // sanitizeMessages prunes tool calls a reload or cancel left unanswered.
-      // Sending one of those upstream is a hard 400, which reads to the user
-      // as a chat that is broken and will not recover.
-      return saved ? sanitizeMessages(JSON.parse(saved)) : [];
-    } catch {
-      return [];
-    }
-  }
+  // The model is the only setting this page has, so it is all a saved
+  // conversation brings back. sanitizeMessages prunes tool calls a reload or
+  // cancel left unanswered; sending one of those upstream is a hard 400, which
+  // reads to the user as a chat that is broken and will not recover.
+  const history = createChatHistory<{ model: string }>({
+    namespace: "docs",
+    legacyKeys: ["playground-docs-messages"],
+    defaultLimit: 1,
+    sanitize: sanitizeMessages,
+  });
 
-  let messages = $state<ChatMessage[]>(loadMessages());
+  let messages = $state<ChatMessage[]>([]);
   // Drawn once per empty chat rather than derived: a list that recomputed
   // would reshuffle under the reader's cursor.
   let suggestions = $state(pickSuggestions());
@@ -91,7 +93,6 @@
   let toolLabels = $derived(
     new Map(toolDefs.map((t) => [t.function.name, friendlyToolName(t.function.name, t.function.title)]))
   );
-  let canSend = $derived(Boolean($selectedModelStore) && toolDefs.length > 0 && !isStreaming);
 
   // A complete agent response can include several model turns and tool calls.
   // Keep that contiguous run in one card so its reasoning, work, and answer
@@ -225,22 +226,28 @@
     }
   });
 
-  // Persist messages to localStorage (throttled to once per 2s)
-  let lastSaveTime = 0;
-  $effect(() => {
-    const json = JSON.stringify(messages);
-    const elapsed = Date.now() - lastSaveTime;
-    const save = () => {
-      try { localStorage.setItem("playground-docs-messages", json); } catch {}
-      lastSaveTime = Date.now();
-    };
-    if (elapsed >= 2000) {
-      save();
-      return;
-    }
-    const timer = setTimeout(save, 2000 - elapsed);
-    return () => clearTimeout(timer);
+  const conversation = useConversation<{ model: string }>({
+    history,
+    getMessages: () => messages,
+    setMessages: (next) => (messages = next),
+    getSettings: () => ({ model: $selectedModelStore }),
+    applySettings: (settings) => selectedModelStore.set(settings.model),
+    isStreaming: () => isStreaming,
   });
+
+  let canSend = $derived(Boolean($selectedModelStore) && toolDefs.length > 0 && !isStreaming && !conversation.loading);
+
+  function selectHistory(id: string) {
+    void conversation.open(id).then((ok) => {
+      if (!ok) return;
+      suggestions = pickSuggestions();
+      isReasoning = false;
+      reasoningStartTime = 0;
+      agentNotice = null;
+      showJinjaHint = false;
+      userScrolledUp = false;
+    });
+  }
 
   async function sendMessage() {
     const trimmedInput = userInput.trim();
@@ -271,7 +278,7 @@
     if (isStreaming) {
       cancelStreaming();
     }
-    messages = [];
+    void conversation.newChat();
     suggestions = pickSuggestions();
     isReasoning = false;
     reasoningStartTime = 0;
@@ -488,6 +495,7 @@
   <!-- Model selector and controls -->
   <div class="mb-3 shrink-0">
     <div class="flex gap-2">
+      <HistoryMenu {history} disabled={isStreaming} onSelect={selectHistory} onCleared={conversation.detach} />
       <ModelSelector
         bind:value={$selectedModelStore}
         placeholder="Select a tool-capable model..."
@@ -515,7 +523,9 @@
       bind:this={messagesContainer}
       onscroll={handleMessagesScroll}
     >
-      {#if messages.length === 0}
+      {#if messages.length === 0 && conversation.loading}
+        <!-- restoring the last conversation: no suggestions flash -->
+      {:else if messages.length === 0}
         <EmptyState full>
           <div class="w-full max-w-xl px-4 text-center">
             <p class="text-foreground text-sm font-medium">Ask llama-swap about llama-swap</p>
@@ -568,7 +578,7 @@
               statsLive={isStreaming && item.isCurrent && $showGenerationStats}
               toolCallCount={item.toolCallCount}
               interrupted={item.interrupted}
-              onRegenerate={!isStreaming && item.userMessageIdx !== undefined
+              onRegenerate={!isStreaming && !conversation.loading && item.userMessageIdx !== undefined
                 ? () => regenerateFromIndex(item.userMessageIdx!)
                 : undefined}
             />
@@ -616,7 +626,7 @@
         bind:value={userInput}
         placeholder="Ask about llama-swap..."
         onkeydown={handleKeyDown}
-        disabled={isStreaming || !$selectedModelStore}
+        disabled={isStreaming || conversation.loading || !$selectedModelStore}
         streaming={isStreaming}
         canSend={Boolean(userInput.trim()) && canSend}
         onsend={sendMessage}
