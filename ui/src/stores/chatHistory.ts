@@ -57,6 +57,12 @@ export interface ChatHistoryOptions {
   namespace: string;
   /** Conversations kept until the user changes it. */
   defaultLimit?: number;
+  /**
+   * localStorage keys of the storage this replaced. They are deleted, not
+   * migrated: they can hold megabytes of base64 images that would otherwise
+   * stay in the quota for good.
+   */
+  legacyKeys?: string[];
   /** Applied to messages on load, e.g. to drop tool calls left unanswered. */
   sanitize?: (messages: ChatMessage[]) => ChatMessage[];
 }
@@ -204,6 +210,13 @@ function isQuotaError(e: unknown): boolean {
 
 export function createChatHistory<S extends object>(options: ChatHistoryOptions): ChatHistory<S> {
   const { namespace, sanitize } = options;
+  for (const key of options.legacyKeys ?? []) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // no localStorage; nothing to free
+    }
+  }
   const limit = persistentStore<number>(`${namespace}-history-limit`, options.defaultLimit ?? 1);
   limit.update(normalizeLimit);
   const activeId = persistentStore<string | null>(`${namespace}-active-id`, null);

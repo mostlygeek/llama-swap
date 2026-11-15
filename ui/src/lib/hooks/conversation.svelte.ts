@@ -37,7 +37,11 @@ export function conversationTitle(messages: ChatMessage[]): string {
  */
 export function useConversation<S extends object>(options: ConversationOptions<S>) {
   const { history } = options;
-  let loading = $state(get(history.limit) > 0 && get(history.activeId) !== null);
+  let restoring = $state(get(history.limit) > 0 && get(history.activeId) !== null);
+  // Set while switching or starting a chat, so nothing is sent into a
+  // conversation that is about to be replaced.
+  let switching = $state(false);
+  const isBusy = () => restoring || switching;
   let id: string | null = null;
   // What was last saved or restored; the effect only writes on a difference.
   let lastJson = "";
@@ -50,10 +54,9 @@ export function useConversation<S extends object>(options: ConversationOptions<S
   async function write() {
     const messages = $state.snapshot(options.getMessages()) as ChatMessage[];
     if (messages.length === 0 || get(history.limit) === 0) return;
-    if (id === null) {
-      id = newId();
-      history.activeId.set(id);
-    }
+    id ??= newId();
+    // Saving may have been off (limit 0), which clears the active id.
+    history.activeId.set(id);
     lastJson = snapshotJson();
     lastSaveTime = Date.now();
     await history.save({
@@ -66,7 +69,7 @@ export function useConversation<S extends object>(options: ConversationOptions<S
 
   /** Saves right now if anything changed since the last save. */
   function flush(): Promise<void> {
-    if (loading || snapshotJson() === lastJson) return Promise.resolve();
+    if (restoring || snapshotJson() === lastJson) return Promise.resolve();
     return write();
   }
 
@@ -88,7 +91,7 @@ export function useConversation<S extends object>(options: ConversationOptions<S
       .then((ok) => {
         if (!ok) history.activeId.set(null);
       })
-      .finally(() => (loading = false));
+      .finally(() => (restoring = false));
   } else {
     history.activeId.set(null);
   }
@@ -97,13 +100,17 @@ export function useConversation<S extends object>(options: ConversationOptions<S
   $effect(() => {
     const json = snapshotJson();
     return untrack(() => {
-      if (loading || json === lastJson || options.getMessages().length === 0) return;
+      if (restoring || json === lastJson || options.getMessages().length === 0) return;
       const wait = SAVE_INTERVAL_MS - (Date.now() - lastSaveTime);
       if (wait <= 0) {
         void write();
         return;
       }
-      const timer = setTimeout(() => void write(), wait);
+      // Re-checked when it fires: the chat may have been detached or
+      // switched meanwhile, and then there is nothing left to save.
+      const timer = setTimeout(() => {
+        if (snapshotJson() !== lastJson) void write();
+      }, wait);
       return () => clearTimeout(timer);
     });
   });
@@ -130,23 +137,34 @@ export function useConversation<S extends object>(options: ConversationOptions<S
   });
 
   return {
+    /** True while restoring or switching; the page should not accept input. */
     get loading() {
-      return loading;
+      return isBusy();
     },
     flush,
     /** Starts a blank conversation; the current one is saved first. */
     async newChat() {
-      await flush();
-      id = null;
-      history.activeId.set(null);
-      options.setMessages([]);
-      lastJson = snapshotJson();
+      switching = true;
+      try {
+        await flush();
+        id = null;
+        history.activeId.set(null);
+        options.setMessages([]);
+        lastJson = snapshotJson();
+      } finally {
+        switching = false;
+      }
     },
     /** Switches to a saved conversation. False if it could not be loaded. */
     async open(convId: string): Promise<boolean> {
-      if (options.isStreaming() || convId === id) return false;
-      await flush();
-      return restore(convId);
+      if (options.isStreaming() || isBusy() || convId === id) return false;
+      switching = true;
+      try {
+        await flush();
+        return await restore(convId);
+      } finally {
+        switching = false;
+      }
     },
     /** After the stored history was cleared: keep what is on screen, unsaved. */
     detach() {

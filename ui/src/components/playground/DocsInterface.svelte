@@ -51,6 +51,7 @@
   // reads to the user as a chat that is broken and will not recover.
   const history = createChatHistory<{ model: string }>({
     namespace: "docs",
+    legacyKeys: ["playground-docs-messages"],
     defaultLimit: 1,
     sanitize: sanitizeMessages,
   });
@@ -92,7 +93,6 @@
   let toolLabels = $derived(
     new Map(toolDefs.map((t) => [t.function.name, friendlyToolName(t.function.name, t.function.title)]))
   );
-  let canSend = $derived(Boolean($selectedModelStore) && toolDefs.length > 0 && !isStreaming);
 
   // A complete agent response can include several model turns and tool calls.
   // Keep that contiguous run in one card so its reasoning, work, and answer
@@ -234,6 +234,8 @@
     applySettings: (settings) => selectedModelStore.set(settings.model),
     isStreaming: () => isStreaming,
   });
+
+  let canSend = $derived(Boolean($selectedModelStore) && toolDefs.length > 0 && !isStreaming && !conversation.loading);
 
   function selectHistory(id: string) {
     void conversation.open(id).then((ok) => {
@@ -576,7 +578,7 @@
               statsLive={isStreaming && item.isCurrent && $showGenerationStats}
               toolCallCount={item.toolCallCount}
               interrupted={item.interrupted}
-              onRegenerate={!isStreaming && item.userMessageIdx !== undefined
+              onRegenerate={!isStreaming && !conversation.loading && item.userMessageIdx !== undefined
                 ? () => regenerateFromIndex(item.userMessageIdx!)
                 : undefined}
             />
@@ -624,7 +626,7 @@
         bind:value={userInput}
         placeholder="Ask about llama-swap..."
         onkeydown={handleKeyDown}
-        disabled={isStreaming || !$selectedModelStore}
+        disabled={isStreaming || conversation.loading || !$selectedModelStore}
         streaming={isStreaming}
         canSend={Boolean(userInput.trim()) && canSend}
         onsend={sendMessage}

@@ -63,6 +63,7 @@
   // when a conversation loads, since sending one upstream is a hard 400.
   const history = createChatHistory<ChatSettings>({
     namespace: "chat",
+    legacyKeys: ["playground-messages"],
     defaultLimit: 1,
     sanitize: (msgs) => msgs.filter((msg) => msg.role !== "tool" && !msg.tool_calls?.length),
   });
@@ -215,7 +216,7 @@
 
   async function sendMessage() {
     const trimmedInput = userInput.trim();
-    if ((!trimmedInput && attachedImages.length === 0) || !$selectedModelStore || isStreaming) return;
+    if ((!trimmedInput && attachedImages.length === 0) || !$selectedModelStore || isStreaming || conversation.loading) return;
 
     userScrolledUp = false;
 
@@ -385,7 +386,7 @@
   }
 
   async function editMessage(idx: number, newContent: string) {
-    if (isStreaming || !$selectedModelStore) return;
+    if (isStreaming || conversation.loading || !$selectedModelStore) return;
 
     // Update the user message at the specified index
     messages = messages.map((msg, i) =>
@@ -618,7 +619,7 @@
             statsLive={statsLiveFor(idx)}
             onEdit={message.role === "user" ? (newContent) => editMessage(idx, newContent) : undefined}
             interrupted={message.interrupted}
-            onRegenerate={!isStreaming && message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
+            onRegenerate={!isStreaming && !conversation.loading && message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
               ? () => regenerateFromIndex(idx - 1)
               : undefined}
           />
@@ -645,7 +646,7 @@
         placeholder="Type a message..."
         onkeydown={handleKeyDown}
         onpaste={handleImagePaste}
-        disabled={isStreaming || !$selectedModelStore}
+        disabled={isStreaming || conversation.loading || !$selectedModelStore}
         streaming={isStreaming}
         canSend={Boolean(userInput.trim()) || attachedImages.length > 0}
         onsend={sendMessage}
@@ -686,7 +687,7 @@
             size="icon-lg"
             class="text-muted-foreground shrink-0 rounded-full"
             onclick={() => fileInput?.click()}
-            disabled={isStreaming || !$selectedModelStore}
+            disabled={isStreaming || conversation.loading || !$selectedModelStore}
             title="Attach image or paste it into the message box"
             aria-label="Attach image"
           >

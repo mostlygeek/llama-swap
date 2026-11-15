@@ -160,3 +160,13 @@ describe("ChatHistory", () => {
     expect(id).toBeNull();
   });
 });
+
+describe("ChatHistory legacy keys", () => {
+  it("deletes the old localStorage keys without reading them", () => {
+    storage.set("playground-messages", "[...]");
+    storage.set("other", "keep");
+    createChatHistory<S>({ namespace: "chat", legacyKeys: ["playground-messages"] });
+    expect(storage.has("playground-messages")).toBe(false);
+    expect(storage.get("other")).toBe("keep");
+  });
+});
