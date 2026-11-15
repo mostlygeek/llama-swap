@@ -1,13 +1,12 @@
 <script lang="ts">
-  import { get } from "svelte/store";
+  import { untrack } from "svelte";
+  import { derived } from "svelte/store";
   import { hasListedModels, playgroundModels } from "../../stores/api";
-  import { persistentStore } from "../../stores/persistent";
+  import { chatHistory, chatMessages, activeChat } from "../../stores/chatHistory";
   import { showGenerationStats } from "../../stores/generationStats";
-  import { streamChatCompletion, type Endpoint } from "../../lib/chatApi";
-  import { currentStats, markCancelled, startTracking, trackChunk } from "../../lib/generationStats";
-  import { DOCS_AGENT_SYSTEM_PROMPT } from "../../lib/prompts/docsAgent";
-  import { playgroundStores } from "../../stores/playgroundActivity";
-  import type { ChatMessage, ContentPart } from "../../lib/types";
+  import type { Endpoint } from "../../lib/chatApi";
+  import { chatGeneration } from "../../lib/chatGeneration";
+  import type { ContentPart } from "../../lib/types";
   import { isSubmitEnter } from "../../lib/ime";
   import { appendImageFiles, pasteImageFiles } from "../../lib/chatImages";
   import ChatMessageComponent from "./ChatMessage.svelte";
@@ -24,47 +23,19 @@
   import { Tabs, TabsContent, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
   import { X } from "@lucide/svelte";
 
-  const selectedModelStore = persistentStore<string>("playground-selected-model", "");
-  const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
-  const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
-  const endpointStore = persistentStore<Endpoint>("playground-endpoint", "v1/chat/completions");
-  const maxTokensStore = persistentStore<number>("playground-max-tokens", 4096);
-  const topPStore = persistentStore<number>("playground-top-p", 1);
-  const topKStore = persistentStore<number>("playground-top-k", 40);
-  const minPStore = persistentStore<number>("playground-min-p", 0);
+  const selectedModelStore = chatHistory.setting("model");
+  const systemPromptStore = chatHistory.setting("systemPrompt");
+  const temperatureStore = chatHistory.setting("temperature");
+  const endpointStore = chatHistory.setting("endpoint");
+  const maxTokensStore = chatHistory.setting("maxTokens");
+  const topPStore = chatHistory.setting("topP");
+  const topKStore = chatHistory.setting("topK");
+  const minPStore = chatHistory.setting("minP");
 
-  // This tab was briefly the docs agent; that is the Docs tab now. Anyone who
-  // used it in between has the agent's prompt persisted here, which is not a
-  // prompt they chose, so it is cleared once.
-  if (get(systemPromptStore) === DOCS_AGENT_SYSTEM_PROMPT) {
-    systemPromptStore.set("");
-  }
-
-  /** Chat holds no tool turns; the Docs tab is where tool calling lives. */
-  type PlainMessage = ChatMessage & { role: "user" | "assistant" | "system" };
-
-  function loadMessages(): PlainMessage[] {
-    try {
-      const saved = localStorage.getItem("playground-messages");
-      const parsed = saved ? JSON.parse(saved) : [];
-      if (!Array.isArray(parsed)) return [];
-      // A history left over from when this tab was agentic still holds tool
-      // turns this tab cannot render or replay. Sending one upstream is a hard
-      // 400, so they are dropped on load.
-      return parsed.filter(
-        (msg: ChatMessage): msg is PlainMessage => msg?.role !== "tool" && !msg?.tool_calls?.length
-      );
-    } catch {
-      return [];
-    }
-  }
-
-  let messages = $state<PlainMessage[]>(loadMessages());
   let userInput = $state("");
-  let isStreaming = $state(false);
-  let isReasoning = $state(false);
-  let reasoningStartTime = $state<number>(0);
-  let abortController = $state<AbortController | null>(null);
+  const streaming = derived([activeChat, chatHistory.generating], ([chat, ids]) => ids.has(chat.id));
+  const reasoning = chatGeneration.reasoning;
+  const isReasoning = $derived(Boolean($reasoning[$activeChat.id]));
   let messagesContainer: HTMLDivElement | undefined = $state();
   let inputRef: HTMLTextAreaElement | null = $state(null);
   let showSettings = $state(false);
@@ -85,16 +56,25 @@
     return $playgroundModels.find((m) => m.id === id || m.aliases?.includes(id))?.context_length;
   }
 
+  let previousChatId = "";
   $effect(() => {
-    playgroundStores.chatStreaming.set(isStreaming);
+    const id = $activeChat.id;
+    if (id === previousChatId) return;
+    previousChatId = id;
+    untrack(() => {
+      userInput = "";
+      attachedImages = [];
+      imageError = null;
+      userScrolledUp = false;
+    });
   });
 
   let wasStreaming = $state(false);
   $effect(() => {
-    if (wasStreaming && !isStreaming) {
+    if (wasStreaming && !$streaming) {
       inputRef?.focus();
     }
-    wasStreaming = isStreaming;
+    wasStreaming = $streaming;
   });
 
   // The settings dialog follows the visual viewport (see TextEditDialog):
@@ -142,34 +122,17 @@
 
   // Auto-scroll when messages change — skip if user scrolled up
   $effect(() => {
-    if (messages.length > 0 && messagesContainer && !userScrolledUp) {
+    if ($chatMessages.length > 0 && messagesContainer && !userScrolledUp) {
       messagesContainer.scrollTo({
         top: messagesContainer.scrollHeight,
-        behavior: isStreaming ? "instant" : "smooth",
+        behavior: $streaming ? "instant" : "smooth",
       });
     }
   });
 
-  // Persist messages to localStorage (throttled to once per 2s)
-  let lastSaveTime = 0;
-  $effect(() => {
-    const json = JSON.stringify(messages);
-    const elapsed = Date.now() - lastSaveTime;
-    const save = () => {
-      try { localStorage.setItem("playground-messages", json); } catch {}
-      lastSaveTime = Date.now();
-    };
-    if (elapsed >= 2000) {
-      save();
-      return;
-    }
-    const timer = setTimeout(save, 2000 - elapsed);
-    return () => clearTimeout(timer);
-  });
-
   async function sendMessage() {
     const trimmedInput = userInput.trim();
-    if ((!trimmedInput && attachedImages.length === 0) || !$selectedModelStore || isStreaming) return;
+    if ((!trimmedInput && attachedImages.length === 0) || !$selectedModelStore || $streaming) return;
 
     userScrolledUp = false;
 
@@ -189,79 +152,21 @@
     }
 
     // Add user message
-    messages = [...messages, { role: "user", content }];
+    $chatMessages = [...$chatMessages, { role: "user", content }];
     userInput = "";
     attachedImages = [];
     imageError = null;
 
     // Generate response from the new user message
-    await regenerateFromIndex(messages.length - 1);
+    await regenerateFromIndex($chatMessages.length - 1);
   }
 
   function cancelStreaming() {
-    abortController?.abort();
+    chatGeneration.cancel($activeChat.id);
   }
 
   function newChat() {
-    if (isStreaming) {
-      cancelStreaming();
-    }
-    messages = [];
-    isReasoning = false;
-    reasoningStartTime = 0;
-  }
-
-  /** Merges a patch into the last message. */
-  function patchLast(patch: Partial<PlainMessage>) {
-    messages = messages.map((msg, i) => (i === messages.length - 1 ? { ...msg, ...patch } : msg));
-  }
-
-  function lastText(): string {
-    const last = messages[messages.length - 1];
-    return typeof last?.content === "string" ? last.content : "";
-  }
-
-  /** Applies a streamed delta to the in-progress assistant message. */
-  function appendDelta(kind: "content" | "reasoning", text: string) {
-    if (kind === "reasoning") {
-      if (!isReasoning) {
-        isReasoning = true;
-        reasoningStartTime = Date.now();
-      }
-      const last = messages[messages.length - 1];
-      patchLast({ reasoning_content: (last?.reasoning_content || "") + text });
-      return;
-    }
-
-    // The first content delta ends the reasoning phase.
-    if (isReasoning) {
-      patchLast({ reasoningTimeMs: Date.now() - reasoningStartTime });
-      isReasoning = false;
-    }
-    patchLast({ content: lastText() + text });
-  }
-
-  function handleTurnError(error: unknown) {
-    if (error instanceof Error && error.name === "AbortError") {
-      // Cancelled by the user: keep the partial response.
-      if (isReasoning && reasoningStartTime > 0) {
-        patchLast({ reasoningTimeMs: Date.now() - reasoningStartTime });
-      }
-      patchLast({ interrupted: "cancelled" });
-      return;
-    }
-    const message = error instanceof Error ? error.message : "An error occurred";
-    patchLast({ content: lastText() + `\n\n**Error:** ${message}`, interrupted: "error" });
-  }
-
-  /** The conversation to send, with the optional system prompt prepended. */
-  function requestMessages(): ChatMessage[] {
-    const out: ChatMessage[] = [];
-    if ($systemPromptStore.trim()) {
-      out.push({ role: "system", content: $systemPromptStore.trim() });
-    }
-    out.push(...messages.slice(0, -1)); // everything but the empty placeholder
-    return out;
+    chatHistory.create();
   }
 
   /**
@@ -272,76 +177,26 @@
    */
   function statsFor(idx: number) {
     if (!$showGenerationStats) return undefined;
-    const msg = messages[idx];
+    const msg = $chatMessages[idx];
     if (msg.role === "assistant") return msg.stats;
-    const next = messages[idx + 1];
+    const next = $chatMessages[idx + 1];
     return next?.role === "assistant" ? next.stats : undefined;
   }
 
   /** True for the streaming assistant turn and the user message that prompted it. */
   function statsLiveFor(idx: number) {
-    return $showGenerationStats && isStreaming && idx >= messages.length - 2;
+    return $showGenerationStats && $streaming && idx >= $chatMessages.length - 2;
   }
 
   async function regenerateFromIndex(idx: number) {
-    // Remove all messages after the edited user message
-    messages = messages.slice(0, idx + 1);
-
-    // Add empty assistant message for the new response
-    messages = [...messages, { role: "assistant", content: "" }];
-
-    isStreaming = true;
-    isReasoning = false;
-    reasoningStartTime = 0;
-    abortController = new AbortController();
-
-    // Stats are refreshed on every chunk and, so the clocks keep moving while
-    // the backend is quiet (prompt processing, a slow token), on a timer too.
-    const tracker = startTracking(performance.now(), selectedContextLength());
-    const ticker = window.setInterval(() => {
-      patchLast({ stats: currentStats(tracker, performance.now(), true) });
-    }, 200);
-
-    try {
-      const stream = streamChatCompletion(
-        $selectedModelStore,
-        requestMessages(),
-        abortController.signal,
-        {
-          temperature: $temperatureStore,
-          endpoint: $endpointStore,
-          max_tokens: $maxTokensStore,
-          top_p: $topPStore,
-          top_k: $topKStore,
-          min_p: $minPStore,
-        }
-      );
-
-      for await (const chunk of stream) {
-        const now = performance.now();
-        trackChunk(tracker, chunk, now);
-        if (chunk.done) break;
-        if (chunk.reasoning_content) appendDelta("reasoning", chunk.reasoning_content);
-        if (chunk.content) appendDelta("content", chunk.content);
-        patchLast({ stats: currentStats(tracker, now, true) });
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") markCancelled(tracker);
-      handleTurnError(error);
-    } finally {
-      window.clearInterval(ticker);
-      patchLast({ stats: currentStats(tracker, performance.now(), false) });
-      isStreaming = false;
-      isReasoning = false;
-      abortController = null;
-    }
+    await chatGeneration.generate($activeChat.id, idx, selectedContextLength());
   }
 
   async function editMessage(idx: number, newContent: string) {
-    if (isStreaming || !$selectedModelStore) return;
+    if ($streaming || !$selectedModelStore) return;
 
     // Update the user message at the specified index
-    messages = messages.map((msg, i) =>
+    $chatMessages = $chatMessages.map((msg, i) =>
       i === idx ? { ...msg, content: newContent } : msg
     );
 
@@ -389,14 +244,14 @@
     <ModelSelector
       bind:value={$selectedModelStore}
       placeholder="Select a model..."
-      disabled={isStreaming}
+      disabled={$streaming}
       match={{ inputModalities: ["text", "image"], outputModalities: ["text"] }}
     />
     <div class="flex shrink-0 gap-2">
       <Button variant="outline" size="icon" onclick={() => (showSettings = true)} title="Chat settings">
         <Settings />
       </Button>
-      <Button variant="outline" onclick={newChat} disabled={messages.length === 0 && !isStreaming} title="New chat">
+      <Button variant="outline" onclick={newChat} disabled={$chatMessages.length === 0} title="New chat">
         <SquarePen />
         <span class="hidden sm:inline">New Chat</span>
       </Button>
@@ -430,7 +285,7 @@
             placeholder="You are a helpful assistant..."
             rows={5}
             bind:value={$systemPromptStore}
-            disabled={isStreaming}
+            disabled={$streaming}
           />
         </TabsContent>
 
@@ -462,7 +317,7 @@
               step="0.05"
               class="accent-primary w-full"
               bind:value={$temperatureStore}
-              disabled={isStreaming}
+              disabled={$streaming}
             />
             <div class="text-muted-foreground mt-1 flex justify-between text-xs">
               <span>Precise (0)</span>
@@ -481,7 +336,7 @@
               step="0.01"
               class="accent-primary w-full"
               bind:value={$topPStore}
-              disabled={isStreaming}
+              disabled={$streaming}
             />
             <div class="text-muted-foreground mt-1 flex justify-between text-xs">
               <span>Narrow (0.01)</span>
@@ -500,7 +355,7 @@
               step="0.01"
               class="accent-primary w-full"
               bind:value={$minPStore}
-              disabled={isStreaming}
+              disabled={$streaming}
             />
             <p class="text-muted-foreground mt-1 text-xs">Off at 0. Only sent on /v1/chat/completions.</p>
           </div>
@@ -513,13 +368,13 @@
               max="10000"
               step="1"
               bind:value={$topKStore}
-              disabled={isStreaming}
+              disabled={$streaming}
             />
             <p class="text-muted-foreground mt-1 text-xs">0 disables it. Not sent on /v1/responses.</p>
           </div>
           <div>
             <Label class="mb-1" for="max-tokens">Max Tokens</Label>
-            <Input id="max-tokens" type="number" min="1" bind:value={$maxTokensStore} disabled={isStreaming} />
+            <Input id="max-tokens" type="number" min="1" bind:value={$maxTokensStore} disabled={$streaming} />
             <p class="text-muted-foreground mt-1 text-xs">Required for /v1/messages.</p>
           </div>
         </TabsContent>
@@ -543,27 +398,29 @@
       bind:this={messagesContainer}
       onscroll={handleMessagesScroll}
     >
-      {#if messages.length === 0}
+      {#if $chatMessages.length === 0}
         <EmptyState full message="Start a conversation by typing a message below." />
       {:else}
         <div class="mx-auto w-full max-w-3xl py-2">
-        {#each messages as message, idx (idx)}
+        {#key $activeChat.id}
+        {#each $chatMessages as message, idx (idx)}
           <ChatMessageComponent
             role={message.role}
             content={message.content}
             reasoning_content={message.reasoning_content}
             reasoningTimeMs={message.reasoningTimeMs}
-            isStreaming={isStreaming && idx === messages.length - 1 && message.role === "assistant"}
-            isReasoning={isReasoning && idx === messages.length - 1 && message.role === "assistant"}
+            isStreaming={$streaming && idx === $chatMessages.length - 1 && message.role === "assistant"}
+            isReasoning={isReasoning && idx === $chatMessages.length - 1 && message.role === "assistant"}
             stats={statsFor(idx)}
             statsLive={statsLiveFor(idx)}
             onEdit={message.role === "user" ? (newContent) => editMessage(idx, newContent) : undefined}
             interrupted={message.interrupted}
-            onRegenerate={!isStreaming && message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
+            onRegenerate={!$streaming && message.role === "assistant" && idx > 0 && $chatMessages[idx - 1].role === "user"
               ? () => regenerateFromIndex(idx - 1)
               : undefined}
           />
         {/each}
+        {/key}
         </div>
       {/if}
     </div>
@@ -586,8 +443,8 @@
         placeholder="Type a message..."
         onkeydown={handleKeyDown}
         onpaste={handleImagePaste}
-        disabled={isStreaming || !$selectedModelStore}
-        streaming={isStreaming}
+        disabled={$streaming || !$selectedModelStore}
+        streaming={$streaming}
         canSend={Boolean(userInput.trim()) || attachedImages.length > 0}
         onsend={sendMessage}
         onstop={cancelStreaming}
@@ -627,7 +484,7 @@
             size="icon-lg"
             class="text-muted-foreground shrink-0 rounded-full"
             onclick={() => fileInput?.click()}
-            disabled={isStreaming || !$selectedModelStore}
+            disabled={$streaming || !$selectedModelStore}
             title="Attach image or paste it into the message box"
             aria-label="Attach image"
           >

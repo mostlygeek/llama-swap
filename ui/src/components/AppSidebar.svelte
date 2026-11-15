@@ -15,6 +15,7 @@
   import { isComposingKey } from "../lib/ime";
   import ConnectionStatus from "./ConnectionStatus.svelte";
   import MiddleTruncate from "./MiddleTruncate.svelte";
+  import ChatHistory from "./ChatHistory.svelte";
 
   function handleTitleChange(newTitle: string): void {
     const sanitized = newTitle.replace(/\n/g, "").trim().substring(0, 64) || "llama-swap";
@@ -295,6 +296,7 @@
         </Sidebar.Menu>
       </Sidebar.GroupContent>
     </Sidebar.Group>
+    <ChatHistory />
   </Sidebar.Content>
 
   <Sidebar.Footer>
