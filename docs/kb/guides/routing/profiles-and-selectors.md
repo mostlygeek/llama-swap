@@ -100,9 +100,16 @@ routing:
         pools: {vram: 24}
 
 models:
-  llama-70b:   {cmd: ..., capacities: {vram: 20}, evict_cost: 10}
-  llama-8b-q8: {cmd: ..., capacities: {vram: 9}}
-  llama-8b-q4: {cmd: ..., capacities: {vram: 5}}
+  llama-70b:
+    cmd: llama-server -m /models/llama-70b-q4.gguf --port ${PORT}
+    capacities: {vram: 20}
+    evict_cost: 10
+  llama-8b-q8:
+    cmd: llama-server -m /models/llama-8b-q8.gguf --port ${PORT}
+    capacities: {vram: 9}
+  llama-8b-q4:
+    cmd: llama-server -m /models/llama-8b-q4.gguf --port ${PORT}
+    capacities: {vram: 5}
 
 selectors:
   any-llama:
