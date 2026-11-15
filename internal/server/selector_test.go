@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -430,4 +433,183 @@ func TestServer_Selector_ModelListingPinUsesFirstTarget(t *testing.T) {
 		}
 	}
 	t.Fatal("public selector missing from model listing")
+}
+
+func fitTestConfig(t *testing.T, noEvict bool) config.Config {
+	t.Helper()
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(fmt.Sprintf(`
+models:
+  big:
+    cmd: echo ${PORT}
+    capacities: {vram: 8}
+  medium:
+    cmd: echo ${PORT}
+    aliases: [medium-alias]
+    capacities: {vram: 4}
+  small:
+    cmd: echo ${PORT}
+    capacities: {vram: 2}
+routing:
+  router:
+    use: capacity
+    settings:
+      capacity:
+        pools: {vram: 10}
+selectors:
+  any:
+    strategy: fit
+    targets: [big, medium-alias, small]
+    settings:
+      no_evict: %t
+`, noEvict)))
+	require.NoError(t, err)
+	return cfg
+}
+
+func TestServer_SelectorStrategyFit(t *testing.T) {
+	ready, starting, stopped := process.StateReady, process.StateStarting, process.StateStopped
+	evict := func(cost int64, state process.ProcessState, models ...string) router.Eviction {
+		return router.Eviction{Models: models, Cost: cost, State: state}
+	}
+	for _, tc := range []struct {
+		name      string
+		noEvict   bool
+		evictions map[string]router.Eviction
+		want      string
+		wantErr   error
+	}{
+		{
+			name:      "all fit: list order",
+			evictions: map[string]router.Eviction{"big": evict(0, stopped), "medium": evict(0, stopped), "small": evict(0, stopped)},
+			want:      "big",
+		},
+		{
+			name:      "lowest cost wins even with more models",
+			evictions: map[string]router.Eviction{"big": evict(10, stopped, "x"), "medium": evict(3, stopped, "y", "z"), "small": evict(5, stopped, "x")},
+			want:      "medium-alias",
+		},
+		{
+			name:      "equal cost: fewest models",
+			evictions: map[string]router.Eviction{"big": evict(0, stopped, "x", "y"), "medium": evict(0, stopped, "x"), "small": evict(0, stopped, "x", "y")},
+			want:      "medium-alias",
+		},
+		{
+			name:      "equal cost and count: ready beats cold",
+			evictions: map[string]router.Eviction{"big": evict(0, stopped), "medium": evict(0, stopped), "small": evict(0, ready)},
+			want:      "small",
+		},
+		{
+			name:      "ready beats starting",
+			evictions: map[string]router.Eviction{"big": evict(0, starting), "medium": evict(0, ready), "small": evict(0, stopped)},
+			want:      "medium-alias",
+		},
+		{
+			name:      "starting beats cold",
+			evictions: map[string]router.Eviction{"big": evict(0, stopped), "medium": evict(0, stopped), "small": evict(0, starting)},
+			want:      "small",
+		},
+		{
+			name:      "no_evict skips zero-cost evictions",
+			noEvict:   true,
+			evictions: map[string]router.Eviction{"big": evict(0, stopped, "x"), "medium": evict(0, stopped, "x"), "small": evict(0, stopped)},
+			want:      "small",
+		},
+		{
+			name:      "no_evict with nothing fitting",
+			noEvict:   true,
+			evictions: map[string]router.Eviction{"big": evict(0, stopped, "x"), "medium": evict(1, stopped, "x"), "small": evict(2, stopped, "x")},
+			wantErr:   errNoFit,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := fitTestConfig(t, tc.noEvict)
+			local := newStubRouter([]string{"big", "medium", "small"}, "")
+			local.evictions = tc.evictions
+			target, err := strategyFit(cfg, cfg.Selectors["any"], local)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, target)
+		})
+	}
+}
+
+func TestServer_SelectorMiddleware_FitRewritesModel(t *testing.T) {
+	cfg := fitTestConfig(t, false)
+	local := newStubRouter([]string{"big", "medium", "small"}, "")
+	local.evictions = map[string]router.Eviction{
+		"big":    {Models: []string{"small"}, Cost: 5},
+		"medium": {},
+		"small":  {State: process.StateReady},
+	}
+	var received swaputil.ReqContextData
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		received, _ = swaputil.ReadContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}
+	s := selectorTestServer(t, cfg, local)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, chatRequest("any"))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "small", received.ModelID)
+}
+
+func TestServer_SelectorMiddleware_FitNoEvict429(t *testing.T) {
+	cfg := fitTestConfig(t, true)
+	local := newStubRouter([]string{"big", "medium", "small"}, "")
+	local.evictions = map[string]router.Eviction{
+		"big":    {Models: []string{"x"}},
+		"medium": {Models: []string{"x"}},
+		"small":  {Models: []string{"x"}},
+	}
+	served := false
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) { served = true }
+	s := selectorTestServer(t, cfg, local)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, chatRequest("any"))
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.Contains(t, w.Body.String(), "fits without evicting")
+	assert.False(t, served, "request must not reach the router")
+}
+
+func TestServer_SelectorMiddleware_FitRouterError(t *testing.T) {
+	cfg := fitTestConfig(t, false)
+	local := newStubRouter([]string{"big", "medium", "small"}, "")
+	local.evictionsErr = errors.New("router is shutting down")
+	s := selectorTestServer(t, cfg, local)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, chatRequest("any"))
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestServer_Selector_ModelListingFitNoEvict(t *testing.T) {
+	cfg := fitTestConfig(t, true)
+	local := newStubRouter([]string{"big", "medium", "small"}, "")
+	s := selectorTestServer(t, cfg, local)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var response struct {
+		Data []modelRecord `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	for _, record := range response.Data {
+		if record.ID != "any" {
+			continue
+		}
+		metadata, ok := record.Meta["llamaswap"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, config.SelectorStrategyFit, metadata["strategy"])
+		assert.Equal(t, true, metadata["no_evict"])
+		assert.NotContains(t, metadata, "spillover")
+		return
+	}
+	t.Fatal("fit selector missing from /v1/models")
 }

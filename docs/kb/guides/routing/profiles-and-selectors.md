@@ -2,9 +2,9 @@
 title: Profiles and selectors
 summary: Switch model sets at runtime with profiles, or resolve a virtual model ID per request with selectors.
 category: guides
-tags: [profiles, selectors, aliases, routing, virtual-models]
-config_keys: [profiles, profiles.*.pins, selectors, selectors.*.strategy, selectors.*.targets]
-updated: 2026-08-25
+tags: [profiles, selectors, aliases, routing, virtual-models, fit, eviction, capacity]
+config_keys: [profiles, profiles.*.pins, selectors, selectors.*.strategy, selectors.*.targets, selectors.*.settings.no_evict]
+updated: 2026-11-15
 ---
 
 # Profiles and selectors
@@ -66,7 +66,7 @@ selectors:
     description: "Best currently loaded coding model"
 ```
 
-Three strategies:
+Four strategies:
 
 **`warm`** — use the first target that is already ready; failing that, one that
 is already starting; failing that, cold-start the first. This is the one you
@@ -86,6 +86,64 @@ selectors:
     settings:
       spillover: 4     # requests per active target before spilling over
 ```
+
+**`fit`** — pick the target that is cheapest to run right now, based on what
+the capacity router would have to unload. Requires
+`routing.router.use: capacity`; any other router is a config error. Targets
+must be local models.
+
+```yaml
+routing:
+  router:
+    use: capacity
+    settings:
+      capacity:
+        pools: {vram: 24}
+
+models:
+  llama-70b:   {cmd: ..., capacities: {vram: 20}, evict_cost: 10}
+  llama-8b-q8: {cmd: ..., capacities: {vram: 9}}
+  llama-8b-q4: {cmd: ..., capacities: {vram: 5}}
+
+selectors:
+  any-llama:
+    strategy: fit
+    targets: [llama-70b, llama-8b-q8, llama-8b-q4]   # order = preference
+    settings:
+      no_evict: false   # true: 429 instead of choosing a target that unloads a model
+    name: "Any Llama"
+```
+
+For each request the selector asks the router which running models each target
+would unload, and picks by, in order:
+
+1. lowest total `evict_cost` of the models unloaded
+2. fewest models unloaded
+3. ready, then starting, then not loaded
+4. earliest in `targets`
+
+A target that is already loaded unloads nothing, so it always wins over one that
+would unload something. Between targets that both fit without unloading, a
+loaded one wins over one that would have to start.
+
+With `no_evict: true`, targets that would unload anything are skipped, even when
+the unloaded models have `evict_cost: 0`. If none are left, the selector answers
+**429** and the request never reaches the router. Retry later or add a target
+that fits.
+
+What `no_evict` does **not** promise: it controls only which target the selector
+picks. If another request starts a swap between the selector's check and this
+request reaching the router, the router may still unload a model to serve this
+request. It never stops a model while it is serving a request; it waits for it
+to finish.
+
+Things that go wrong:
+
+- A model with no `capacities` uses nothing, so it always fits. Give every fit
+  target its real usage.
+- `evict_cost` defaults to 0, so without costs the choice falls to "fewest
+  models unloaded", then warmth, then order.
+- `settings.no_evict` on any strategy other than `fit` is a config error.
 
 Rules worth knowing:
 
@@ -109,4 +167,5 @@ you get "when I'm coding, use whichever coding model is already hot".
 ## Related
 
 - `reference/config/profiles` and `reference/config/selectors`
-- `guides/routing/groups-and-matrix` — which models can be loaded at the same time
+- `guides/routing/groups-and-matrix` — which models can be loaded at the same time,
+  including the capacity router that `fit` requires

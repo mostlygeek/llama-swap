@@ -41,6 +41,8 @@ type stubRouter struct {
 	unloadTimeout time.Duration
 	onUnload      func()
 	loggers       map[string]*logmon.Monitor
+	evictions     map[string]router.Eviction
+	evictionsErr  error
 }
 
 func newStubRouter(models []string, response string) *stubRouter {
@@ -69,6 +71,18 @@ func (s *stubRouter) RunningStatus() map[string]process.Status {
 		out[id] = process.Status{State: st, ReadySince: s.readySince[id], Loading: s.loading[id]}
 	}
 	return out
+}
+func (s *stubRouter) Evictions(targets ...string) (map[string]router.Eviction, error) {
+	if s.evictionsErr != nil {
+		return nil, s.evictionsErr
+	}
+	out := make(map[string]router.Eviction, len(targets))
+	for _, target := range targets {
+		if e, ok := s.evictions[target]; ok {
+			out[target] = e
+		}
+	}
+	return out, nil
 }
 func (s *stubRouter) Unload(timeout time.Duration, models ...string) {
 	s.unloadCalls.Add(1)

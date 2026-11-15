@@ -1,7 +1,9 @@
 package server
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -9,6 +11,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
@@ -117,6 +120,12 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 				target, err = strategyWarm(s.cfg, selector, s.local.RunningModels())
 			case config.SelectorStrategySpillover:
 				target, err = strategySpillover(model, spillovers, s.local.RunningModels())
+			case config.SelectorStrategyFit:
+				target, err = strategyFit(s.cfg, selector, s.local)
+				if errors.Is(err, errNoFit) {
+					swaputil.SendResponse(w, r, http.StatusTooManyRequests, err.Error())
+					return
+				}
 			default:
 				err = fmt.Errorf("unknown selector strategy %q", selector.Strategy)
 			}
@@ -254,4 +263,66 @@ func (s *selectorSpilloverState) minimum(targets []spilloverTarget) int {
 		}
 	}
 	return minimum
+}
+
+// errNoFit is returned by strategyFit when no_evict leaves no target. The
+// selector answers 429 so the client can retry once capacity frees up.
+var errNoFit = errors.New("no selector target fits without evicting a running model")
+
+// fitWarmth ranks process states for strategyFit: ready, then starting, then
+// everything else (cold).
+func fitWarmth(state process.ProcessState) int {
+	switch state {
+	case process.StateReady:
+		return 0
+	case process.StateStarting:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// strategyFit asks the router what each target would evict right now and picks
+// the cheapest: lowest total evict_cost, then fewest models stopped, then
+// ready over starting over cold, then earliest in targets. With no_evict, any
+// target that would stop a model is skipped.
+func strategyFit(cfg config.Config, selector config.SelectorConfig, local router.LocalRouter) (string, error) {
+	if len(selector.Targets) == 0 {
+		return "", fmt.Errorf("selector has no targets")
+	}
+	modelIDs := make([]string, len(selector.Targets))
+	for i, target := range selector.Targets {
+		modelIDs[i], _ = cfg.RealModelName(target)
+	}
+	evictions, err := local.Evictions(modelIDs...)
+	if err != nil {
+		return "", err
+	}
+
+	best := -1
+	var bestEviction router.Eviction
+	for i, modelID := range modelIDs {
+		eviction, ok := evictions[modelID]
+		if !ok {
+			continue
+		}
+		if selector.Settings.NoEvict && len(eviction.Models) > 0 {
+			continue
+		}
+		if best >= 0 && cmp.Or(
+			cmp.Compare(eviction.Cost, bestEviction.Cost),
+			cmp.Compare(len(eviction.Models), len(bestEviction.Models)),
+			cmp.Compare(fitWarmth(eviction.State), fitWarmth(bestEviction.State)),
+		) >= 0 {
+			continue
+		}
+		best, bestEviction = i, eviction
+	}
+	if best < 0 {
+		if selector.Settings.NoEvict {
+			return "", errNoFit
+		}
+		return "", fmt.Errorf("no selector target is available")
+	}
+	return selector.Targets[best], nil
 }

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -321,4 +322,26 @@ func TestCapacity_SearchCutoffRetainsRedundantVictim(t *testing.T) {
 	s.searchLimit = 3
 	require.Equal(t, []string{"b"}, s.EvictionFor("x", []string{"a", "b", "c", "d"}))
 	require.True(t, s.searchLimited)
+}
+
+// TestCapacity_Evictions checks the run-loop query against a real capacity
+// planner, including costs from the model config.
+func TestCapacity_Evictions(t *testing.T) {
+	a, b, c := newFakeProcess("a"), newFakeProcess("b"), newFakeProcess("c")
+	a.markReady()
+	planner := newCapacityPlanner(10, map[string]int64{"a": 6, "b": 4, "c": 8}, map[string]int64{"a": 3})
+	conf := config.Config{HealthCheckTimeout: 5, Models: planner.models}
+	r := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "b": b, "c": c}, planner)
+
+	got, err := r.Evictions("a", "b", "c", "missing")
+	require.NoError(t, err)
+	require.Equal(t, map[string]Eviction{
+		"a": {State: process.StateReady},
+		"b": {State: process.StateStopped},
+		"c": {Models: []string{"a"}, Cost: 3, State: process.StateStopped},
+	}, got)
+
+	require.NoError(t, r.Shutdown(time.Second))
+	_, err = r.Evictions("a")
+	require.Error(t, err)
 }

@@ -403,3 +403,81 @@ selectors:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `duplicate selectors "public"`)
 }
+
+func TestConfig_Selectors_Fit(t *testing.T) {
+	const peers = `peers:
+  remote:
+    proxy: http://example.com
+    models: [remote-model]
+`
+	t.Run("loads with capacity router", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(capacityModels + capacityRouting + `selectors:
+  any:
+    strategy: fit
+    targets: [b, alias-a]
+    settings:
+      no_evict: true
+`))
+		require.NoError(t, err)
+		assert.Equal(t, SelectorStrategyFit, cfg.Selectors["any"].Strategy)
+		assert.True(t, cfg.Selectors["any"].Settings.NoEvict)
+	})
+
+	t.Run("no_evict defaults to false", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(capacityModels + capacityRouting + `selectors:
+  any:
+    strategy: fit
+    targets: [a, b]
+`))
+		require.NoError(t, err)
+		assert.False(t, cfg.Selectors["any"].Settings.NoEvict)
+	})
+
+	for _, tc := range []struct {
+		name, config, wantErr string
+	}{
+		{
+			name: "requires capacity router",
+			config: capacityModels + `selectors:
+  any:
+    strategy: fit
+    targets: [a, b]
+`,
+			wantErr: `strategy "fit" requires routing.router.use: capacity`,
+		},
+		{
+			name: "rejects peer targets",
+			config: capacityModels + capacityRouting + peers + `selectors:
+  any:
+    strategy: fit
+    targets: [a, remote-model]
+`,
+			wantErr: `must resolve to a local model for strategy "fit"`,
+		},
+		{
+			name: "rejects duplicate resolved targets",
+			config: capacityModels + capacityRouting + `selectors:
+  any:
+    strategy: fit
+    targets: [a, alias-a]
+`,
+			wantErr: `duplicate resolved model "a"`,
+		},
+		{
+			name: "no_evict only for fit",
+			config: capacityModels + capacityRouting + `selectors:
+  any:
+    strategy: pin
+    targets: [a]
+    settings:
+      no_evict: true
+`,
+			wantErr: `settings.no_evict only applies to strategy "fit"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadConfigFromReader(strings.NewReader(tc.config))
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
