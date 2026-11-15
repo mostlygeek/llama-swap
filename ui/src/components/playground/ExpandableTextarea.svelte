@@ -9,6 +9,7 @@
     ref?: HTMLTextAreaElement | null;
     placeholder?: string;
     rows?: number;
+    class?: string;
     disabled?: boolean;
     onkeydown?: (event: KeyboardEvent) => void;
   }
@@ -18,6 +19,7 @@
     ref = $bindable(null),
     placeholder = "",
     rows = 3,
+    class: textareaClass = "",
     disabled = false,
     onkeydown,
   }: Props = $props();
@@ -30,9 +32,9 @@
   }
 </script>
 
-<div class="group relative flex min-h-0 flex-1 items-stretch">
+<div class="group relative flex min-h-0 min-w-0 flex-1 items-stretch">
   <Textarea
-    class="resize-none pr-10"
+    class={`resize-none pr-10 ${textareaClass}`}
     bind:ref
     {placeholder}
     {rows}

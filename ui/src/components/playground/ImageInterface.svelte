@@ -14,6 +14,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Download, X } from "@lucide/svelte";
 
   const iface = createPlaygroundInterface("playground-image-model", playgroundStores.imageGenerating);
@@ -169,7 +170,7 @@
   }
 </script>
 
-<div class="flex flex-col h-full">
+<div class="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto">
   <!-- Model selector and mode toggle -->
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
     <ModelSelector
@@ -221,15 +222,20 @@
     </Select.Root>
 
     {#if isSdapi}
-      <Button variant="outline" onclick={() => showSettings = !showSettings}>
-        {showSettings ? "Hide Settings" : "Settings"}
+      <Button variant="outline" onclick={() => showSettings = true}>
+        Settings
       </Button>
     {/if}
   </div>
 
-  <!-- SDAPI Settings Panel -->
-  {#if isSdapi && showSettings}
-    <div class="shrink-0 mb-4 p-4 rounded-md border border-border bg-background">
+  <!-- Keep settings from consuming the image preview's height. -->
+  {#if isSdapi}
+    <Dialog.Root bind:open={showSettings}>
+    <Dialog.Content class="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+      <Dialog.Header>
+        <Dialog.Title>Image Settings</Dialog.Title>
+        <Dialog.Description>Configure SDAPI generation parameters and LoRAs.</Dialog.Description>
+      </Dialog.Header>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
         <label class="flex flex-col gap-1">
           <span class="text-xs text-muted-foreground">Steps</span>
@@ -320,6 +326,7 @@
         <span class="text-xs text-muted-foreground">Negative Prompt</span>
         <Textarea
           bind:value={$sdNegativePromptStore}
+          class="max-h-32 resize-none overflow-y-auto"
           rows={2}
           placeholder="Elements to avoid..."
         ></Textarea>
@@ -393,7 +400,11 @@
           </div>
         {/if}
       </div>
-    </div>
+      <Dialog.Footer>
+        <Button onclick={() => showSettings = false}>Done</Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+    </Dialog.Root>
   {/if}
 
   <!-- Empty state for no models configured -->
@@ -401,7 +412,7 @@
     <EmptyState message="No models configured. Add models to your configuration to generate images." />
   {:else}
     <!-- Image display area -->
-    <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-background border border-border rounded-md">
+    <div class="min-h-48 min-w-0 flex-1 overflow-hidden mb-4 flex items-center justify-center bg-background border border-border rounded-md" role="region" aria-label="Generated images">
       {#if isGenerating}
         <div class="text-center text-muted-foreground">
           <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
@@ -413,18 +424,18 @@
           <p class="text-sm mt-1">{$error}</p>
         </div>
       {:else if generatedImages.length > 1}
-        <div class="grid grid-cols-2 gap-2 p-2 w-full h-full overflow-auto">
+        <div class="grid grid-cols-2 auto-rows-[minmax(10rem,1fr)] gap-2 p-2 w-full h-full min-h-0 overflow-auto">
           {#each generatedImages as img, i}
-            <div class="relative flex items-center justify-center">
+            <div class="relative flex min-h-0 min-w-0 items-center justify-center">
               <button
-                class="p-0 border-0 bg-transparent cursor-pointer"
+                class="h-full w-full min-h-0 min-w-0 p-0 border-0 bg-transparent cursor-pointer"
                 onclick={() => openFullscreen(i)}
                 aria-label="View fullscreen"
               >
                 <img
                   src={img}
                   alt="AI generated content {i + 1}"
-                  class="max-w-full max-h-full object-contain hover:opacity-90 transition-opacity"
+                  class="h-full w-full object-contain hover:opacity-90 transition-opacity"
                 />
               </button>
               <Button
@@ -440,16 +451,16 @@
           {/each}
         </div>
       {:else if generatedImages.length === 1}
-        <div class="relative max-w-full max-h-full flex items-center justify-center">
+        <div class="relative h-full w-full min-h-0 min-w-0 flex items-center justify-center p-2">
           <button
-            class="p-0 border-0 bg-transparent cursor-pointer"
+            class="h-full w-full min-h-0 min-w-0 p-0 border-0 bg-transparent cursor-pointer"
             onclick={() => openFullscreen(0)}
             aria-label="View fullscreen"
           >
             <img
               src={generatedImages[0]}
               alt="AI generated content"
-              class="max-w-full max-h-full object-contain hover:opacity-90 transition-opacity"
+              class="h-full w-full object-contain hover:opacity-90 transition-opacity"
             />
           </button>
           <Button
@@ -473,6 +484,7 @@
     <div class="shrink-0 flex flex-col md:flex-row gap-2">
       <ExpandableTextarea
         bind:value={prompt}
+        class="max-h-32 overflow-y-auto md:max-h-40"
         placeholder="Describe the image you want to generate..."
         rows={3}
         onkeydown={handleKeyDown}
