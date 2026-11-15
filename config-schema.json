@@ -391,9 +391,10 @@
                         "enum": [
                             "warm",
                             "pin",
-                            "spillover"
+                            "spillover",
+                            "fit"
                         ],
-                        "description": "How a target is selected for each request."
+                        "description": "How a target is selected for each request. fit selectors are ignored, with a warning, unless routing.router.use is capacity."
                     },
                     "targets": {
                         "type": "array",
@@ -412,6 +413,11 @@
                                 "minimum": 1,
                                 "default": 1,
                                 "description": "Requests reserved per active target before spilling over to the next target."
+                            },
+                            "no_evict": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "fit only: respond 429 instead of choosing a target that would stop a running model."
                             }
                         },
                         "additionalProperties": false,

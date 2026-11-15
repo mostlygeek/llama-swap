@@ -235,6 +235,9 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for selectorID, selector := range s.cfg.Selectors {
+		if !s.cfg.SelectorEnabled(selector) {
+			continue
+		}
 		modelIDs[selectorID] = struct{}{}
 		if selector.Unlisted {
 			continue
@@ -259,6 +262,9 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		}
 		if selector.Strategy == config.SelectorStrategySpillover {
 			internalMetadata["spillover"] = selector.Settings.Spillover
+		}
+		if selector.Strategy == config.SelectorStrategyFit {
+			internalMetadata["no_evict"] = selector.Settings.NoEvict
 		}
 		data = append(data, newRecord(
 			selectorID,

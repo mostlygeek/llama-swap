@@ -58,6 +58,7 @@ type baseRouter struct {
 	cancelCh    chan scheduler.HandlerReq
 	shutdownCh  chan shutdownReq
 	unloadCh    chan unloadReq
+	evictionsCh chan evictionsReq
 	swapDoneCh  chan scheduler.SwapDone
 	serveDoneCh chan scheduler.ServeDoneEvent
 
@@ -98,6 +99,7 @@ func newBaseRouter(
 		cancelCh:    make(chan scheduler.HandlerReq),
 		shutdownCh:  make(chan shutdownReq),
 		unloadCh:    make(chan unloadReq),
+		evictionsCh: make(chan evictionsReq),
 		swapDoneCh:  make(chan scheduler.SwapDone),
 		serveDoneCh: make(chan scheduler.ServeDoneEvent),
 		runDone:     make(chan struct{}),
@@ -137,6 +139,9 @@ func (b *baseRouter) run() {
 			b.schedule.OnUnload(req.targets, req.timeout)
 			close(req.respond)
 			b.notifyProcessed()
+
+		case req := <-b.evictionsCh:
+			req.respond <- b.schedule.Evictions(req.targets)
 
 		case ev := <-b.swapDoneCh:
 			b.schedule.OnSwapDone(ev)
@@ -500,6 +505,37 @@ func (b *baseRouter) sendUnload(targets []string, timeout time.Duration) {
 		return
 	}
 	<-req.respond
+}
+
+// evictionsReq asks the run loop for an eviction plan. respond is buffered so
+// the run loop never blocks on a caller that has gone away.
+type evictionsReq struct {
+	targets []string
+	respond chan map[string]Eviction
+}
+
+// Evictions asks the scheduler, on the run loop, what starting each target
+// would stop right now. The run loop can be busy for a long time (an unload
+// stops processes on it), so ctx bounds the wait. It returns an error once
+// the router is shutting down.
+func (b *baseRouter) Evictions(ctx context.Context, targets ...string) (map[string]Eviction, error) {
+	if b.shuttingDown.Load() {
+		return nil, fmt.Errorf("%s is shutting down", b.name)
+	}
+	req := evictionsReq{targets: targets, respond: make(chan map[string]Eviction, 1)}
+	select {
+	case b.evictionsCh <- req:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-b.runDone:
+		return nil, fmt.Errorf("%s is shutting down", b.name)
+	}
+	select {
+	case evictions := <-req.respond:
+		return evictions, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (b *baseRouter) Shutdown(timeout time.Duration) error {

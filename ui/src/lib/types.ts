@@ -51,6 +51,7 @@ export interface Model {
   strategy?: string;
   targets?: string[];
   spillover?: number;
+  noEvict?: boolean;
 }
 
 export interface Profile {

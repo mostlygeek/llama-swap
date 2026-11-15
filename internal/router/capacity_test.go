@@ -2,6 +2,7 @@ package router
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -321,4 +323,74 @@ func TestCapacity_SearchCutoffRetainsRedundantVictim(t *testing.T) {
 	s.searchLimit = 3
 	require.Equal(t, []string{"b"}, s.EvictionFor("x", []string{"a", "b", "c", "d"}))
 	require.True(t, s.searchLimited)
+}
+
+// TestCapacity_Evictions checks the run-loop query against a real capacity
+// planner, including costs from the model config.
+func TestCapacity_Evictions(t *testing.T) {
+	a, b, c := newFakeProcess("a"), newFakeProcess("b"), newFakeProcess("c")
+	a.markReady()
+	planner := newCapacityPlanner(10, map[string]int64{"a": 6, "b": 4, "c": 8}, map[string]int64{"a": 3})
+	conf := config.Config{HealthCheckTimeout: 5, Models: planner.models}
+	r := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "b": b, "c": c}, planner)
+
+	got, err := r.Evictions(t.Context(), "a", "b", "c", "missing")
+	require.NoError(t, err)
+	require.Equal(t, map[string]Eviction{
+		"a": {State: process.StateReady},
+		"b": {State: process.StateStopped},
+		"c": {Models: []string{"a"}, Cost: 3, State: process.StateStopped},
+	}, got)
+
+	require.NoError(t, r.Shutdown(time.Second))
+	_, err = r.Evictions(t.Context(), "a")
+	require.Error(t, err)
+}
+
+// TestCapacity_EvictionsJoinInFlightSwap checks that a target with a swap in
+// flight reports no evictions: a request for it joins that swap, so the model
+// the swap is already stopping must not be counted again.
+func TestCapacity_EvictionsJoinInFlightSwap(t *testing.T) {
+	a, b := newFakeProcess("a"), newFakeProcess("b")
+	a.markReady()
+	a.stopBlock = make(chan struct{})
+	planner := newCapacityPlanner(10, map[string]int64{"a": 10, "b": 10}, map[string]int64{"a": 5})
+	conf := config.Config{HealthCheckTimeout: 5, Models: planner.models}
+	r := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "b": b}, planner)
+	// Registered after the router so it runs before the router's Shutdown
+	// cleanup, which would otherwise wait on the held stop.
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(a.stopBlock) }) })
+
+	go func() { r.ServeHTTP(httptest.NewRecorder(), newRequest("b")) }()
+	waitProcessed(t, r.testProcessed, 1)
+	waitSignal(t, a.stopStarted, "a stopping")
+
+	got, err := r.Evictions(t.Context(), "b")
+	require.NoError(t, err)
+	require.Equal(t, map[string]Eviction{"b": {State: process.StateStarting}}, got)
+}
+
+// TestCapacity_EvictionsHonorsContext checks that a caller is not stuck while
+// the run loop is busy stopping processes for an unload.
+func TestCapacity_EvictionsHonorsContext(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	a.stopBlock = make(chan struct{})
+	planner := newCapacityPlanner(10, map[string]int64{"a": 4}, nil)
+	conf := config.Config{HealthCheckTimeout: 5, Models: planner.models}
+	r := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a}, planner)
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(a.stopBlock) }) })
+
+	go r.Unload(time.Second, "a")
+	waitSignal(t, a.stopStarted, "a stopping")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	_, err := r.Evictions(ctx, "a")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	release.Do(func() { close(a.stopBlock) })
+	waitProcessed(t, r.testProcessed, 1)
 }

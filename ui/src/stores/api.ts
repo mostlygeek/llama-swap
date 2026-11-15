@@ -273,6 +273,7 @@ interface ModelListRecord {
       strategy?: string;
       targets?: string[];
       spillover?: number;
+      no_evict?: boolean;
     };
   };
 }
@@ -323,6 +324,7 @@ async function loadPlaygroundModels(request: number): Promise<Model[]> {
           strategy: metadata?.strategy,
           targets: metadata?.targets ?? [],
           spillover: metadata?.spillover,
+          noEvict: metadata?.no_evict,
         };
       });
     newModels.sort((a, b) => {

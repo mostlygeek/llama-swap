@@ -358,6 +358,23 @@ selectors:
       # - optional, default: 1
       spillover: 4
 
+  # fit picks the target that is cheapest to run right now: lowest total
+  # evict_cost of the models it would unload, then fewest models unloaded,
+  # then ready over starting over not loaded, then target order
+  # - needs routing.router.use: capacity; with any other router fit selectors
+  #   are ignored with a warning in the log and requests for them get a 404
+  # - targets must be local models
+  # - commented out because this example uses the group router
+  # "any-llama":
+  #   strategy: fit
+  #   targets: ["llama-70b", "llama-8b-q8", "llama-8b-q4"]
+  #   settings:
+  #     # true: respond 429 instead of choosing a target that unloads a model
+  #     # - only controls the selector's choice; the router may still unload
+  #     #   a model if another swap starts before this request reaches it
+  #     # - optional, default: false
+  #     no_evict: false
+
 # models: a dictionary of model configurations
 # - required
 # - each key is the model's ID, used in API requests

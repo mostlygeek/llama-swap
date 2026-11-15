@@ -1011,3 +1011,72 @@ func TestFIFO_ConcurrencyLimit_CancelledQueuedWaiterReleasesReservation(t *testi
 		t.Fatalf("queue len=%d want 1 after cancel and retry", got)
 	}
 }
+
+// recordingPlanner returns a fixed eviction list per target and records the
+// running set it was planned against.
+type recordingPlanner struct {
+	evict   map[string][]string
+	running map[string][]string
+}
+
+func (p *recordingPlanner) EvictionFor(target string, running []string) []string {
+	if p.running == nil {
+		p.running = map[string][]string{}
+	}
+	p.running[target] = append([]string(nil), running...)
+	return p.evict[target]
+}
+
+func (p *recordingPlanner) OnSwapStart(string, []string) {}
+
+func TestFIFO_Evictions(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	eff.states["b"] = process.StateStopped
+	eff.states["c"] = process.StateStopped
+	eff.states["d"] = process.StateStopped
+	planner := &recordingPlanner{evict: map[string][]string{
+		"b": {"a"},
+		"d": {"a", "c"},
+	}}
+	s := NewFIFO("test", logmon.NewWriter(io.Discard), planner, config.FifoConfig{}, map[string]config.ModelConfig{
+		"a": {EvictCost: 5},
+		"c": {EvictCost: 2},
+	}, eff)
+
+	// Commit a swap to c. Its process is still stopped, so only the scheduler
+	// knows it is coming.
+	s.OnRequest(req("c"))
+	if got := eff.startsFor("c"); got != 1 {
+		t.Fatalf("StartSwap(c)=%d want 1", got)
+	}
+	startsBefore := len(eff.starts)
+
+	got := s.Evictions([]string{"a", "b", "c", "d", "unknown"})
+
+	want := map[string]Eviction{
+		"a": {State: process.StateReady},
+		"b": {Models: []string{"a"}, Cost: 5, State: process.StateStopped},
+		"c": {State: process.StateStarting},
+		"d": {Models: []string{"a", "c"}, Cost: 7, State: process.StateStopped},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Evictions returned %d entries want %d: %+v", len(got), len(want), got)
+	}
+	for id, w := range want {
+		g, ok := got[id]
+		if !ok {
+			t.Errorf("missing entry for %s", id)
+			continue
+		}
+		if g.Cost != w.Cost || g.State != w.State || len(g.Models) != len(w.Models) {
+			t.Errorf("%s: got %+v want %+v", id, g, w)
+		}
+	}
+	if running := planner.running["b"]; len(running) != 2 || running[0] != "a" || running[1] != "c" {
+		t.Errorf("running set for b=%v want [a c] (committed swap included)", running)
+	}
+	if len(eff.starts) != startsBefore || len(eff.stops) != 0 {
+		t.Errorf("Evictions must not start or stop anything")
+	}
+}

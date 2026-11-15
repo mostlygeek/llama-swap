@@ -416,6 +416,9 @@
                 {#if selector.strategy === "spillover" && selector.spillover}
                   <Tag>spillover {selector.spillover}</Tag>
                 {/if}
+                {#if selector.strategy === "fit" && selector.noEvict}
+                  <Tag>no evict</Tag>
+                {/if}
                 <Tag class="px-1.5 text-[0.625rem] uppercase">{selector.strategy}</Tag>
               </div>
             {/each}

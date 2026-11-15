@@ -66,6 +66,23 @@ type Scheduler interface {
 	// swap waiters and queued requests). Process teardown is the baseRouter's
 	// responsibility.
 	OnShutdown(err error)
+	// Evictions reports, for each target, what starting it would cost right
+	// now, using the same running set a request would be planned against. It
+	// is read-only: it never queues, starts or stops anything. Unknown targets
+	// are omitted from the result.
+	Evictions(targets []string) map[string]Eviction
+}
+
+// Eviction describes what serving a target would cost at the moment it was
+// computed. Models is nil when the target can serve without stopping anything,
+// including when it is already running. Cost is the sum of evict_cost for
+// Models, so it can be zero even when Models is not empty. State is the
+// target's process state, reported as StateStarting while a swap to it is in
+// flight but not yet visible in process state.
+type Eviction struct {
+	Models []string
+	Cost   int64
+	State  process.ProcessState
 }
 
 // Effects is implemented by the baseRouter. The scheduler calls back through it
