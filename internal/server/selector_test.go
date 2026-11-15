@@ -525,7 +525,7 @@ func TestServer_SelectorStrategyFit(t *testing.T) {
 			cfg := fitTestConfig(t, tc.noEvict)
 			local := newStubRouter([]string{"big", "medium", "small"}, "")
 			local.evictions = tc.evictions
-			target, err := strategyFit(cfg, cfg.Selectors["any"], local)
+			target, err := strategyFit(t.Context(), cfg, cfg.Selectors["any"], local)
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
 				return
@@ -612,4 +612,48 @@ func TestServer_Selector_ModelListingFitNoEvict(t *testing.T) {
 		return
 	}
 	t.Fatal("fit selector missing from /v1/models")
+}
+
+func TestServer_SelectorMiddleware_FitIgnoredWithoutCapacityRouter(t *testing.T) {
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
+models:
+  a:
+    cmd: echo ${PORT}
+  b:
+    cmd: echo ${PORT}
+selectors:
+  any:
+    strategy: fit
+    targets: [a, b]
+  pinned:
+    strategy: pin
+    targets: [a]
+`))
+	require.NoError(t, err)
+	local := newStubRouter([]string{"a", "b"}, "")
+	var served []string
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		data, _ := swaputil.ReadContext(r.Context())
+		served = append(served, data.ModelID)
+		w.WriteHeader(http.StatusOK)
+	}
+	s := selectorTestServer(t, cfg, local)
+
+	assert.Contains(t, string(s.logs.ProxyLogs.GetHistory()), "ignoring fit selectors [any]")
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, chatRequest("any"))
+	assert.Equal(t, http.StatusNotFound, w.Code, "ignored fit selector must not resolve")
+	assert.Empty(t, served)
+
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, chatRequest("pinned"))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, []string{"a"}, served)
+
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), `"id":"any"`)
+	assert.Contains(t, w.Body.String(), `"id":"pinned"`)
 }

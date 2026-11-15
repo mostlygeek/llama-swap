@@ -361,7 +361,9 @@ selectors:
   # fit picks the target that is cheapest to run right now: lowest total
   # evict_cost of the models it would unload, then fewest models unloaded,
   # then ready over starting over not loaded, then target order
-  # - requires routing.router.use: capacity; targets must be local models
+  # - needs routing.router.use: capacity; with any other router fit selectors
+  #   are ignored with a warning in the log and requests for them get a 404
+  # - targets must be local models
   # - commented out because this example uses the group router
   # "any-llama":
   #   strategy: fit

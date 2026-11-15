@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
@@ -94,6 +95,16 @@ func (t *selectorSpilloverTracker) release(selectorID, target string) {
 // and before the normal request context, filters, routing, and metrics pipeline.
 func CreateSelectorMiddleware(s *Server) chain.Middleware {
 	spillovers := newSelectorSpilloverTracker(s.cfg)
+	var ignored []string
+	for selectorID, selector := range s.cfg.Selectors {
+		if !s.cfg.SelectorEnabled(selector) {
+			ignored = append(ignored, selectorID)
+		}
+	}
+	if len(ignored) > 0 {
+		slices.Sort(ignored)
+		s.logs.ProxyLogs.Warnf("selector: ignoring fit selectors %v: strategy fit requires routing.router.use: capacity", ignored)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if len(s.cfg.Selectors) == 0 {
@@ -107,7 +118,7 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 				return
 			}
 			selector, found := s.cfg.Selectors[model]
-			if !found {
+			if !found || !s.cfg.SelectorEnabled(selector) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -121,7 +132,7 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 			case config.SelectorStrategySpillover:
 				target, err = strategySpillover(model, spillovers, s.local.RunningModels())
 			case config.SelectorStrategyFit:
-				target, err = strategyFit(s.cfg, selector, s.local)
+				target, err = strategyFit(r.Context(), s.cfg, selector, s.local)
 				if errors.Is(err, errNoFit) {
 					swaputil.SendResponse(w, r, http.StatusTooManyRequests, err.Error())
 					return
@@ -286,7 +297,7 @@ func fitWarmth(state process.ProcessState) int {
 // the cheapest: lowest total evict_cost, then fewest models stopped, then
 // ready over starting over cold, then earliest in targets. With no_evict, any
 // target that would stop a model is skipped.
-func strategyFit(cfg config.Config, selector config.SelectorConfig, local router.LocalRouter) (string, error) {
+func strategyFit(ctx context.Context, cfg config.Config, selector config.SelectorConfig, local router.LocalRouter) (string, error) {
 	if len(selector.Targets) == 0 {
 		return "", fmt.Errorf("selector has no targets")
 	}
@@ -294,7 +305,7 @@ func strategyFit(cfg config.Config, selector config.SelectorConfig, local router
 	for i, target := range selector.Targets {
 		modelIDs[i], _ = cfg.RealModelName(target)
 	}
-	evictions, err := local.Evictions(modelIDs...)
+	evictions, err := local.Evictions(ctx, modelIDs...)
 	if err != nil {
 		return "", err
 	}

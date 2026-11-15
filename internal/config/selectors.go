@@ -63,11 +63,7 @@ func validateSelectors(config Config) error {
 		}
 
 		switch selector.Strategy {
-		case SelectorStrategyPin, SelectorStrategyWarm, SelectorStrategySpillover:
-		case SelectorStrategyFit:
-			if config.Routing.Router.Use != "capacity" {
-				return fmt.Errorf("selectors.%s: strategy %q requires routing.router.use: capacity", selectorID, selector.Strategy)
-			}
+		case SelectorStrategyPin, SelectorStrategyWarm, SelectorStrategySpillover, SelectorStrategyFit:
 		case "":
 			return fmt.Errorf("selectors.%s.strategy is required", selectorID)
 		default:
@@ -132,6 +128,14 @@ func validateSelectors(config Config) error {
 		}
 	}
 	return nil
+}
+
+// SelectorEnabled reports whether a selector can serve requests with the
+// configured router. A fit selector needs the capacity router's eviction
+// costs; with any other router it is ignored rather than rejected, so a
+// config can switch routers without editing its selectors.
+func (c Config) SelectorEnabled(selector SelectorConfig) bool {
+	return selector.Strategy != SelectorStrategyFit || c.Routing.Router.Use == "capacity"
 }
 
 // checkDuplicateTargets rejects targets that resolve to the same model, such as

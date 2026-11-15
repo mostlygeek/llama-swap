@@ -515,18 +515,27 @@ type evictionsReq struct {
 }
 
 // Evictions asks the scheduler, on the run loop, what starting each target
-// would stop right now. It returns an error once the router is shutting down.
-func (b *baseRouter) Evictions(targets ...string) (map[string]Eviction, error) {
+// would stop right now. The run loop can be busy for a long time (an unload
+// stops processes on it), so ctx bounds the wait. It returns an error once
+// the router is shutting down.
+func (b *baseRouter) Evictions(ctx context.Context, targets ...string) (map[string]Eviction, error) {
 	if b.shuttingDown.Load() {
 		return nil, fmt.Errorf("%s is shutting down", b.name)
 	}
 	req := evictionsReq{targets: targets, respond: make(chan map[string]Eviction, 1)}
 	select {
 	case b.evictionsCh <- req:
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-b.runDone:
 		return nil, fmt.Errorf("%s is shutting down", b.name)
 	}
-	return <-req.respond, nil
+	select {
+	case evictions := <-req.respond:
+		return evictions, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (b *baseRouter) Shutdown(timeout time.Duration) error {

@@ -88,9 +88,8 @@ selectors:
 ```
 
 **`fit`** — pick the target that is cheapest to run right now, based on what
-the capacity router would have to unload. Requires
-`routing.router.use: capacity`; any other router is a config error. Targets
-must be local models.
+the capacity router would have to unload. Needs `routing.router.use: capacity`.
+Targets must be local models.
 
 ```yaml
 routing:
@@ -139,6 +138,11 @@ to finish.
 
 Things that go wrong:
 
+- With any router other than `capacity`, fit selectors are **ignored**: the
+  config still loads, llama-swap logs
+  `selector: ignoring fit selectors [...]` at startup, the selector is left
+  out of `/v1/models`, and requests for it get a 404. Other selectors keep
+  working.
 - A model with no `capacities` uses nothing, so it always fits. Give every fit
   target its real usage.
 - `evict_cost` defaults to 0, so without costs the choice falls to "fewest

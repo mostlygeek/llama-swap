@@ -284,8 +284,14 @@ func (s *FIFO) Evictions(targets []string) map[string]Eviction {
 		if !ok {
 			continue
 		}
-		if _, swapping := s.active[target]; swapping && state != process.StateReady {
-			state = process.StateStarting
+		// A request for a target with a swap in flight joins that swap
+		// (OnRequest step 2), so it stops nothing beyond what is committed.
+		if _, swapping := s.active[target]; swapping {
+			if state != process.StateReady {
+				state = process.StateStarting
+			}
+			out[target] = Eviction{State: state}
+			continue
 		}
 		evict := s.planner.EvictionFor(target, s.runningSet(target))
 		var cost int64

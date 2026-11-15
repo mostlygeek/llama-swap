@@ -235,6 +235,9 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for selectorID, selector := range s.cfg.Selectors {
+		if !s.cfg.SelectorEnabled(selector) {
+			continue
+		}
 		modelIDs[selectorID] = struct{}{}
 		if selector.Unlisted {
 			continue

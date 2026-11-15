@@ -394,7 +394,7 @@
                             "spillover",
                             "fit"
                         ],
-                        "description": "How a target is selected for each request. fit requires routing.router.use: capacity."
+                        "description": "How a target is selected for each request. fit selectors are ignored, with a warning, unless routing.router.use is capacity."
                     },
                     "targets": {
                         "type": "array",

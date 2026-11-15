@@ -433,18 +433,23 @@ func TestConfig_Selectors_Fit(t *testing.T) {
 		assert.False(t, cfg.Selectors["any"].Settings.NoEvict)
 	})
 
-	for _, tc := range []struct {
-		name, config, wantErr string
-	}{
-		{
-			name: "requires capacity router",
-			config: capacityModels + `selectors:
+	t.Run("loads but is disabled without capacity router", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(capacityModels + `selectors:
   any:
     strategy: fit
     targets: [a, b]
-`,
-			wantErr: `strategy "fit" requires routing.router.use: capacity`,
-		},
+  pinned:
+    strategy: pin
+    targets: [a]
+`))
+		require.NoError(t, err)
+		assert.False(t, cfg.SelectorEnabled(cfg.Selectors["any"]))
+		assert.True(t, cfg.SelectorEnabled(cfg.Selectors["pinned"]))
+	})
+
+	for _, tc := range []struct {
+		name, config, wantErr string
+	}{
 		{
 			name: "rejects peer targets",
 			config: capacityModels + capacityRouting + peers + `selectors:

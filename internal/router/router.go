@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -67,7 +68,8 @@ type LocalRouter interface {
 	// to start it, their total evict_cost, and the target's state, using the
 	// scheduler's live view including swaps it has committed to. Targets this
 	// router does not handle are omitted. It never starts or stops anything.
-	Evictions(targets ...string) (map[string]Eviction, error)
+	// ctx bounds the wait for the router's run loop.
+	Evictions(ctx context.Context, targets ...string) (map[string]Eviction, error)
 
 	// SetStartGate installs a check that runs before the router starts any
 	// process. While it returns an error no model starts, and the requests

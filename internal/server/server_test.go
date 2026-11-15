@@ -72,7 +72,7 @@ func (s *stubRouter) RunningStatus() map[string]process.Status {
 	}
 	return out
 }
-func (s *stubRouter) Evictions(targets ...string) (map[string]router.Eviction, error) {
+func (s *stubRouter) Evictions(_ context.Context, targets ...string) (map[string]router.Eviction, error) {
 	if s.evictionsErr != nil {
 		return nil, s.evictionsErr
 	}
