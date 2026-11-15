@@ -6,6 +6,9 @@ const histories: ReturnType<typeof createChatHistory>[] = [];
 function setup(initial: Record<string, unknown> = {}) {
   const data = new Map(Object.entries(initial).map(([key, value]) => [key, JSON.stringify(value)]));
   const storage = { getItem: (key: string) => data.get(key) ?? null,
+    removeItem: (key: string) => { data.delete(key); },
+    key: (index: number) => [...data.keys()][index] ?? null,
+    get length() { return data.size; },
     setItem: vi.fn((key: string, value: string) => { data.set(key, value); }) };
   const history = createChatHistory(storage);
   histories.push(history);
@@ -17,6 +20,101 @@ afterEach(() => {
 });
 
 describe("chat history", () => {
+  it("does not let an untouched tab's hide/close flush erase another tab's new chats", () => {
+    const { history: first, storage } = setup();
+    first.messages.set([{ role: "user", content: "First chat" }]);
+    first.flush();
+    const idle = createChatHistory(storage);
+    histories.push(idle);
+    first.create();
+    first.messages.set([{ role: "user", content: "Second chat" }]);
+    first.flush();
+    storage.setItem.mockClear();
+    idle.flush();
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(listSavedChats(get(idle).chats).map((chat) => chat.title).sort()).toEqual(["First chat", "Second chat"]);
+    const reopened = createChatHistory(storage);
+    histories.push(reopened);
+    expect(listSavedChats(get(reopened).chats)).toHaveLength(2);
+  });
+
+  it("preserves independently created chats and merges unrelated edits across tabs", () => {
+    const { history: first, storage } = setup();
+    const second = createChatHistory(storage);
+    histories.push(second);
+    first.messages.set([{ role: "user", content: "Chat A" }]);
+    second.messages.set([{ role: "user", content: "Chat B" }]);
+    first.flush(); second.flush(); first.sync();
+    expect(listSavedChats(get(first).chats)).toHaveLength(2);
+    const id = get(first).activeId;
+    second.select(id);
+    first.rename(id, "Renamed in A");
+    second.messages.update((messages) => [...messages, { role: "assistant", content: "Answer in B" }]);
+    second.flush(); first.sync();
+    expect(get(first.active).title).toBe("Renamed in A");
+    expect(get(first.messages).at(-1)?.content).toBe("Answer in B");
+    first.setting("systemPrompt").set("Prompt A");
+    second.setting("model").set("Model B");
+    second.flush(); first.flush(); second.sync();
+    expect(get(second.setting("systemPrompt"))).toBe("Prompt A");
+    expect(get(second.setting("model"))).toBe("Model B");
+  });
+
+  it("does not resurrect a deleted chat when a stale tab writes or closes", () => {
+    const { history: first, storage } = setup();
+    first.messages.set([{ role: "user", content: "To delete" }]); first.flush();
+    const id = get(first).activeId;
+    const stale = createChatHistory(storage);
+    histories.push(stale);
+    first.remove(id);
+    stale.rename(id, "Stale edit");
+    stale.flush();
+    expect(get(stale).chats.some((chat) => chat.id === id)).toBe(false);
+    expect(storage.getItem(`playground-chat-history:${id}`)).toBe("null");
+  });
+
+  it("migrates near-full browser storage without keeping a second conversation copy", () => {
+    const original = [{ role: "user", content: "x".repeat(2000) }];
+    const { history, storage, data } = setup({ "playground-messages": original });
+    const limit = 3200;
+    storage.setItem.mockImplementation((key, value) => {
+      const used = [...data].reduce((total, [otherKey, otherValue]) => total + (otherKey === key ? 0 : otherValue.length), 0);
+      if (used + value.length > limit) throw new DOMException("Full", "QuotaExceededError");
+      data.set(key, value);
+    });
+    history.flush();
+    expect(get(history.storageError)).toBe("");
+    expect(data.has("playground-messages")).toBe(false);
+    const reopened = createChatHistory(storage);
+    histories.push(reopened);
+    expect(get(reopened.messages)).toEqual(original);
+  });
+
+  it("identifies the same legacy chat when two tabs migrate before either one saves", () => {
+    const { history: first, storage } = setup({ "playground-messages": [{ role: "user", content: "Original" }] });
+    const second = createChatHistory(storage);
+    histories.push(second);
+    first.rename(get(first).activeId, "Migrated and renamed");
+    second.flush();
+    expect(listSavedChats(get(second).chats).map((chat) => chat.title)).toEqual(["Migrated and renamed"]);
+    expect(storage.getItem("playground-messages")).toBeNull();
+  });
+
+  it("restores the original legacy conversation if migration cannot write the replacement", () => {
+    const original = [{ role: "user", content: "Keep this conversation" }];
+    const { history, storage, data } = setup({ "playground-messages": original });
+    storage.setItem.mockImplementation((key, value) => {
+      if (key.startsWith("playground-chat-history:")) throw new DOMException("Full", "QuotaExceededError");
+      data.set(key, value);
+    });
+    history.flush();
+    expect(JSON.parse(data.get("playground-messages")!)).toEqual(original);
+    expect(get(history.storageError)).toContain("could not be saved");
+    storage.setItem.mockImplementation((key, value) => { data.set(key, value); });
+    history.flush();
+    expect(data.has("playground-messages")).toBe(false);
+    expect(get(history.storageError)).toBe("");
+  });
   it("hides empty drafts until their first message is sent", () => {
     const { history } = setup();
     expect(listSavedChats(get(history).chats)).toEqual([]);

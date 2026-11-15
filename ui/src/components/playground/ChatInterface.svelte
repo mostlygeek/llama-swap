@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { untrack } from "svelte";
-  import { derived } from "svelte/store";
+  import { onMount, untrack } from "svelte";
+  import { derived, get, writable } from "svelte/store";
   import { hasListedModels, playgroundModels } from "../../stores/api";
   import { chatHistory, chatMessages, activeChat } from "../../stores/chatHistory";
   import { showGenerationStats } from "../../stores/generationStats";
@@ -9,6 +9,9 @@
   import type { ContentPart } from "../../lib/types";
   import { isSubmitEnter } from "../../lib/ime";
   import { appendImageFiles, pasteImageFiles } from "../../lib/chatImages";
+  import { trackViewedChat } from "../../lib/chatViewed";
+  import { currentRoute } from "../../stores/route";
+  import { selectedPlaygroundTab } from "../../stores/playground";
   import ChatMessageComponent from "./ChatMessage.svelte";
   import ModelSelector from "./ModelSelector.svelte";
   import ChatComposer from "./ChatComposer.svelte";
@@ -42,6 +45,22 @@
   let attachedImages = $state<string[]>([]);
   let fileInput = $state<HTMLInputElement | null>(null);
   let imageError = $state<string | null>(null);
+  // Store notifications invalidate reads synchronously, including A -> B -> A
+  // switches that occur before Svelte runs the next render effect.
+  let composerVersion = 0;
+  onMount(() => {
+    const unsubscribe = derived(activeChat, (chat) => chat.id).subscribe(() => { composerVersion++; });
+    const visible = writable(document.visibilityState === "visible");
+    const updateVisibility = () => visible.set(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", updateVisibility);
+    const stopTracking = trackViewedChat(chatHistory, currentRoute, selectedPlaygroundTab, visible);
+    return () => {
+      composerVersion++;
+      unsubscribe();
+      stopTracking();
+      document.removeEventListener("visibilitychange", updateVisibility);
+    };
+  });
 
   let userScrolledUp = $state(false);
 
@@ -153,6 +172,7 @@
 
     // Add user message
     $chatMessages = [...$chatMessages, { role: "user", content }];
+    composerVersion++;
     userInput = "";
     attachedImages = [];
     imageError = null;
@@ -212,11 +232,14 @@
   }
 
   async function processImageFiles(files: File[]): Promise<void> {
+    const chatId = get(activeChat).id;
+    const version = composerVersion;
+    const isCurrent = () => get(activeChat).id === chatId && composerVersion === version;
     imageError = null;
     const error = await appendImageFiles(files, () => attachedImages, (images) => {
       attachedImages = images;
-    });
-    if (error) imageError = error;
+    }, undefined, isCurrent);
+    if (error && isCurrent()) imageError = error;
   }
 
   function handleImageSelect(event: Event) {

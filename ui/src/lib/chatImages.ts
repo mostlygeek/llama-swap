@@ -30,7 +30,9 @@ export async function appendImageFiles(
   currentImages: () => readonly string[],
   replaceImages: (images: string[]) => void,
   readImage: (file: File) => Promise<string> = fileToDataUrl,
+  isCurrent: () => boolean = () => true,
 ): Promise<string | null> {
+  if (!isCurrent()) return null;
   if (currentImages().length + files.length > MAX_IMAGES_PER_MESSAGE) return imageLimitError;
 
   for (const file of files) {
@@ -44,12 +46,14 @@ export async function appendImageFiles(
 
   try {
     const dataUrls = await Promise.all(files.map(readImage));
+    if (!isCurrent()) return null;
     // Another paste or file selection may have finished during these reads.
     const existing = currentImages();
     if (existing.length + dataUrls.length > MAX_IMAGES_PER_MESSAGE) return imageLimitError;
     replaceImages([...existing, ...dataUrls]);
     return null;
   } catch (error) {
+    if (!isCurrent()) return null;
     return error instanceof Error ? error.message : "Failed to process images";
   }
 }

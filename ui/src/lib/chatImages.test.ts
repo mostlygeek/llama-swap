@@ -28,6 +28,27 @@ describe("pasteImageFiles", () => {
 });
 
 describe("appendImageFiles", () => {
+  it("discards image reads that finish after the composer changes chats", async () => {
+    const pending = Promise.withResolvers<string>();
+    const replaceImages = vi.fn();
+    let current = true;
+    const result = appendImageFiles([png("private.png")], () => [], replaceImages,
+      () => pending.promise, () => current);
+    current = false;
+    pending.resolve("data:image/png;base64,private");
+    await expect(result).resolves.toBeNull();
+    expect(replaceImages).not.toHaveBeenCalled();
+  });
+
+  it("does not surface stale image-read errors in another chat", async () => {
+    const pending = Promise.withResolvers<string>();
+    let current = true;
+    const result = appendImageFiles([png("private.png")], () => [], vi.fn(),
+      () => pending.promise, () => current);
+    current = false;
+    pending.reject(new Error("Read failed"));
+    await expect(result).resolves.toBeNull();
+  });
   it("rejects an unsupported image before reading the file", async () => {
     const svg = new File(["<svg/>"], "image.svg", { type: "image/svg+xml" });
     const readImage = vi.fn();

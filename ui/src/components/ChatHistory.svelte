@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { push } from "svelte-spa-router";
   import { SquarePen, Pencil, Trash2, Ellipsis, Pin, PinOff } from "@lucide/svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
@@ -13,19 +12,6 @@
 
   const generating = chatHistory.generating;
   const sidebar = Sidebar.useSidebar();
-  let pageVisible = $state(document.visibilityState === "visible");
-  onMount(() => {
-    const updateVisibility = () => { pageVisible = document.visibilityState === "visible"; };
-    document.addEventListener("visibilitychange", updateVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", updateVisibility);
-      chatHistory.setViewed(null);
-    };
-  });
-  $effect(() => {
-    chatHistory.setViewed(pageVisible && $currentRoute === "/playground" && $selectedPlaygroundTab === "chat"
-      ? $chatHistory.activeId : null);
-  });
   let search = $state("");
   let editing = $state<SavedChat | null>(null);
   let deleting = $state<SavedChat | null>(null);
