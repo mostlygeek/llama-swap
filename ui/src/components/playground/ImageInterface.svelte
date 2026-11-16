@@ -435,7 +435,7 @@
                 <img
                   src={img}
                   alt="AI generated content {i + 1}"
-                  class="h-full w-full object-contain hover:opacity-90 transition-opacity"
+                  class="h-full w-full object-scale-down hover:opacity-90 transition-opacity"
                 />
               </button>
               <Button
@@ -460,7 +460,7 @@
             <img
               src={generatedImages[0]}
               alt="AI generated content"
-              class="h-full w-full object-contain hover:opacity-90 transition-opacity"
+              class="h-full w-full object-scale-down hover:opacity-90 transition-opacity"
             />
           </button>
           <Button
