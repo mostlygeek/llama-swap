@@ -419,7 +419,14 @@
           <p>Generating image...</p>
         </div>
       {:else if $error}
-        <div class="text-center text-red-500 p-4">
+        <!-- Keyboard users need to focus this region to scroll long API errors. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div
+          class="h-full w-full overflow-auto text-center text-red-500 p-4 [overflow-wrap:anywhere]"
+          role="region"
+          aria-label="Image generation error"
+          tabindex="0"
+        >
           <p class="font-medium">Error</p>
           <p class="text-sm mt-1">{$error}</p>
         </div>
