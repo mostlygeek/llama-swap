@@ -32,9 +32,9 @@
   }
 </script>
 
-<div class="group relative flex min-h-0 min-w-0 flex-1 items-stretch">
+<div class="group flex min-h-0 min-w-0 flex-1 items-stretch gap-2">
   <Textarea
-    class={`resize-none pr-10 ${textareaClass}`}
+    class={`min-w-0 flex-1 resize-none ${textareaClass}`}
     bind:ref
     {placeholder}
     {rows}
@@ -45,7 +45,7 @@
   <Button
     variant="outline"
     size="icon-sm"
-    class="absolute right-2 top-2 opacity-60 transition-opacity group-hover:opacity-100 md:opacity-0"
+    class="mt-2 shrink-0 self-start opacity-60 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 md:opacity-0"
     onclick={() => (isExpanded = true)}
     title="Expand to edit"
     type="button"
