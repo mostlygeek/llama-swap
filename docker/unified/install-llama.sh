@@ -3,7 +3,9 @@
 # Usage: BACKEND=cuda|vulkan ./install-llama.sh <commit_hash>
 set -e
 
+# Default is the fork's master branch, not an upstream revision.
 COMMIT_HASH="${1:-master}"
+LLAMA_REPO="${LLAMA_REPO:-https://github.com/mostlygeek/mg-llama.cpp.git}"
 BACKEND="${BACKEND:-cuda}"
 
 mkdir -p /install/bin
@@ -14,7 +16,7 @@ mkdir -p /src/llama.cpp
 cd /src/llama.cpp
 if [ ! -d .git ]; then
     git init
-    git remote add origin https://github.com/ggml-org/llama.cpp.git
+    git remote add origin "${LLAMA_REPO}"
 fi
 git fetch --depth=1 origin "${COMMIT_HASH}"
 git checkout FETCH_HEAD
