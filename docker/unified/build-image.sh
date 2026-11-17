@@ -105,6 +105,9 @@ ALL_PROJECTS=(whisper sd audio llama ik-llama)
 # a job cancelled by GitHub publishes nothing. See ccache-build.sh.
 COMPILE_TIMEOUT_MINUTES="${COMPILE_TIMEOUT_MINUTES:-}"
 
+# --consumer narrows ik_llama.cpp's CUDA architectures; see IK_CUDA_ARCHITECTURES.
+CONSUMER=false
+
 for arg in "$@"; do
     case $arg in
         --cuda)    BACKEND="cuda";   VARIANT="cuda" ;;
@@ -112,6 +115,7 @@ for arg in "$@"; do
         --vulkan)  BACKEND="vulkan"; VARIANT="vulkan" ;;
         --no-cache) NO_CACHE=true ;;
         --push)     PUSH=true ;;
+        --consumer) CONSUMER=true ;;
         --resolve)  MODE="resolve" ;;
         --assemble) MODE="assemble" ;;
         --manifest) MODE="manifest" ;;
@@ -130,6 +134,8 @@ for arg in "$@"; do
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
             echo "  --platform=PLATFORM  linux/amd64 or linux/arm64 (default: this host)"
+            echo "  --consumer  Compile ik_llama.cpp for consumer GPUs only on --cuda13 amd64"
+            echo "              (75-virtual;86-real;89-real;120-real), so it fits the CI time limit"
             echo "  --help, -h  Show this help message"
             echo ""
             echo "Split build (CI only):"
@@ -158,6 +164,9 @@ for arg in "$@"; do
             echo "                       (default: 60;61;70;75;86;89 for --cuda,"
             echo "                       75;80;86;89;90;100;120 for --cuda13 on amd64,"
             echo "                       121 for --cuda13 on arm64)"
+            echo "  IK_CUDA_ARCHITECTURES  CUDA architectures for ik_llama.cpp only; overrides"
+            echo "                       --consumer. Empty uses CMAKE_CUDA_ARCHITECTURES"
+            echo "                       (default: empty)"
             echo "  CUDA_VERSION         CUDA toolkit/runtime version as an nvidia/cuda image tag"
             echo "                       (default: 12.9.1 for --cuda, 13.3.1 for --cuda13)"
             echo "  DATE_TAG             Date suffix for published tags (default: today, UTC)"
@@ -254,6 +263,25 @@ case "${VARIANT}:${ARCH}" in
         CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;70;75;86;89}"
         ;;
 esac
+
+# ik_llama.cpp compiles far more CUDA template instances than the other
+# projects, and a change to a shared ggml header (most days, upstream) misses
+# every one of them in ccache. Compiled for the full cuda13 amd64 list that
+# overran the CI job's time limit, so on that image ik_llama.cpp targets
+# consumer cards only: SASS for Ampere (RTX 30xx), Ada (RTX 40xx) and
+# Blackwell (RTX 50xx, RTX PRO), plus Turing PTX that RTX 20xx / GTX 16xx JIT
+# on first load. Datacenter parts (A100, H100, B200) are not supported by
+# ik-llama-server in that image: ik picks kernels from the GPU's compute
+# capability, so running lower PTX can launch a kernel that was never compiled
+# and abort (issue #1185).
+#
+# --consumer turns that list on (CI passes it by default). An explicit
+# IK_CUDA_ARCHITECTURES wins either way; empty means use CMAKE_CUDA_ARCHITECTURES.
+IK_CUDA_ARCHITECTURES="${IK_CUDA_ARCHITECTURES:-}"
+if [[ "${CONSUMER}" == true && -z "${IK_CUDA_ARCHITECTURES}" \
+      && "${VARIANT}:${ARCH}" == "cuda13:amd64" ]]; then
+    IK_CUDA_ARCHITECTURES="75-virtual;86-real;89-real;120-real"
+fi
 
 # Resolved once here rather than per stage: a build that crosses UTC midnight
 # would otherwise tag its platforms and its manifest with different dates.
@@ -397,6 +425,10 @@ artifact_tag() {
         cat "${SCRIPT_DIR}/ccache-build.sh"
         echo "base=$(base_tag)"
         echo "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
+        # Only ik_llama.cpp reads it, so only its tag moves when it changes.
+        if [[ "${project}" == "ik-llama" ]]; then
+            echo "IK_CUDA_ARCHITECTURES=${IK_CUDA_ARCHITECTURES}"
+        fi
     } | sha256sum | cut -c1-8 )"
     echo "${ARTIFACT_REPO}:art-${project}-${VARIANT}${ARCH_TAG}-${commit:0:12}-${recipe}"
 }
@@ -654,6 +686,7 @@ build_project() {
         --build-arg "AUDIO_COMMIT_HASH=${AUDIO_HASH}" \
         --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}" \
         --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}" \
+        --build-arg "IK_CUDA_ARCHITECTURES=${IK_CUDA_ARCHITECTURES}" \
         "${PLATFORM_ARGS[@]}" \
         "${CACHE_ARGS[@]}" \
         "${SCRIPT_DIR}"
@@ -671,6 +704,7 @@ build_runtime() {
         --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
         --build-arg "CUDA_VERSION=${CUDA_VERSION}"
         --build-arg "CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
+        --build-arg "IK_CUDA_ARCHITECTURES=${IK_CUDA_ARCHITECTURES}"
         --build-arg "VARIANT=${VARIANT}"
     )
     local project
@@ -958,6 +992,9 @@ echo "  ik_llama.cpp:         ${IK_LLAMA_HASH}"
 if [[ "$BACKEND" == "cuda" ]]; then
     echo "  CUDA version:         ${CUDA_VERSION}"
     echo "  CUDA architectures:   ${CMAKE_CUDA_ARCHITECTURES}"
+    if [[ -n "${IK_CUDA_ARCHITECTURES}" ]]; then
+        echo "  ik_llama.cpp CUDA:    ${IK_CUDA_ARCHITECTURES}"
+    fi
 fi
 echo "  llama-swap:           $(docker run --rm --entrypoint cat "${RUNTIME_TAG}" /versions.txt | grep llama-swap | cut -d' ' -f2-)"
 echo ""

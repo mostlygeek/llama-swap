@@ -126,6 +126,7 @@ ARG AUDIO_COMMIT_HASH=unknown
 ARG VARIANT
 ARG CUDA_VERSION
 ARG CMAKE_CUDA_ARCHITECTURES=
+ARG IK_CUDA_ARCHITECTURES=
 ARG RUN_UID=0
 
 RUN for i in 1 2 3 4 5; do apt-get -o Acquire::Retries=5 update --error-on=any && break; \
@@ -216,6 +217,9 @@ RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
     if [ "${BACKEND}" = "cuda" ]; then \
       echo "cuda_version: ${CUDA_VERSION}" >> /versions.txt; \
       echo "cuda_architectures: ${CMAKE_CUDA_ARCHITECTURES}" >> /versions.txt; \
+      if [ -n "${IK_CUDA_ARCHITECTURES}" ]; then \
+        echo "ik_llama_cuda_architectures: ${IK_CUDA_ARCHITECTURES}" >> /versions.txt; \
+      fi; \
     fi && \
     echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
 
