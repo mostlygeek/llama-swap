@@ -10,24 +10,26 @@ ARG BACKEND=cuda
 # differ, so this is recorded in /versions.txt rather than used to build.
 ARG VARIANT=cuda
 ARG BUILDER_BASE
-ARG WHISPER_IMAGE
-ARG SD_IMAGE
-ARG AUDIO_IMAGE
-ARG LLAMA_IMAGE
-ARG IK_LLAMA_IMAGE=ik-llama-empty
 ARG CUDA_VERSION=12.9.1
+
+# The artifacts image of each project that is part of the build. A project that
+# is not has no image, so it falls back to the empty stage below: its COPY then
+# copies nothing and needs no conditional of its own. build-image.sh passes a
+# real artifacts image for every project it was asked to build.
+ARG WHISPER_IMAGE=empty
+ARG SD_IMAGE=empty
+ARG AUDIO_IMAGE=empty
+ARG LLAMA_IMAGE=empty
+ARG IK_LLAMA_IMAGE=empty
+
+# An empty /install. Must come before the stages that may name it.
+FROM ubuntu:24.04 AS empty
+RUN mkdir -p /install
 
 FROM ${WHISPER_IMAGE} AS whisper-src
 FROM ${SD_IMAGE} AS sd-src
 FROM ${AUDIO_IMAGE} AS audio-src
 FROM ${LLAMA_IMAGE} AS llama-src
-
-# Fallback for IK_LLAMA_IMAGE when the caller does not supply one, so the
-# COPY below always has a real (if empty) /install/bin and needs no backend
-# branching. build-image.sh passes a real artifacts image for every backend
-# it drives, and BuildKit prunes this stage when it does.
-FROM ubuntu:24.04 AS ik-llama-empty
-RUN mkdir -p /install/bin
 FROM ${IK_LLAMA_IMAGE} AS ik-llama-src
 
 # ── llama-swap release binary ─────────────────────────────────────────
@@ -146,35 +148,25 @@ RUN if [ "$RUN_UID" != "0" ]; then \
 
 WORKDIR /app
 
-# Copy whisper.cpp binaries and libraries
-COPY --from=whisper-src /install/bin/whisper-server /usr/local/bin/
-COPY --from=whisper-src /install/bin/whisper-cli /usr/local/bin/
-COPY --from=whisper-src /install/lib/ /usr/local/lib/
+# Each project's artifacts image holds exactly what it ships under /install
+# (bin/, and lib/ or share/ where it has them), so the tree is copied whole and a
+# project that was not built contributes nothing.
+#
+# whisper.cpp and stable-diffusion.cpp: binaries and their shared libraries.
+COPY --from=whisper-src /install/ /usr/local/
+COPY --from=sd-src /install/ /usr/local/
 
-# Copy stable-diffusion.cpp binaries and libraries
-COPY --from=sd-src /install/bin/sd-server /usr/local/bin/
-COPY --from=sd-src /install/bin/sd-cli /usr/local/bin/
-COPY --from=sd-src /install/lib/ /usr/local/lib/
-
-# Copy audio.cpp binaries (statically linked, model specs compiled in via
-# AUDIOCPP_DEPLOYMENT_BUILD). The on-disk spec catalog is installed too so
+# audio.cpp: statically linked, model specs compiled in via
+# AUDIOCPP_DEPLOYMENT_BUILD. The on-disk spec catalog is installed too so
 # --model-spec-override has a path to point at. eSpeak-ng is linked in
 # statically and finds its data directory next to the executable, so
-# espeak-ng-data must stay in /usr/local/bin. Its GPL license and source
+# espeak-ng-data stays in /usr/local/bin. Its GPL license and source
 # archive are in /usr/local/share/audiocpp/licenses/espeak-ng.
-COPY --from=audio-src /install/bin/audiocpp_server /usr/local/bin/
-COPY --from=audio-src /install/bin/audiocpp_cli /usr/local/bin/
-COPY --from=audio-src /install/bin/espeak-ng-data/ /usr/local/bin/espeak-ng-data/
-COPY --from=audio-src /install/share/audiocpp/ /usr/local/share/audiocpp/
+COPY --from=audio-src /install/ /usr/local/
 
-# Copy llama.cpp binaries (statically linked)
-COPY --from=llama-src /install/bin/llama-server /usr/local/bin/
-COPY --from=llama-src /install/bin/llama-cli /usr/local/bin/
-COPY --from=llama-src /install/bin/llama-tts /usr/local/bin/
-COPY --from=llama-src /install/bin/llama-bench /usr/local/bin/
-
-# Copy ik-llama-server
-COPY --from=ik-llama-src /install/bin/ /usr/local/bin/
+# llama.cpp (statically linked) and ik_llama.cpp (ik-llama-server)
+COPY --from=llama-src /install/ /usr/local/
+COPY --from=ik-llama-src /install/ /usr/local/
 
 # Install uv
 RUN pip install uv --break-system-packages
@@ -206,11 +198,16 @@ RUN sed -i "s/__BACKEND__/${BACKEND}/" /etc/llama-swap/audiocpp-server.example.j
     chown -R ${RUN_UID}:${RUN_UID} /etc/llama-swap
 
 # Version tracking
-RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
-    echo "whisper.cpp: ${WHISPER_COMMIT_HASH}" >> /versions.txt && \
-    echo "stable-diffusion.cpp: ${SD_COMMIT_HASH}" >> /versions.txt && \
-    echo "ik_llama.cpp: ${IK_LLAMA_COMMIT_HASH}" >> /versions.txt && \
-    echo "audio.cpp: ${AUDIO_COMMIT_HASH}" >> /versions.txt && \
+#
+# A project that was not built has an empty commit hash and gets no line.
+RUN : > /versions.txt && \
+    for entry in "llama.cpp:${LLAMA_COMMIT_HASH}" \
+                 "whisper.cpp:${WHISPER_COMMIT_HASH}" \
+                 "stable-diffusion.cpp:${SD_COMMIT_HASH}" \
+                 "ik_llama.cpp:${IK_LLAMA_COMMIT_HASH}" \
+                 "audio.cpp:${AUDIO_COMMIT_HASH}"; do \
+      [ -n "${entry#*:}" ] && echo "${entry%%:*}: ${entry#*:}" >> /versions.txt; \
+    done; \
     echo "llama-swap: $(cat /tmp/llama-swap-version)" >> /versions.txt && \
     echo "backend: ${VARIANT}" >> /versions.txt && \
     if [ "${BACKEND}" = "cuda" ]; then \
