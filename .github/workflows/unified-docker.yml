@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       llama_cpp_ref:
-        description: "llama.cpp commit hash, tag, or branch"
+        description: "llama.cpp commit hash, tag, or branch (mostlygeek/mg-llama.cpp)"
         required: false
         default: "master"
       whisper_ref:

@@ -10,6 +10,8 @@
 #   ./build-image.sh --cuda --no-cache                   # Build without cache
 #   LLAMA_REF=b1234 ./build-image.sh --vulkan            # Pin llama.cpp to a commit hash
 #   LLAMA_REF=v1.2.3 ./build-image.sh --cuda             # Pin llama.cpp to a tag
+#   (with no LLAMA_REF, llama.cpp comes from the master branch of
+#    https://github.com/mostlygeek/mg-llama.cpp)
 #   WHISPER_REF=v1.0.0 ./build-image.sh --vulkan         # Pin whisper.cpp to a tag
 #   SD_REF=master ./build-image.sh --cuda                # Pin stable-diffusion.cpp to a branch
 #   AUDIO_REF=main ./build-image.sh --cuda               # Pin audio.cpp to a branch
@@ -144,6 +146,8 @@ for arg in "$@"; do
             echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:unified-<variant>,"
             echo "                       e.g. llama-swap:unified-cuda13)"
             echo "  LLAMA_REF            Pin llama.cpp to a commit, tag, or branch"
+            echo "                       (default: master of"
+            echo "                       https://github.com/mostlygeek/mg-llama.cpp)"
             echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
             echo "  AUDIO_REF            Pin audio.cpp to a commit, tag, or branch"
@@ -275,7 +279,10 @@ DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${VARIANT}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Git repository URLs
-LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
+# llama.cpp is built from mostlygeek/mg-llama.cpp master, not ggml-org/llama.cpp:
+# the fork carries the patches the unified image needs on top of upstream.
+LLAMA_REPO="https://github.com/mostlygeek/mg-llama.cpp.git"
+LLAMA_DEFAULT_REF="master"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
 SD_REPO="https://github.com/leejet/stable-diffusion.cpp.git"
 AUDIO_REPO="https://github.com/0xShug0/audio.cpp.git"
@@ -504,9 +511,9 @@ if [[ -n "${LLAMA_REF:-}" ]]; then
     LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_REF}") || exit 1
     log "llama.cpp: ${LLAMA_REF} -> ${LLAMA_HASH}"
 else
-    LLAMA_HASH=$(get_latest_hash "${LLAMA_REPO}")
-    [[ -n "${LLAMA_HASH}" ]] || { echo "ERROR: Could not determine latest commit for llama.cpp" >&2; exit 1; }
-    log "llama.cpp: latest HEAD: ${LLAMA_HASH}"
+    LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_DEFAULT_REF}") || exit 1
+    [[ -n "${LLAMA_HASH}" ]] || { echo "ERROR: Could not determine latest commit for llama.cpp (${LLAMA_DEFAULT_REF})" >&2; exit 1; }
+    log "llama.cpp: ${LLAMA_DEFAULT_REF} (default): ${LLAMA_HASH}"
 fi
 
 if [[ -n "${WHISPER_REF:-}" ]]; then
