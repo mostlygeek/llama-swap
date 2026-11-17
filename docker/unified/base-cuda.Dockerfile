@@ -27,7 +27,10 @@ ENV CCACHE_DIR=/ccache
 ENV CCACHE_MAXSIZE=2G
 ENV PATH="/usr/lib/ccache:${PATH}"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN for i in 1 2 3 4 5; do apt-get -o Acquire::Retries=5 update && break; \
+      [ "$i" -lt 5 ] || exit 1; echo "apt-get update failed, retrying in $((i * 30))s"; sleep $((i * 30)); \
+    done \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
     curl ca-certificates ccache make wget \
     pkg-config libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \

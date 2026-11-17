@@ -242,7 +242,7 @@
             "type": "integer",
             "minimum": 0,
             "default": 5,
-            "description": "Size in megabytes of the buffer for storing request/response captures. Set to 0 to disable captures."
+            "description": "Maximum size in megabytes of compressed request/response captures, in memory or in the database file used when store.persistCaptures is true. The oldest captures are deleted first. Set to 0 to disable captures."
         },
         "store": {
             "type": "object",
@@ -257,6 +257,11 @@
                     "minimum": 0,
                     "default": 0,
                     "description": "Delete activity logs older than this many days. 0 keeps them forever."
+                },
+                "persistCaptures": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Keep request/response captures in a second SQLite file next to path, named with _captures added to its base name (metrics.db stores captures in metrics_captures.db). Total size is capped by captureBuffer."
                 }
             },
             "required": [
@@ -403,9 +408,10 @@
                         "enum": [
                             "warm",
                             "pin",
-                            "spillover"
+                            "spillover",
+                            "fit"
                         ],
-                        "description": "How a target is selected for each request."
+                        "description": "How a target is selected for each request. fit selectors are ignored, with a warning, unless routing.router.use is capacity."
                     },
                     "targets": {
                         "type": "array",
@@ -424,6 +430,11 @@
                                 "minimum": 1,
                                 "default": 1,
                                 "description": "Requests reserved per active target before spilling over to the next target."
+                            },
+                            "no_evict": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "fit only: respond 429 instead of choosing a target that would stop a running model."
                             }
                         },
                         "additionalProperties": false,
@@ -702,6 +713,11 @@
                                 "type": "boolean",
                                 "default": false,
                                 "description": "Whether the model supports the /v1/rerank endpoint."
+                            },
+                            "embeddings": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Whether the model serves the /v1/embeddings endpoint. Not auto-discovered; set it for embedding models so clients can tell them from chat models."
                             },
                             "context": {
                                 "type": "integer",

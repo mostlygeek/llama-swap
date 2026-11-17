@@ -38,3 +38,15 @@
   rubric:
     - Gives UD-IQ1_S
     - Reads it from the model's metadata block
+
+- id: holdout-running-config-keepalives
+  question: Which model on this server has upstream connection reuse turned off?
+  tags: [config, running-config, holdout, hard]
+  expect_regex: ["eval-glm4-32b"]
+  expect_tools: [config__get_config]
+  max_iterations: 8
+  reference: |
+    eval-glm4-32b, which sets `disableKeepAlives: true`.
+  rubric:
+    - Names eval-glm4-32b
+    - Names disableKeepAlives as the setting

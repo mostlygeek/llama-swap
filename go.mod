@@ -13,7 +13,7 @@ require (
 	github.com/itchyny/gojq v0.12.19
 	github.com/klauspost/compress v1.20.0
 	github.com/pressly/goose/v3 v3.27.2
-	github.com/shirou/gopsutil/v4 v4.26.4
+	github.com/shirou/gopsutil/v4 v4.26.9
 	github.com/stretchr/testify v1.12.1
 	github.com/tailscale/tailcat v0.7.0
 	github.com/tidwall/gjson v1.18.0
@@ -165,5 +165,3 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
 )
-
-replace github.com/shirou/gopsutil/v4 => github.com/hsdfat/gopsutil/v4 v4.26.9-0.20260925154932-b689427e410d

@@ -2,9 +2,9 @@
 title: Model capabilities and model listings
 summary: Advertise images, tools and context length in /v1/models, automatically or by hand.
 category: guides
-tags: [capabilities, voices, speech, models, tools, vision, context, autodetect, llama-server, vllm, halogen, playground, decisions]
-config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, models.*.capabilities.voices, store.path]
-updated: 2026-10-10
+tags: [capabilities, voices, speech, models, tools, vision, context, autodetect, embeddings, reranker, llama-server, vllm, halogen, playground, decisions]
+config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, models.*.capabilities.voices, models.*.capabilities.embeddings, models.*.capabilities.reranker, models.*.metadata, store.path]
+updated: 2026-11-10
 ---
 
 # Model capabilities and model listings
@@ -48,7 +48,9 @@ What each server can report:
 | audio or video input | yes | no | no |
 | tools | yes, from the chat template | no | yes |
 | decision model output | yes, from `/v1/models` | no | no |
+| audio output (speech) | yes, from `/v1/models` | no | no |
 | reranker | no | no | no |
+| embeddings | no | no | no |
 
 llama-server is read from `/props`, and halogen-flash-server from its
 `/health`, which that project documents as the authoritative report of what
@@ -56,15 +58,24 @@ the running build accepts. Both vary per deployment: halogen serves images
 only when it was started with a vision tower, and that is read rather than
 assumed.
 
-Decision models are the one thing `/props` cannot show. They answer
-`/v1/systemone` and generate no text, so llama-server marks them with
-`output_modalities: ["decisions"]` in its `/v1/models` instead, and llama-swap
-reports `out: [decisions]` and no tools for them, whatever their chat template
-says.
+What a model outputs is the one thing `/props` cannot show, so it is read
+from the `output_modalities` in llama-server's own `/v1/models`. Decision
+models answer `/v1/systemone` and generate no text; llama-server marks them
+with `["decisions"]`, and llama-swap reports `out: [decisions]` and no tools
+for them, whatever their chat template says. The listing also flags them
+with `capabilities.decisions: true`, which the UI shows as a Decisions
+badge. Speech models report audio:
+LFM Audio reports `["text", "audio"]` and gets `out: [text, audio]`, and a
+speech-only model reports `["audio"]` and gets `out: [audio]`. Audio output
+alone does not mean a model can hold a `/v1/realtime` conversation (the
+Playground's Realtime tab); that also needs a model that chats, such as LFM
+Audio.
 
 vLLM is the thin one. Nothing it serves says whether it was started with
 `--enable-auto-tool-choice`, or whether the model takes images, so set those
-by hand on vLLM models.
+by hand on vLLM models. Other servers whose `/v1/models` lists a context
+length, such as Gufo and yamz (`max_context`), are read the same way: context
+length only.
 
 llama-swap picks the right reader from the `owned_by` field in the server's
 own `/v1/models`: `llamacpp`, `vllm` or `halogen`. To check what a server
@@ -96,6 +107,59 @@ models:
 
 Set only what the model really supports. A false claim makes clients send
 requests that fail or get ignored.
+
+## Marking embedding and rerank models
+
+Embedding servers have nothing to probe: no endpoint tells an embedding
+model from a chat model without sending a real request, so discovery
+never fills this in. The same is true for a reranker. Set the flag by
+hand on both:
+
+```yaml
+models:
+  gte-modernbert:
+    cmd: llama-server -m gte-modernbert-F16.gguf --embedding --pooling cls --port ${PORT}
+    capabilities:
+      embeddings: true
+      context: 8192
+  gte-reranker:
+    cmd: llama-server -m gte-reranker-F16.gguf --embedding --pooling rank --port ${PORT}
+    capabilities:
+      reranker: true
+      context: 8192
+```
+
+The flags only change listing metadata: `/v1/models` reports
+`capabilities.embeddings: true` or `capabilities.reranker: true` so
+clients can tell these models apart from chat models, filter for them,
+and show a badge. Neither flag starts, stops or reroutes anything; what
+the server actually serves is decided by its command line. Without the
+flag an embedding model that reports `text -> text` from `/props` is
+indistinguishable from a chat model in the listing.
+
+## Reading /props without loading the model
+
+`GET /props?model=<id>` is forwarded to the model, so by default it starts
+the model, and under a tight `capacity` pool it stops another model to make
+room. A client that reads the context size of every model in the list, such
+as the llama.vscode extension, would load them one after another.
+
+Add `autoload=false`, the same parameter llama-server's router mode takes, to
+read `/props` only from a model that is already running:
+
+```bash
+curl -i "localhost:8080/props?model=my-model&autoload=false"
+```
+
+A local model that is ready or still starting answers as usual. A local model
+in any other state is not started and nothing is stopped; the request gets
+`409 Conflict`. The client can then use `context_length` from `/v1/models`,
+which is filled in after the model has been loaded once.
+
+Only `autoload=false` and other values that are not `true` or `1` skip loading,
+so `autoload=0` does too. Leaving the parameter out, or empty, loads the model
+as before. Only `/props` checks it, and only for local models. A request for a
+peer model is forwarded unchanged, and the peer decides what to do with it.
 
 ## Turning discovery off
 
@@ -145,6 +209,45 @@ answer, and voices are not shown in `/v1/models`.
 When `voices` is empty or unset there is no override, and the request goes to
 the upstream server as before, which starts the model if it is not running.
 This applies to local models only, not peers.
+
+## Custom metadata in model listings
+
+A model's `metadata` block is copied into `/v1/models` as written, under
+`meta.llamaswap`. It is separate from the fields generated from
+capabilities, which sit at the top level of the model entry, so the two never
+overwrite each other:
+
+```yaml
+models:
+  example:
+    cmd: llama-server -m model.gguf --port ${PORT}
+    metadata:
+      context_window: 59940
+      reasoning: true
+```
+
+Once the model has been loaded and its capabilities discovered, the listing
+looks like this:
+
+```json
+{
+  "id": "example",
+  "context_length": 60160,
+  "context_window": 60160,
+  "meta": {
+    "llamaswap": { "context_window": 59940, "reasoning": true },
+    "n_ctx": 60160
+  }
+}
+```
+
+Top-level `context_window` is the discovered value and
+`meta.llamaswap.context_window` is yours. Clients that read your own key must
+look under `meta.llamaswap`. Metadata is the same before and after discovery.
+
+llama-swap adds a few keys of its own to `meta.llamaswap` (`type`, `aliases`,
+`upstream`, and `modelID` on alias entries). If your `metadata` uses one of
+those names, llama-swap's value wins.
 
 ## How the Playground uses this
 

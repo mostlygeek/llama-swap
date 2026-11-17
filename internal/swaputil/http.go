@@ -43,6 +43,7 @@ var (
 	ErrNoRouterFound     = fmt.Errorf("no router found for model")
 	ErrNoPeerModelFound  = fmt.Errorf("peer model not found")
 	ErrNoLocalModelFound = fmt.Errorf("local model not found")
+	ErrInferencePaused   = fmt.Errorf("all inference is paused")
 )
 
 // IsWebSocketUpgrade reports whether r contains a valid websocket protocol
@@ -85,6 +86,15 @@ func ShouldIgnoreWebsocket(r *http.Request, cfg config.Config) bool {
 // proxy). It is never written to the connection — the client is already gone —
 // so it only ever appears in the access log and the activity store.
 const StatusClientClosedRequest = 499
+
+// IsInformationalStatus reports whether code is a 1xx interim status such as
+// 100 Continue or 103 Early Hints. These precede the final response and may be
+// sent more than once, so a response recorder must forward them without
+// treating them as the response status. 101 Switching Protocols is excluded: it
+// ends the HTTP exchange and is handled through Hijack.
+func IsInformationalStatus(code int) bool {
+	return code >= 100 && code <= 199 && code != http.StatusSwitchingProtocols
+}
 
 // StatusMarker is implemented by the response recorders in the middleware
 // chain. It lets a status be recorded for logging and metrics without writing
@@ -182,6 +192,8 @@ func SendError(w http.ResponseWriter, r *http.Request, err error) {
 		SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
 	case errors.Is(err, ErrNoRouterFound):
 		SendResponse(w, r, http.StatusNotFound, "no router for requested model")
+	case errors.Is(err, ErrInferencePaused):
+		SendResponse(w, r, http.StatusServiceUnavailable, ErrInferencePaused.Error())
 	default:
 		SendResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("unspecific error: %v", err))
 	}

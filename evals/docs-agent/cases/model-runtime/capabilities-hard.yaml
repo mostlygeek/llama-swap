@@ -12,3 +12,40 @@
     - Answers no
     - Explains the flag is advertising only
     - Notes that setting it on an incapable model causes tools to be silently ignored
+
+- id: hard-capabilities-false-ignored
+  question: I set tools false on a model but /v1/models still reports tools. How do I force it off?
+  tags: [capabilities, trap]
+  expect_regex: ["disableAuto"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `capabilities.disableAuto: true` and write the fields you want. A zero
+    value such as `tools: false` cannot be told apart from one never written,
+    so it does not override a discovered true.
+  rubric:
+    - Names disableAuto
+    - Explains why tools false does not override discovery
+
+- id: hard-capabilities-lost-on-restart
+  question: Discovered capabilities disappear every time I restart llama-swap. Why?
+  tags: [capabilities, store]
+  expect_regex: ["store"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    The cache lives in llama-swap's SQLite database, which is in memory unless
+    `store.path` is set.
+  rubric:
+    - Names store.path
+    - Says the database is in memory by default
+
+- id: hard-capabilities-vllm-tools
+  question: Will llama-swap automatically detect tool support on a vLLM model?
+  tags: [capabilities, trap]
+  expect_regex: ["tools"]
+  expect_any: ["\\bno\\b", "not", "by hand", "manually"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. vLLM reports context length only, so set `tools: true` by hand.
+  rubric:
+    - Answers no
+    - Says to set tools true by hand

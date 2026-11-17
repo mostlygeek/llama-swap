@@ -9,3 +9,89 @@
   expect_regex: ["metricsMaxInMemory"]
   expect_tools_any: [docs__search_docs, docs__get_doc]
   require_tools: true
+
+- id: operations-log-to-stdout
+  question: HTTP access lines no longer reach stdout. How do I get them back?
+  tags: [logs]
+  expect_regex: ["logToStdout", "http"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `logToStdout: "proxy,http"`. The default is `"proxy"`, and it is read
+    at startup only, so restart llama-swap.
+  rubric:
+    - Shows logToStdout with the http stream
+    - Says a restart is needed
+
+- id: operations-persist-captures
+  question: How do I keep request captures across llama-swap restarts?
+  tags: [captures, store]
+  expect_regex: ["persistCaptures", "store"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `store.path` and `store.persistCaptures: true`. Captures go in a second
+    SQLite file next to the database.
+  rubric:
+    - Shows store.path together with store.persistCaptures
+    - Says captures live in a second file
+
+- id: operations-tailcat-listener
+  question: What command line flag starts llama-swap's Tailcat listener?
+  tags: [tailcat]
+  expect_regex: ["-listen-tailcat"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `-listen-tailcat /path/to/server.private.json`. It needs a valid server key
+    file and a non-empty `tailcat.models` list.
+  rubric:
+    - Gives -listen-tailcat with a key file
+    - Mentions tailcat.models must not be empty
+
+- id: operations-tailcat-403
+  question: A Tailcat client connects to my llama-swap but every request gets 403 Forbidden. What do I check?
+  tags: [tailcat, troubleshooting]
+  expect_regex: ["allow"]
+  expect_any: ["printpub", "nodekey", "public key"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Check that the client's `printpub` output, its nodekey public key, is in
+    `tailcat.allow` exactly, and that it uses its saved key, not an ephemeral one.
+  rubric:
+    - Points at tailcat.allow
+    - Says to compare the client's printpub output
+
+- id: operations-non-root-image
+  question: The default llama-swap container runs as root. How do I avoid that?
+  tags: [containers, security]
+  expect_regex: ["non-root"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Use an image tagged `non-root`, such as `llama-swap:cpu-non-root`, and check
+    mounted files and device nodes are readable by the `app` user.
+  rubric:
+    - Names the non-root image tag
+    - Warns about mounted file and device permissions
+
+- id: operations-unified-image-revision
+  question: When building the unified image, how do I pin which llama-swap revision goes in it?
+  tags: [docker, build]
+  expect_regex: ["LS_VERSION"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `LS_VERSION=<commit-or-tag>` when running `./build-image.sh`.
+  rubric:
+    - Names LS_VERSION
+    - Shows it with build-image.sh
+
+- id: operations-kubeswap-rwx
+  question: Why does the shared model cache PVC for kubeswap want ReadWriteMany?
+  tags: [kubeswap, storage]
+  expect_regex: ["ReadWriteMany|RWX"]
+  expect_any: ["node"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    A model's pod is deleted on eviction and recreated on the next request,
+    possibly on a different node, so the ReadWriteMany PVC must be mountable on
+    every node a backend can land on.
+  rubric:
+    - Says pods can come back on a different node
+    - Mentions pinning pods to one node as the RWO escape, or says RWO can leave a pod stuck

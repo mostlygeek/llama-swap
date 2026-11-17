@@ -9,9 +9,9 @@ usage() {
 Usage: scripts/add-changelog.sh [harness] [version]
        scripts/add-changelog.sh [version]
 
-Adds a release version to CHANGELOG.md. The harness is codex, claude,
-opencode or pi and defaults to pi. When version is omitted it is the
-highest v<number> tag plus one.
+Creates changelog/v<version>.md with the release entry. The harness is
+codex, claude, opencode or pi and defaults to pi. When version is
+omitted it is the highest v<number> tag plus one.
 
 Environment:
   CHANGELOG_MODEL  Model passed to the harness. Defaults to the harness
@@ -37,15 +37,17 @@ next_version() {
 }
 
 check_changelog() {
-  local version="$1"
+  local version="$1" file
 
-  if ! git diff --quiet -- CHANGELOG.md; then
-    printf 'CHANGELOG.md has unstaged changes. Commit, stage or stash them first.\n' >&2
+  file="changelog/${version}.md"
+
+  if ! git diff --quiet -- CHANGELOG.md changelog/; then
+    printf 'CHANGELOG.md or changelog/ has unstaged changes. Commit, stage or stash them first.\n' >&2
     exit 1
   fi
 
-  if grep -qE "^## ${version}( |$)" CHANGELOG.md; then
-    printf 'CHANGELOG.md already has an entry for %s.\n' "$version" >&2
+  if [[ -e "$file" ]]; then
+    printf '%s already exists.\n' "$file" >&2
     exit 1
   fi
 }
@@ -53,7 +55,7 @@ check_changelog() {
 changelog_prompt() {
   local version="$1"
 
-  printf '%s\n' "Use docs/changelog-rules.md to add the ${version} release entry to CHANGELOG.md. The release changes are committed: inspect them with git log from the last release tag to HEAD (or main as the rules require). Read each commit's full message and use gh pr view to read each pull request's description and author. Do not use Git reflogs or .git/logs paths. Complete the edit before replying; do not only describe the planned work. Make only the required changelog update."
+  printf '%s\n' "Use docs/changelog-rules.md to create the file changelog/${version}.md containing the ${version} release entry. The release changes are committed: inspect them with git log from the last release tag to HEAD (or main as the rules require). Read each commit's full message and use gh pr view to read each pull request's description and author. Do not use Git reflogs or .git/logs paths. Complete the edit before replying; do not only describe the planned work. Make only the required changelog update."
 }
 
 run_codex() {

@@ -89,5 +89,5 @@ func (s *Server) handleComfyUI(w http.ResponseWriter, r *http.Request) {
 		ModelID:  config.ComfyUIModelID,
 		Metadata: make(map[string]string),
 	}))
-	s.local.ServeHTTP(w, r)
+	s.serveLocal(w, r)
 }

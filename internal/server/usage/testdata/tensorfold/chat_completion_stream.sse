@@ -1,0 +1,5 @@
+data: {"id": "chatcmpl-eb3517c8853c49888f655052", "object": "chat.completion.chunk", "created": 1792002477, "model": "qwen3.8-flash-next", "choices": [{"index": 0, "delta": {}, "finish_reason": "length"}], "tensorfold": {"prefill_s": 0.2393, "decode_s": 0.7758, "rounds": 9, "drafts": true, "cached": 0, "min_rows": 2, "drafted": 34, "accepted": 22, "token_sha": "a4efc8f50f90"}}
+
+data: {"id": "chatcmpl-eb3517c8853c49888f655052", "object": "chat.completion.chunk", "created": 1792002477, "model": "qwen3.8-flash-next", "choices": [], "usage": {"prompt_tokens": 59, "completion_tokens": 32, "total_tokens": 91, "prompt_tokens_details": {"cached_tokens": 0}, "completion_tokens_details": {"reasoning_tokens": 31}}}
+
+data: [DONE]

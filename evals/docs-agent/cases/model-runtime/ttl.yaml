@@ -1,4 +1,4 @@
-# Grounded in docs/kb/guides/ttl-and-unloading.md
+# Grounded in docs/kb/guides/model-runtime/ttl-and-unloading.md
 - id: ttl-unload-after-5min
   question: How do I make a model unload after 5 minutes of inactivity?
   tags: [ttl]
@@ -74,3 +74,15 @@
   rubric:
     - Gives the /api/models/unload endpoint with a model id
     - Shows a runnable curl command
+
+- id: ttl-pause-inference
+  question: I want the GPU free for a few hours while gaming, but unloaded models come back on the next request. What do I do?
+  tags: [pause, api]
+  expect_regex: ["/api/models/pause"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `curl -X POST http://localhost:8080/api/models/pause` unloads everything
+    and rejects requests until `POST /api/models/resume`.
+  rubric:
+    - Gives the pause endpoint
+    - Mentions resume or the Models page button

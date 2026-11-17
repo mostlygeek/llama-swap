@@ -6,7 +6,10 @@ export type ThemeMode = "light" | "dark" | "system";
 
 // Named color palettes. Each theme is purely CSS: see the matching
 // [data-theme="..."] / [data-theme="..."].dark blocks in index.css.
-// Adding a new theme = add an entry here + the two CSS blocks.
+// Adding a new theme = add an entry here + the two CSS blocks. Each block
+// defines --link (a readable link color for that background); the --hljs-*
+// code token colors inherit from :root/.dark unless that theme's --muted
+// code background needs an override.
 export type ThemeName =
   | "default"
   | "ocean"

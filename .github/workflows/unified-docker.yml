@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       llama_cpp_ref:
-        description: "llama.cpp commit hash, tag, or branch"
+        description: "llama.cpp commit hash, tag, or branch (mostlygeek/mg-llama.cpp)"
         required: false
         default: "master"
       whisper_ref:
@@ -47,6 +47,11 @@ on:
         default: true
       build_vulkan:
         description: "Build Vulkan image"
+        type: boolean
+        required: false
+        default: true
+      consumer:
+        description: "Pass --consumer: compile ik_llama.cpp on cuda13 amd64 for consumer GPUs only (RTX 20xx-50xx), so it fits the job time limit"
         type: boolean
         required: false
         default: true
@@ -104,6 +109,7 @@ jobs:
       cuda13_platforms: ${{ steps.plan.outputs.cuda13_platforms }}
       date_tag: ${{ steps.plan.outputs.date_tag }}
       push_to_ghcr: ${{ steps.plan.outputs.push_to_ghcr }}
+      consumer: ${{ steps.plan.outputs.consumer }}
       llama_hash: ${{ steps.refs.outputs.llama_hash }}
       whisper_hash: ${{ steps.refs.outputs.whisper_hash }}
       sd_hash: ${{ steps.refs.outputs.sd_hash }}
@@ -136,13 +142,14 @@ jobs:
           # schedule uses defaults (build all, push); workflow_dispatch respects inputs
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             build_cuda=true; build_cuda13=true; build_vulkan=true
-            build_arm64=true; push=true
+            build_arm64=true; push=true; consumer=true
           else
             build_cuda="${{ inputs.build_cuda }}"
             build_cuda13="${{ inputs.build_cuda13 }}"
             build_vulkan="${{ inputs.build_vulkan }}"
             build_arm64="${{ inputs.build_arm64 }}"
             push="${{ inputs.push_to_ghcr }}"
+            consumer="${{ inputs.consumer }}"
           fi
 
           # cuda and vulkan are amd64 only; cuda13 adds arm64 for GB10.
@@ -157,6 +164,7 @@ jobs:
             echo "build_cuda13=${build_cuda13}"
             echo "build_vulkan=${build_vulkan}"
             echo "push_to_ghcr=${push}"
+            echo "consumer=${consumer}"
             echo 'cuda_projects=["whisper","sd","audio","llama","ik-llama"]'
             echo 'vulkan_projects=["whisper","sd","audio","llama","ik-llama"]'
             echo 'amd64_only=["linux/amd64"]'
@@ -182,6 +190,7 @@ jobs:
       platform: ${{ matrix.platform }}
       projects: ${{ needs.setup.outputs.cuda_projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      consumer: ${{ needs.setup.outputs.consumer == 'true' }}
       date_tag: ${{ needs.setup.outputs.date_tag }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
       whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
@@ -218,6 +227,7 @@ jobs:
       platform: ${{ matrix.platform }}
       projects: ${{ needs.setup.outputs.cuda_projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      consumer: ${{ needs.setup.outputs.consumer == 'true' }}
       date_tag: ${{ needs.setup.outputs.date_tag }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
       whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
@@ -254,6 +264,7 @@ jobs:
       platform: ${{ matrix.platform }}
       projects: ${{ needs.setup.outputs.vulkan_projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      consumer: ${{ needs.setup.outputs.consumer == 'true' }}
       date_tag: ${{ needs.setup.outputs.date_tag }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
       whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
@@ -273,3 +284,21 @@ jobs:
       variant: vulkan
       platforms: ${{ needs.setup.outputs.amd64_only }}
       date_tag: ${{ needs.setup.outputs.date_tag }}
+
+  # Every --stage build overwrites its project's tag in llama-swap-ccache, which
+  # leaves the previous cache image behind untagged. That package holds nothing
+  # else, so every untagged version in it is safe to delete. Runs even when a
+  # build failed, since a failed compile still publishes its cache.
+  delete-stale-ccache:
+    needs: [cuda, cuda13, vulkan]
+    # Skip on forks: the delete API needs package admin on the upstream account.
+    if: ${{ always() && github.repository == 'mostlygeek/llama-swap' }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: dataaxiom/ghcr-cleanup-action@cd0cdb900b5dbf3a6f2cc869f0dbb0b8211f50c4 # v1.0.16
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          package: llama-swap-ccache
+          delete-untagged: true

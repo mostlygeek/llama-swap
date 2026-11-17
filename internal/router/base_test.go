@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -14,11 +15,92 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
+
+func TestBaseRouter_ReloadReleasesProcessMonitors(t *testing.T) {
+	for _, kind := range []string{"group", "matrix", "capacity"} {
+		t.Run(kind, func(t *testing.T) {
+			logs := logmon.NewGroup(io.Discard, true, true, true)
+			defer func() {
+				for _, m := range []*logmon.Monitor{logs.ProxyLogs, logs.UpstreamLogs, logs.HttpLogs, logs.MuxLogs} {
+					if closer, ok := any(m).(io.Closer); ok {
+						closer.Close()
+					}
+				}
+			}()
+			conf, err := config.LoadConfigFromReader(strings.NewReader("models:\n  a:\n    cmd: echo ${PORT}\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "matrix" {
+				conf.Routing.Router.Use = "matrix"
+				conf.Routing.Router.Settings.Matrix = &config.MatrixConfig{Sets: config.OrderedSets{{Name: "a", DSL: "a"}}}
+			}
+			if kind == "capacity" {
+				conf.Routing.Router.Use = "capacity"
+				conf.Routing.Router.Settings.Capacity = &config.CapacityConfig{Pools: map[string]int64{"ram": 1}}
+				model := conf.Models["a"]
+				model.Capacities = map[string]int64{"ram": 1}
+				conf.Models["a"] = model
+			}
+			before := runtime.NumGoroutine()
+			for i := 0; i < 100; i++ {
+				var rt interface {
+					Shutdown(time.Duration) error
+					Unload(time.Duration, ...string)
+					ProcessLogger(string) (*logmon.Monitor, bool)
+				}
+				if kind == "group" {
+					rt, err = NewGroup(conf, logs)
+				} else if kind == "matrix" {
+					rt, err = NewMatrix(conf, logs)
+				} else {
+					rt, err = NewCapacity(conf, logs)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				monitor, ok := rt.ProcessLogger("a")
+				if !ok {
+					t.Fatal("missing process logger")
+				}
+				monitor.Write([]byte("reload log"))
+				rt.Unload(time.Second, "a")
+				if len(monitor.GetHistory()) == 0 {
+					t.Fatal("Unload closed the process monitor")
+				}
+				if err := rt.Shutdown(time.Second); err != nil {
+					t.Fatal(err)
+				}
+				deadline := time.Now().Add(time.Second)
+				for len(monitor.GetHistory()) > 0 && time.Now().Before(deadline) {
+					runtime.Gosched()
+				}
+				if len(monitor.GetHistory()) > 0 {
+					t.Fatal("Shutdown retained process log history")
+				}
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
+				runtime.Gosched()
+			}
+			after := runtime.NumGoroutine()
+			t.Logf("100 router replacements: goroutines before=%d after=%d", before, after)
+			if after > before {
+				t.Fatalf("goroutines leaked: before=%d after=%d", before, after)
+			}
+			logs.ProxyLogs.Write([]byte("still active"))
+			if len(logs.ProxyLogs.GetHistory()) == 0 {
+				t.Fatal("Shutdown closed shared logs")
+			}
+		})
+	}
+}
 
 // These tests cover baseRouter's own machinery — the run loop, process
 // lifecycle (doSwap), grant/ServeHTTP plumbing, Unload, and Shutdown. The
@@ -442,6 +524,49 @@ func TestBaseRouter_OnDemandStart(t *testing.T) {
 	}
 }
 
+func TestBaseRouter_StartGateRefusesSwap(t *testing.T) {
+	a := newFakeProcess("a")
+	a.autoReady = true
+
+	b := newTestBase(t, map[string]process.Process{"a": a}, &stubPlanner{})
+	b.SetStartGate(func() error { return swaputil.ErrInferencePaused })
+
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, newRequest("a"))
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d want 503; body=%q", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), swaputil.ErrInferencePaused.Error()) {
+		t.Errorf("body=%q want the gate's error", w.Body.String())
+	}
+	if got := a.runCalls.Load(); got != 0 {
+		t.Errorf("runCalls=%d want 0 while the gate refuses", got)
+	}
+	if got := a.serveCalls.Load(); got != 0 {
+		t.Errorf("serveCalls=%d want 0 while the gate refuses", got)
+	}
+}
+
+func TestBaseRouter_StartGateClearedAllowsSwap(t *testing.T) {
+	a := newFakeProcess("a")
+	a.autoReady = true
+
+	b := newTestBase(t, map[string]process.Process{"a": a}, &stubPlanner{})
+	b.SetStartGate(func() error { return swaputil.ErrInferencePaused })
+	b.SetStartGate(nil)
+
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, newRequest("a"))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if got := a.runCalls.Load(); got != 1 {
+		t.Errorf("runCalls=%d want 1", got)
+	}
+}
+
 func TestBaseRouter_IgnoreWebsocketsRejectsModelUnlessReady(t *testing.T) {
 	for _, state := range []process.ProcessState{process.StateStopped, process.StateStarting} {
 		t.Run(string(state), func(t *testing.T) {
@@ -855,5 +980,24 @@ func TestBaseRouter_Shutdown_StopsAllProcesses(t *testing.T) {
 	// Second Shutdown should report already in progress.
 	if err := b.Shutdown(0); err == nil {
 		t.Errorf("second Shutdown returned nil, want error")
+	}
+}
+
+func TestBaseRouter_SetsLocalHint(t *testing.T) {
+	a := newFakeProcess("a")
+	a.autoReady = true
+	a.upstream = hint.VLLM
+
+	b := newTestBase(t, map[string]process.Process{"a": a}, &stubPlanner{})
+
+	ctx, h := hint.New(context.Background())
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, newRequest("a").WithContext(ctx))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if h.Route != hint.RouteLocal || h.PeerID != "" || h.Upstream != hint.VLLM {
+		t.Errorf("hint = %+v, want local vllm", *h)
 	}
 }

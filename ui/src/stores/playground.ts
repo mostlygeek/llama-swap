@@ -1,13 +1,14 @@
 import { get } from "svelte/store";
 import { persistentStore } from "./persistent";
 
-export type PlaygroundTab = "chat" | "images" | "speech" | "audio" | "rerank" | "concurrency";
+export type PlaygroundTab = "chat" | "images" | "speech" | "audio" | "realtime" | "rerank" | "concurrency";
 
 export const playgroundTabs: { id: PlaygroundTab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "images", label: "Images" },
   { id: "speech", label: "Speech" },
   { id: "audio", label: "Transcription" },
+  { id: "realtime", label: "Realtime" },
   { id: "rerank", label: "Rerank" },
   { id: "concurrency", label: "Load Test" },
 ];

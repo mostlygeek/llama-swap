@@ -11,3 +11,52 @@
   expect_regex: ["loading"]
   expect_tools_any: [docs__search_docs, docs__get_doc]
   require_tools: true
+
+- id: holdout-reranker-not-discovered
+  question: Will llama-swap work out on its own that a model is a reranker?
+  tags: [capabilities, holdout]
+  expect_regex: ["reranker"]
+  expect_any: ["\\bno\\b", "not", "by hand", "manually"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. Discovery never fills it in, so set `capabilities.reranker: true` by
+    hand.
+  rubric:
+    - Answers no
+    - Shows capabilities.reranker true
+
+- id: holdout-capabilities-before-first-load
+  question: A new model shows no context length in /v1/models though llama-server should report it. What is going on?
+  tags: [capabilities, holdout]
+  expect_any: ["load", "first", "running"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    It has never been loaded. The server has to be running to be asked, so
+    load the model once and the values appear.
+  rubric:
+    - Says the model has to be loaded once
+    - Says the values stay after it unloads
+
+- id: holdout-pause-peers
+  question: While inference is paused, can clients still use models served by a peer?
+  tags: [pause, holdout]
+  expect_any: ["yes", "not affected", "unaffected", "still"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Yes. Peer models are not affected; only local models get the 503.
+  rubric:
+    - Says peer models keep working
+    - Says local models get a 503
+
+- id: holdout-progress-extends-timeout
+  question: Can a model take longer to load than healthCheckTimeout if it keeps reporting progress?
+  tags: [health-check, holdout]
+  expect_regex: ["progress"]
+  expect_any: ["yes", "restart", "reset", "extend"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Yes. Each change in `progress` restarts the countdown, so the timeout limits
+    how long a load may go without progress. A `message` alone does not extend it.
+  rubric:
+    - Says each change in progress restarts the countdown
+    - Says a message on its own does not extend it

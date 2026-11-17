@@ -1,6 +1,7 @@
 package capcompat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -8,12 +9,15 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
 
 // The fixtures under testdata/ are built from the documented response shapes:
@@ -52,10 +56,19 @@ import (
 // gufo/v1_models.json is a verbatim capture from a running Gufo instance
 // (AMD Strix Halo gfx1151).
 //
+// yamz/v1_models.json is the /v1/models response of a yamz (kyojin) server, as
+// supplied by a user.
+//
 // v1_models_capture_clef.json and props_capture_clef.json are one capture from
 // a single llama-server (b11429) serving the Clef-Flash decision model. The
 // listing is verbatim; the /props file keeps only modalities,
 // default_generation_settings and chat_template_caps.
+
+// props_capture_b12017.json is a /props from a newer llama-server (b12017),
+// keeping only modalities, default_generation_settings and
+// chat_template_caps. Its chat_template_caps mixes types: the supports_*
+// keys are booleans, but reasoning_effort_levels is a list. Older code that
+// decoded chat_template_caps as map[string]bool rejected the whole response.
 
 // fixture reads a testdata file.
 func fixture(t *testing.T, parts ...string) []byte {
@@ -95,7 +108,16 @@ func (u *upstream) client(t *testing.T) *Client {
 	t.Helper()
 	base, err := url.Parse(u.server.URL)
 	require.NoError(t, err)
-	return NewClient(base, config.TimeoutsConfig{})
+	return NewClient(base, config.TimeoutsConfig{}, nil)
+}
+
+// clientWithLogger is like client but with the warnings a probe logs for a
+// degraded /props captured in log, for tests that assert on them.
+func (u *upstream) clientWithLogger(t *testing.T, log *logmon.Monitor) *Client {
+	t.Helper()
+	base, err := url.Parse(u.server.URL)
+	require.NoError(t, err)
+	return NewClient(base, config.TimeoutsConfig{}, log)
 }
 
 func TestCapcompat_DetectLlamaServer(t *testing.T) {
@@ -107,7 +129,7 @@ func TestCapcompat_DetectLlamaServer(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "model-a")
 	require.NoError(t, err)
 
-	assert.Equal(t, "llama-server", info.Upstream)
+	assert.Equal(t, hint.LlamaServer, info.Upstream)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 	assert.True(t, info.Capabilities.Tools)
@@ -149,6 +171,46 @@ func TestCapcompat_DetectLlamaServerDecisionModel(t *testing.T) {
 	assert.Equal(t, 16384, info.Capabilities.Context)
 }
 
+// A speech to speech model (LFM3 Audio on build b12063) accepts audio, which
+// /props reports, and also speaks, which only the listing's
+// output_modalities says. The capture's chat_template is elided and its model
+// paths shortened.
+func TestCapcompat_DetectLlamaServerAudioOutput(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models_capture_lfm_audio.json"),
+		"/props":     fixture(t, "llama-server", "props_capture_lfm_audio.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "liquidfm-2B")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.LlamaServer, info.Upstream)
+	assert.Equal(t, []string{"text", "audio"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text", "audio"}, info.Capabilities.Out)
+	assert.True(t, info.Capabilities.Tools, "text is still an output, so tools stay")
+	assert.Equal(t, 128000, info.Capabilities.Context)
+	require.NoError(t, info.Capabilities.Validate())
+}
+
+func TestCapcompat_DetectLlamaServerAudioOnlyOutput(t *testing.T) {
+	// A speech-only model reports output_modalities ["audio"]. It must not be
+	// credited with text, or with tools, which need text out.
+	listing := regexp.MustCompile(`"output_modalities": \[[^\]]*\]`).ReplaceAll(
+		fixture(t, "llama-server", "v1_models_capture_lfm_audio.json"),
+		[]byte(`"output_modalities": ["audio"]`))
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": listing,
+		"/props":     fixture(t, "llama-server", "props_capture_lfm_audio.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "liquidfm-2B")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"audio"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools)
+	require.NoError(t, info.Capabilities.Validate())
+}
+
 func TestCapcompat_DetectLlamaServerIgnoresUnmappedModalities(t *testing.T) {
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
@@ -180,7 +242,7 @@ func TestCapcompat_DetectLlamaServerCapture(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "gemma")
 	require.NoError(t, err)
 
-	assert.Equal(t, "llama-server", info.Upstream)
+	assert.Equal(t, hint.LlamaServer, info.Upstream)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, 220160, info.Capabilities.Context, "context comes from /props")
 }
@@ -229,30 +291,127 @@ func TestCapcompat_DetectLlamaServerAudioAndVideo(t *testing.T) {
 	assert.Equal(t, []string{"text", "image", "audio", "video"}, info.Capabilities.In)
 }
 
+// Builds predating chat_template_caps give no signal for tools. The
+// template source is not consulted at all, so the answer is false even
+// though this fixture's template mentions tools.
 func TestCapcompat_DetectLlamaServerNoTemplateCaps(t *testing.T) {
-	t.Run("template mentions tools", func(t *testing.T) {
-		up := newUpstream(t, map[string][]byte{
-			"/v1/models": fixture(t, "llama-server", "v1_models.json"),
-			"/props":     fixture(t, "llama-server", "props_no_template_caps.json"),
-		})
-
-		info, err := Detect(context.Background(), up.client(t), "model-a")
-		require.NoError(t, err)
-		assert.True(t, info.Capabilities.Tools)
-		assert.Equal(t, 16384, info.Capabilities.Context)
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     fixture(t, "llama-server", "props_no_template_caps.json"),
 	})
 
-	t.Run("template does not mention tools", func(t *testing.T) {
-		up := newUpstream(t, map[string][]byte{
-			"/v1/models": fixture(t, "llama-server", "v1_models.json"),
-			"/props":     fixture(t, "llama-server", "props_no_template_caps_no_tools.json"),
-		})
+	info, err := Detect(context.Background(), up.client(t), "model-a")
+	require.NoError(t, err)
+	assert.False(t, info.Capabilities.Tools)
+	assert.Equal(t, 16384, info.Capabilities.Context)
+}
 
-		info, err := Detect(context.Background(), up.client(t), "model-a")
-		require.NoError(t, err)
-		assert.False(t, info.Capabilities.Tools)
-		assert.Equal(t, 2048, info.Capabilities.Context)
+// Newer builds added reasoning_effort_levels, a list, to
+// chat_template_caps. The prober must decode the caps without rejecting the
+// whole response, and still read the boolean keys from it.
+func TestCapcompat_DetectLlamaServerNewBuildProps(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     fixture(t, "llama-server", "props_capture_b12017.json"),
 	})
+
+	info, err := Detect(context.Background(), up.client(t), "model-a")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.LlamaServer, info.Upstream)
+	assert.Equal(t, []string{"text", "image", "audio", "video"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.True(t, info.Capabilities.Tools, "caps report supports_tools and supports_tool_calls")
+	assert.Equal(t, 262144, info.Capabilities.Context)
+}
+
+// A /props that is not valid JSON must not fail the probe: the server is
+// answering, so the model is usable. Every field reads as its zero value
+// and one warning says why; the per-field warnings stay suppressed.
+func TestCapcompat_DetectLlamaServerInvalidPropsJSON(t *testing.T) {
+	tests := map[string]string{
+		"garbage body": "this is not json",
+		// gjson can still read fields that appear before a truncation,
+		// so these readable fields must not make it into the result.
+		"truncated body": `{"modalities": {"vision": true, "audio": true}, "default_generation_settings": {"n_ctx": 4096}`,
+	}
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log := logmon.NewWriter(&buf)
+			up := newUpstream(t, map[string][]byte{
+				"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+				"/props":     []byte(body),
+			})
+
+			info, err := Detect(context.Background(), up.clientWithLogger(t, log), "model-a")
+			require.NoError(t, err)
+
+			assert.Equal(t, hint.LlamaServer, info.Upstream)
+			assert.Equal(t, []string{"text"}, info.Capabilities.In)
+			assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+			assert.False(t, info.Capabilities.Tools)
+			assert.Equal(t, 0, info.Capabilities.Context)
+			assert.Contains(t, buf.String(), "not valid JSON")
+			assert.NotContains(t, buf.String(), "is not a boolean", "one warning explains the whole body")
+		})
+	}
+}
+
+// A field that is present but of the wrong type logs a WARN and reads as
+// its zero value; the rest of the probe continues.
+func TestCapcompat_DetectLlamaServerContextWrongType(t *testing.T) {
+	var buf bytes.Buffer
+	log := logmon.NewWriter(&buf)
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     []byte(`{"modalities":{"vision":true},"default_generation_settings":{"n_ctx":"262144"},"chat_template_caps":{"supports_tools":true,"supports_tool_calls":true}}`),
+	})
+
+	info, err := Detect(context.Background(), up.clientWithLogger(t, log), "model-a")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"text", "image"}, info.Capabilities.In, "the other fields still read")
+	assert.True(t, info.Capabilities.Tools)
+	assert.Equal(t, 0, info.Capabilities.Context)
+	assert.Contains(t, buf.String(), "n_ctx is not a number")
+}
+
+// A caps value that is not a boolean logs a WARN and reads as false;
+// the rest of the probe continues.
+func TestCapcompat_DetectLlamaServerCapsWrongType(t *testing.T) {
+	var buf bytes.Buffer
+	log := logmon.NewWriter(&buf)
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     []byte(`{"modalities":{},"chat_template_caps":{"supports_tools":"yes","supports_tool_calls":true},"default_generation_settings":{"n_ctx":4096}}`),
+	})
+
+	info, err := Detect(context.Background(), up.clientWithLogger(t, log), "model-a")
+	require.NoError(t, err)
+
+	assert.False(t, info.Capabilities.Tools)
+	assert.Equal(t, 4096, info.Capabilities.Context)
+	assert.Contains(t, buf.String(), "supports_tools is not a boolean")
+}
+
+// A /props that omits a block entirely: the probe continues, the fields
+// read as their zero values, and a warning names the missing block.
+func TestCapcompat_DetectLlamaServerNoModalities(t *testing.T) {
+	var buf bytes.Buffer
+	log := logmon.NewWriter(&buf)
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     []byte(`{"default_generation_settings":{"n_ctx":4096}}`),
+	})
+
+	info, err := Detect(context.Background(), up.clientWithLogger(t, log), "model-a")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.False(t, info.Capabilities.Tools, "no caps and no template, so no tool signal")
+	assert.Equal(t, 4096, info.Capabilities.Context)
+	assert.Contains(t, buf.String(), "has no modalities")
 }
 
 func TestCapcompat_DetectVLLM(t *testing.T) {
@@ -263,7 +422,7 @@ func TestCapcompat_DetectVLLM(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "meta-llama/Llama-3.1-8B-Instruct")
 	require.NoError(t, err)
 
-	assert.Equal(t, "default", info.Upstream)
+	assert.Equal(t, hint.VLLM, info.Upstream)
 	assert.Equal(t, 131072, info.Capabilities.Context)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
@@ -283,7 +442,7 @@ func TestCapcompat_DetectVLLMCapture(t *testing.T) {
 		info, err := Detect(context.Background(), up.client(t), "qwen3-4b-vllm")
 		require.NoError(t, err)
 
-		assert.Equal(t, "default", info.Upstream)
+		assert.Equal(t, hint.VLLM, info.Upstream)
 		assert.Equal(t, 40960, info.Capabilities.Context)
 		assert.Equal(t, []string{"text"}, info.Capabilities.In)
 		assert.Equal(t, []string{"text"}, info.Capabilities.Out)
@@ -338,12 +497,58 @@ func TestCapcompat_DetectGufo(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "qwen3.8-flash-next-gufo")
 	require.NoError(t, err)
 
-	assert.Equal(t, "default", info.Upstream)
+	assert.Equal(t, hint.OpenAICompatible, info.Upstream)
 	assert.Equal(t, 262144, info.Capabilities.Context)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 	assert.False(t, info.Capabilities.Tools, "gufo exposes nothing about tool support in /v1/models")
 	assert.Equal(t, 0, up.hits["/props"], "gufo has no /props to read")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
+func TestCapcompat_DetectRadiance(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "radiance", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "qwen35")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.Radiance, info.Upstream)
+	assert.Equal(t, 200000, info.Capabilities.Context)
+	assert.Equal(t, 0, up.hits["/props"], "radiance has no /props to read")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
+func TestCapcompat_DetectHipfire(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "hipfire", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "deepseek-v4-flash-mtp.mq2lloyd")
+	require.NoError(t, err)
+	assert.Equal(t, hint.Hipfire, info.Upstream)
+	assert.Zero(t, info.Capabilities.Context, "Hipfire does not publish the loaded context")
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools, "tool support is not advertised by the listing")
+	assert.Len(t, up.hits, 1, "only /v1/models is needed")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
+func TestCapcompat_DetectYamz(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "yamz", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "qwen-3.8-next-kyojin")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.Kyojin, info.Upstream, "kyojin lists its models as owned_by yamz")
+	assert.Equal(t, 262144, info.Capabilities.Context)
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools, "yamz exposes nothing about tool support in /v1/models")
 	require.NoError(t, info.Capabilities.Validate())
 }
 
@@ -356,7 +561,7 @@ func TestCapcompat_DetectHalogen(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "halogen-qwen3.8-flash-next")
 	require.NoError(t, err)
 
-	assert.Equal(t, "halogen", info.Upstream)
+	assert.Equal(t, hint.Halogen, info.Upstream)
 	assert.Equal(t, []string{"text", "image"}, info.Capabilities.In, "this build has a vision tower")
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 	assert.True(t, info.Capabilities.Tools)
@@ -429,6 +634,8 @@ func TestCapcompat_ModelEntryContextTokens(t *testing.T) {
 	}{
 		{"max_model_len wins", ModelEntry{MaxModelLen: 1, ContextLength: 2}, 1},
 		{"context_length next", ModelEntry{ContextLength: 2}, 2},
+		{"max_context after context_length", ModelEntry{MaxContext: 4, ContextLength: 2}, 2},
+		{"max_context next", ModelEntry{MaxContext: 4}, 4},
 		{"meta n_ctx last", func() ModelEntry {
 			var e ModelEntry
 			e.Meta.NCtx = 3
@@ -500,7 +707,7 @@ func TestCapcompat_ClientJoinsBasePathPrefix(t *testing.T) {
 	require.NoError(t, err)
 
 	var models ModelsResponse
-	require.NoError(t, NewClient(base, config.TimeoutsConfig{}).GetJSON(context.Background(), "/v1/models", &models))
+	require.NoError(t, NewClient(base, config.TimeoutsConfig{}, nil).GetJSON(context.Background(), "/v1/models", &models))
 	assert.Equal(t, "/upstream/prefix/v1/models", gotPath)
 }
 
@@ -514,7 +721,7 @@ func TestCapcompat_ClientSendsHeaders(t *testing.T) {
 
 	base, err := url.Parse(server.URL)
 	require.NoError(t, err)
-	c := NewClient(base, config.TimeoutsConfig{})
+	c := NewClient(base, config.TimeoutsConfig{}, nil)
 	c.SetHeader("Authorization", "Bearer secret")
 
 	var models ModelsResponse

@@ -4,7 +4,7 @@ summary: Configure concurrencyLimit and globalConcurrencyLimit, and understand q
 category: guides
 tags: [routing, queue, capacity, concurrency, concurrency-limit, max-concurrent-requests, global-concurrency-limit, rate-limit]
 config_keys: [routing, models.*.concurrencyLimit, globalConcurrencyLimit]
-updated: 2026-09-10
+updated: 2026-11-04
 ---
 
 # Routing capacity and request queues
@@ -42,3 +42,6 @@ Use this to protect shared hardware (CPU, disk, network) from being
 overwhelmed by traffic spread across many different models, which a per-model
 `concurrencyLimit` cannot do since it only counts requests to one model at a
 time.
+
+Both limits count a websocket, such as a `/v1/realtime` session, as one request
+for as long as it stays open; see `guides/api-integration/v1-realtime`.

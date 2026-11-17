@@ -56,9 +56,16 @@ logToStdout: "proxy"
 # - path is a sqlite database file path
 # - file-backed sqlite keeps activity logs across restarts
 # - retentionDays deletes activity logs older than this many days, default: 0 (keep forever)
+# - persistCaptures: keep request/response captures in a second sqlite file
+#   next to path, named with _captures added to the base name, so
+#   /path/to/file.sqlite stores captures in /path/to/file_captures.sqlite
+#   - optional, default: false (captures are kept in memory)
+#   - total size is capped by captureBuffer; the oldest captures are deleted
+#   - keep or move the two files together
 # store:
 #   path: /path/to/file.sqlite
 #   retentionDays: 30
+#   persistCaptures: true
 
 # metricsMaxInMemory: maximum number of metrics to keep in memory
 # - optional, default: 1000
@@ -67,9 +74,10 @@ logToStdout: "proxy"
 # - when persistent sqlite storage is defined in store.path this has no effect
 metricsMaxInMemory: 1000
 
-# captureBuffer: how many MBs to allocate for storing request/response captures
-# - optional, default: 10
+# captureBuffer: how many MBs of compressed request/response captures to keep
+# - optional, default: 5
 # - set to 0 to disable
+# - also caps the captures database file when store.persistCaptures is true
 captureBuffer: 15
 
 # ui.activity.session_id: ordered request headers used to identify sessions in
@@ -104,7 +112,8 @@ helpagent:
 
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
-# - the ${PORT} macro can be used in model.cmd and model.proxy settings
+# - the ${PORT} macro can be used in model.cmd, and elsewhere in that model once
+#   model.cmd uses it
 # - it is automatically incremented for every model that uses it
 startPort: 10001
 
@@ -114,6 +123,9 @@ startPort: 10001
 # - when true, a stream of loading messages will be sent to the client in the
 #   reasoning field so chat UIs can show that loading is in progress.
 # - see #366 for more details
+# - this is for chat clients. To show a real progress bar on the Models page,
+#   have your server report progress from its checkEndpoint: see the "Loading
+#   progress" section of guides/model-runtime/writing-cmd.
 sendLoadingState: true
 
 # includeAliasesInList: present aliases within the /v1/models OpenAI API listing
@@ -348,6 +360,23 @@ selectors:
       # - optional, default: 1
       spillover: 4
 
+  # fit picks the target that is cheapest to run right now: lowest total
+  # evict_cost of the models it would unload, then fewest models unloaded,
+  # then ready over starting over not loaded, then target order
+  # - needs routing.router.use: capacity; with any other router fit selectors
+  #   are ignored with a warning in the log and requests for them get a 404
+  # - targets must be local models
+  # - commented out because this example uses the group router
+  # "any-llama":
+  #   strategy: fit
+  #   targets: ["llama-70b", "llama-8b-q8", "llama-8b-q4"]
+  #   settings:
+  #     # true: respond 429 instead of choosing a target that unloads a model
+  #     # - only controls the selector's choice; the router may still unload
+  #     #   a model if another swap starts before this request reaches it
+  #     # - optional, default: false
+  #     no_evict: false
+
 # models: a dictionary of model configurations
 # - required
 # - each key is the model's ID, used in API requests
@@ -509,6 +538,8 @@ models:
     # - optional, default: empty dictionary
     # - while metadata can contains complex types it is recommended to keep it simple
     # - metadata is only passed through in /v1/models responses
+    # - it appears under meta.llamaswap and is never filtered, even when a key
+    #   shares a name with a generated field such as context_window
     metadata:
       # port will remain an integer
       port: ${PORT}

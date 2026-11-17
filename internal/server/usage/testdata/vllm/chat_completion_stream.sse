@@ -1,0 +1,4 @@
+data: {"id":"chatcmpl-a06db9ba64f2889c","object":"chat.completion.chunk","created":1793471428,"model":"qwen3-4b-vllm","choices":[],"usage":{"prompt_tokens":42,"total_tokens":269,"completion_tokens":227,"prompt_tokens_details":{"cached_tokens":0,"created_cache_tokens":32}},"system_fingerprint":"vllm-0.29.1rc1.dev452+g3df4ae153-2089c07a","metrics":{"time_to_first_token_ms":136.54924900038168,"generation_time_ms":1256.9018409994897,"queue_time_ms":0.021259002096485347,"mean_itl_ms":5.561512570794202,"tokens_per_second":162.90489248533362}}
+
+data: [DONE]
+

@@ -23,6 +23,7 @@
     onsend: () => void;
     onstop?: () => void;
     onkeydown?: (event: KeyboardEvent) => void;
+    onpaste?: (event: ClipboardEvent) => void;
     /** Buttons before the text, e.g. an attach button. */
     leading?: Snippet;
     /** Content above the text, e.g. attachment previews and errors. */
@@ -39,6 +40,7 @@
     onsend,
     onstop,
     onkeydown,
+    onpaste,
     leading,
     attachments,
   }: Props = $props();
@@ -66,7 +68,7 @@
   class="bg-card focus-within:border-ring focus-within:ring-ring/50 rounded-2xl border shadow-xs transition-[color,box-shadow] focus-within:ring-3"
   class:opacity-60={disabled && !streaming}
 >
-  {#if attachments}
+  {#if attachments && !isExpanded}
     {@render attachments()}
   {/if}
   <div class="flex items-end gap-1 p-1.5">
@@ -81,6 +83,7 @@
       {placeholder}
       {disabled}
       {onkeydown}
+      {onpaste}
       enterkeyhint="send"
     ></textarea>
     <Button
@@ -120,5 +123,12 @@
 </div>
 
 {#if isExpanded}
-  <TextEditDialog {value} {placeholder} onsave={saveExpanded} oncancel={() => (isExpanded = false)} />
+  <TextEditDialog
+    {value}
+    {placeholder}
+    {onpaste}
+    {attachments}
+    onsave={saveExpanded}
+    oncancel={() => (isExpanded = false)}
+  />
 {/if}

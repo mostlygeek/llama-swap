@@ -48,7 +48,8 @@ CMake build directories are keyed on the backend, so the two CUDA variants share
 them. Building one right after the other on the same machine reconfigures and
 recompiles from scratch — correct, because every install script clears
 `CMakeCache.txt` before configuring, but not incremental. CI is unaffected: each
-variant's jobs get their own runners and start cold anyway.
+variant's jobs get their own runners and seed ccache from that variant's
+published cache (see [Compiler cache](#compiler-cache)).
 
 ### Platforms
 
@@ -142,14 +143,56 @@ Which gives, concretely:
 |---|---|
 | `runtime.Dockerfile`, `rootless.Dockerfile`, this README | nothing |
 | `install-sd.sh` or `sd.Dockerfile` | sd, all three variants |
+| `ccache-build.sh` | all 5 projects of every variant |
 | `base-cuda.Dockerfile` | the base and all 5 projects of **both** CUDA variants; no Vulkan |
 | `CMAKE_CUDA_ARCHITECTURES` or `CUDA_VERSION` env var | the base and all 5 projects of the one variant being built, and its runtime image |
 | the built-in `CMAKE_CUDA_ARCHITECTURES`/`CUDA_VERSION` default for one variant, in `build-image.sh` | that variant only, and only the platform whose default changed |
+| `--consumer`, the `IK_CUDA_ARCHITECTURES` env var, or the `--consumer` list in `build-image.sh` | ik-llama only, of the one variant and platform it applies to, and that runtime image |
 | `base-vulkan.Dockerfile` | the Vulkan base and all 4 Vulkan projects; no CUDA |
 
 and means a project that overruns its own job no longer discards the ones that
 finished, reruns are idempotent, and a failed assemble can be retried without
 recompiling anything.
+
+### Compiler cache
+
+CI creates a new buildx builder for every job, so the BuildKit cache mount
+holding ccache starts empty each time. Without anything else, every nightly
+build would compile ik_llama.cpp's ~430 CUDA files from scratch: about 3h on a
+typical runner and over 5.5h on a slow one, which is longer than the job limit.
+
+`--stage=<project>` therefore keeps ccache in the registry, one mutable tag per
+project, variant and platform: `:ccache-<project>-<variant>[-<arch>]` in
+`CCACHE_REPO` (default `ghcr.io/mostlygeek/llama-swap-ccache`). Each run:
+
+1. seeds `/ccache` from that tag, pinned by digest, when it exists
+2. compiles, stopping after `COMPILE_TIMEOUT_MINUTES` if it is set (CI uses 285)
+3. publishes the updated cache to the tag (the `ccache` stage of the project's
+   Dockerfile), even when the compile failed or ran out of time
+4. publishes the artifacts image, which fails if the compile did not finish
+
+`ccache-build.sh` wraps the install script to do steps 1–3 inside the build,
+and logs the runner's CPU count and model, the compile time and the ccache hit
+rate. A compile stopped by the time limit fails that night's build, but the
+objects it compiled are kept, so the next run continues from there. A job
+cancelled by GitHub's own timeout publishes nothing. That is why
+`COMPILE_TIMEOUT_MINUTES` is set well below the job's `timeout-minutes`.
+
+Overwriting a tag leaves the previous cache image untagged. Those are in a
+package of their own so the `delete-stale-ccache` job in `unified-docker.yml`
+can delete every untagged version after each run without touching the base and
+artifacts images in `llama-swap-build`.
+
+The cache is not keyed on the upstream commit, since the point is to reuse
+objects across commits. ccache checks the compiler and every input of each
+object itself. An upstream change to a header that every CUDA file includes
+still means a full recompile.
+
+Editing `base-<backend>.Dockerfile` also empties every cache in practice. The
+rebuilt base gives the compilers new file timestamps, and ccache's default
+`compiler_check=mtime` treats that as a different compiler, so the next run
+compiles everything cold. Expect the nightly after a base change to take as
+long as a build without the cache.
 
 ### Driving it by hand
 
@@ -331,7 +374,7 @@ from `nvcc` altogether and those cards still need an image:
 |---|---|---|---|---|
 | `unified-cuda` | amd64 | 12.9.1 | `60;61;70;75;86;89` | Pascal (P100, GTX 10xx, P40), Volta (V100), Turing, Ampere, Ada |
 | `unified-cuda13` | amd64 | 13.3.1 | `75;80;86;89;90;100;120` | Turing (RTX 20xx, GTX 16xx, Quadro T-series), Ampere (A100, RTX 30xx), Ada (RTX 40xx), Hopper (H100), Blackwell (100 on datacenter parts, 120 on GeForce RTX 50xx and RTX PRO) |
-| `unified-cuda13` | arm64 | 13.3.1 | `90;100;120;121` | GB10 (DGX Spark) at 121, GH200 at 90, GB200 at 100, and a discrete GeForce or RTX PRO card in an aarch64 host at 120 |
+| `unified-cuda13` | arm64 | 13.3.1 | `121` | GB10 (DGX Spark) only. GH200, GB200 and discrete cards in an aarch64 host are not supported |
 
 Those are the compute capabilities compiled as SASS. For most entries CMake also
 emits PTX, so an architecture above one of them still runs by JIT-compiling that
@@ -364,6 +407,28 @@ dropping `100` does not leave GB200 covered by `120`.
 `121` is deliberately absent from the amd64 list. GB10 is a Grace SoC with no
 PCIe part, so sm_121 cannot appear in an x86 host; it is listed on arm64, where
 it is the whole point.
+
+**ik_llama.cpp on `unified-cuda13` amd64 is consumer cards only.** Its CUDA
+build is several times larger than the others', and ik changes a ggml header
+that every CUDA file includes most weeks, which misses every object in ccache.
+Compiled for the full list, that cold build overran the CI job's time limit. So
+`build-image.sh --consumer` sets `IK_CUDA_ARCHITECTURES` to
+`75-virtual;86-real;89-real;120-real` for that image, and ik_llama.cpp alone
+compiles for it. CI passes `--consumer` unless the `consumer` input of a
+manual run is unticked; a local build without the flag compiles ik_llama.cpp
+for the full list:
+
+| GPU | ik-llama-server |
+|---|---|
+| RTX 30xx, RTX A-series, A10/A40 (86), RTX 40xx, L4/L40 (89), RTX 50xx, RTX PRO Blackwell (120) | native code |
+| RTX 20xx, GTX 16xx, T4 (75) | JIT-compiled from PTX on first load, which can take minutes. The driver caches the result in `~/.nv/ComputeCache`; mount it as a volume and raise `CUDA_CACHE_MAXSIZE` so a new container does not pay it again |
+| A100 (80), H100/H200 (90), B200 (100) | not supported. They would JIT the 7.5 PTX, but ik picks kernels from the GPU's compute capability and can launch one that was never compiled and abort, as on Volta (issue #1185). Use llama.cpp in the same image |
+
+`/versions.txt` records the list as `ik_llama_cuda_architectures`. Set
+`IK_CUDA_ARCHITECTURES` when invoking `build-image.sh` to compile ik_llama.cpp
+for a list of your own, with or without `--consumer`.
+Unlike mainline ggml, ik_llama.cpp does not rewrite `120` to `120a`, so neither
+list gives it native Blackwell FP4 code.
 
 Pick `unified-cuda13` for a Turing (compute 7.5) or newer card and
 `unified-cuda` for anything older. `unified-cuda13` is a multi-arch tag, so on a

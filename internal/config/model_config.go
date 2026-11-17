@@ -41,11 +41,12 @@ var validOutModalities = map[string]struct{}{
 // Used in /v1/models to inform clients. An empty block (all zero values) is
 // treated as not configured.
 type ModelCapConfig struct {
-	In       []string `yaml:"in" json:"in,omitempty"`
-	Out      []string `yaml:"out" json:"out,omitempty"`
-	Tools    bool     `yaml:"tools" json:"tools,omitempty"`
-	Reranker bool     `yaml:"reranker" json:"reranker,omitempty"`
-	Context  int      `yaml:"context" json:"context,omitempty"`
+	In         []string `yaml:"in" json:"in,omitempty"`
+	Out        []string `yaml:"out" json:"out,omitempty"`
+	Tools      bool     `yaml:"tools" json:"tools,omitempty"`
+	Reranker   bool     `yaml:"reranker" json:"reranker,omitempty"`
+	Embeddings bool     `yaml:"embeddings" json:"embeddings,omitempty"`
+	Context    int      `yaml:"context" json:"context,omitempty"`
 
 	// Voices, when set, is returned as the response to
 	// GET /v1/audio/voices?model={id} instead of asking the upstream. It is
@@ -63,7 +64,7 @@ type ModelCapConfig struct {
 // DisableAuto is deliberately excluded: a block that only turns discovery off
 // still advertises nothing, so it must render as if it were absent.
 func (c ModelCapConfig) Empty() bool {
-	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && !c.Reranker && c.Context == 0
+	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && !c.Reranker && !c.Embeddings && c.Context == 0
 }
 
 // Merge returns c with every field left at its zero value filled in from
@@ -88,6 +89,9 @@ func (c ModelCapConfig) Merge(auto ModelCapConfig) ModelCapConfig {
 	}
 	if !merged.Reranker {
 		merged.Reranker = auto.Reranker
+	}
+	if !merged.Embeddings {
+		merged.Embeddings = auto.Embeddings
 	}
 	if merged.Context == 0 {
 		merged.Context = auto.Context

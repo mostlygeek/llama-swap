@@ -1,0 +1,6 @@
+data: {"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"thinking"},"finish_reason":null}]}
+
+data: {"object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":8,"total_tokens":11,"completion_tokens_details":{"reasoning_tokens":6}}}
+
+data: [DONE]
+

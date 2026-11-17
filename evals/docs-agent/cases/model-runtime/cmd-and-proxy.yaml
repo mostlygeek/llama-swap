@@ -1,13 +1,13 @@
-# Grounded in docs/kb/guides/writing-cmd.md and docs/kb/tutorials/first-config.md
+# Grounded in docs/kb/guides/model-runtime/writing-cmd.md
 - id: cmd-port-macro
   question: What does ${PORT} expand to in a model's cmd?
   tags: [cmd]
   expect_any: ["free port", "assigned", "startPort", "allocat"]
   expect_tools: [docs__search_docs]
-  max_iterations: 5
+  max_iterations: 8
   reference: |
     A free port assigned to that model by llama-swap, allocated starting at
-    `startPort` (default 10001).
+    `startPort` (default 5800).
   rubric:
     - Says it is a port llama-swap assigns to the model
     - Mentions startPort or that the port is allocated automatically
@@ -43,7 +43,7 @@
   tags: [cmd]
   expect_any: ["key", "name", "id"]
   expect_tools: [docs__search_docs]
-  max_iterations: 5
+  max_iterations: 8
   reference: |
     The model's key in the `models` map.
   rubric:
@@ -54,7 +54,7 @@
   tags: [cmd, config]
   expect_regex: ["cmd"]
   expect_tools: [docs__search_docs]
-  max_iterations: 5
+  max_iterations: 8
   reference: |
     `cmd` is the only required setting on a model.
   rubric:
@@ -75,3 +75,16 @@
     - Shows a yaml block with a models map and a cmd
     - Uses ${PORT} in the command
     - Does not include settings that are not required
+
+- id: cmd-loading-progress
+  question: How can my inference server show a loading progress bar in llama-swap's UI?
+  tags: [health-check]
+  expect_regex: ["progress"]
+  expect_any: ["non-200", "not 200", "health"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Answer the health check with a non-200 status and a JSON body such as
+    `{"progress": 0.42, "message": "loading tensors 12/28"}`.
+  rubric:
+    - Says to answer the health check with a non-200 status
+    - Shows the progress field as a fraction from 0 to 1

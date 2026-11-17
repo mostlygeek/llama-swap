@@ -2,9 +2,8 @@
 #
 # Runs the Docs Agent eval against a llama-swap built from the working tree.
 #
-# The server has to be built from this branch: /api/mcp does not exist in
-# releases, and docs/kb is compiled in by //go:embed, so a KB edit is only
-# visible after a rebuild. Everything the agent model needs comes through the
+# The server has to be built from this branch: docs/kb is compiled in by
+# //go:embed, so a KB edit is only visible after a rebuild. Everything the agent model needs comes through the
 # same server, via peers, so there is only ever one base URL.
 #
 # The server is started with fixture/ merged in through -config-dir. That is
@@ -106,7 +105,7 @@ fi
 
 echo "==> $BASE_URL is up; running eval with $MODEL"
 cd ui
-exec npm run --silent agent -- eval \
+npm run --silent agent -- eval \
   --base-url "$BASE_URL" \
   --model "$MODEL" \
   --concurrency "$CONCURRENCY" \

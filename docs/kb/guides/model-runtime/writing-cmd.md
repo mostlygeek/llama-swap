@@ -4,7 +4,7 @@ summary: Minimal model config using cmd and ${PORT}, plus proxy, checkEndpoint l
 category: guides
 tags: [cmd, port, proxy, model-id, check-endpoint, health-check, loading-progress, tools, tool-calling, jinja, llama-server, minimal, configuration, getting-started, docker, container]
 config_keys: [models.*.cmd, models.*.proxy, models.*.checkEndpoint, models.*.env, startPort, healthCheckTimeout]
-updated: 2026-10-07
+updated: 2026-11-04
 ---
 
 # Writing the `cmd` for a model
@@ -53,7 +53,7 @@ cmd: |
 
 | macro | expands to | available in |
 | --- | --- | --- |
-| `${PORT}` | a free port assigned to this model, starting at `startPort` (default 5800) | `cmd`, `proxy`, `metadata` |
+| `${PORT}` | a free port assigned to this model, starting at `startPort` (default 5800) | `cmd`, and anywhere else in the model once `cmd` uses it |
 | `${MODEL_ID}` | the model's key from the `models` map | anywhere in the model, and in global macros |
 | `${PID}` | the upstream process id | `cmdStop` only |
 

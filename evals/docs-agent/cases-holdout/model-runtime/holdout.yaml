@@ -68,10 +68,12 @@
   expect_regex: ["capabilities"]
   expect_tools: [docs__search_docs]
   reference: |
-    Set the model's `capabilities` block, which is what /v1/models reports to
-    clients. It is advertising only.
+    llama-server models are discovered automatically once loaded. Otherwise set
+    the model's `capabilities` block, `in: [text, image]`, which is what
+    /v1/models reports to clients. It is advertising only.
   rubric:
     - Names the model capabilities block
+    - Says discovery fills it in for llama-server, or that it is only needed for servers discovery cannot read
     - Notes capabilities are advertising only
 
 - id: holdout-unload-everything

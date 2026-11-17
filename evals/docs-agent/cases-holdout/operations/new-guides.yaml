@@ -9,3 +9,61 @@
   expect_regex: ["captureBuffer"]
   expect_tools_any: [docs__search_docs, docs__get_doc]
   require_tools: true
+
+- id: holdout-captures-off
+  question: How do I turn request captures off completely?
+  tags: [captures, holdout]
+  expect_regex: ["captureBuffer"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `captureBuffer: 0`. Stored captures stay in the file, hidden until captures
+    are turned back on.
+  rubric:
+    - Gives captureBuffer 0
+    - Says stored captures are hidden rather than deleted
+
+- id: holdout-logtostdout-reload
+  question: I changed logToStdout and reloaded the config, but nothing changed. Why?
+  tags: [logs, holdout]
+  expect_any: ["restart", "startup"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    It is read at startup only. Restart llama-swap.
+  rubric:
+    - Says logToStdout is read at startup only
+    - Says to restart llama-swap
+
+- id: holdout-tailcat-reload
+  question: Which Tailcat settings can change with a config reload, and what needs a llama-swap restart?
+  tags: [tailcat, holdout]
+  expect_regex: ["allow", "listen-tailcat|listener key"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `allow`, `models`, `admin` and `debug` apply on reload. Only the listener
+    key, `-listen-tailcat`, needs a restart.
+  rubric:
+    - Lists allow, models, admin and debug as reloadable
+    - Says only the listener key needs a restart
+
+- id: holdout-hipfire-decode
+  question: Hipfire reports no decode rate on a multi-slot route. Does llama-swap use hipfire.tok_s for the Decode column?
+  tags: [metrics, holdout]
+  expect_any: ["\\bno\\b", "not", "unknown"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. `hipfire.tok_s` includes prefill time, so Decode stays unknown.
+  rubric:
+    - Says Decode stays unknown
+    - Says tok_s includes prefill time
+
+- id: holdout-kubeswap-crashloop
+  question: A kubeswap backend pod shows CrashLoopBackOff. Where do I look for the reason?
+  tags: [kubeswap, holdout]
+  expect_regex: ["kubeswap logs"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `kubeswap logs --model <id>`. The engine died while loading, so look for a
+    bad model path, OOM, missing libraries or wrong flags.
+  rubric:
+    - Gives kubeswap logs
+    - Names a likely cause such as a bad model path

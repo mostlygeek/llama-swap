@@ -9,3 +9,35 @@
   expect_any: ["\\|", "pipe"]
   expect_tools_any: [docs__search_docs, docs__get_doc]
   require_tools: true
+
+- id: holdout-evict-cost-default
+  question: What is the default evict_cost of a model under the capacity router?
+  tags: [routing, capacity, holdout]
+  expect_regex: ["\\b0\\b"]
+  expect_tools_any: [docs__search_docs, docs__get_config_schema]
+  reference: |
+    0. `evict_cost` is an optional nonnegative integer. Matrix's `evict_costs`
+    defaults to 1, which is the easy one to confuse it with.
+  rubric:
+    - Gives 0
+    - Does not give matrix's default of 1
+
+- id: holdout-selector-upstream
+  question: Can I use a selector in an /upstream/<model> URL?
+  tags: [routing, selectors, holdout]
+  expect_any: ["\\bno\\b", "not"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. Selectors are not supported on /upstream/<model> paths.
+  rubric:
+    - Answers no
+
+- id: holdout-capacity-peer-models
+  question: Do peer models use up any of the capacity router's local pools?
+  tags: [routing, capacity, peers, holdout]
+  expect_any: ["\\bno\\b", "not", "zero"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. Peer models consume no local capacity.
+  rubric:
+    - Answers no

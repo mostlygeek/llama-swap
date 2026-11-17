@@ -18,7 +18,7 @@ const (
 	maxSearchResultBytes = 8 * 1024
 	maxSchemaResultBytes = 8 * 1024
 
-	defaultDocMaxLines = 250
+	defaultDocMaxLines = 400
 
 	// MaxDocLines is exported so transport tests can assert the clamp.
 	MaxDocLines    = 400

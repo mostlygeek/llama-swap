@@ -1,16 +1,17 @@
-# Grounded in docs/kb/guides/groups-and-matrix.md and guides/profiles-and-selectors.md
-- id: routing-two-routers
-  question: What are the two routing engines in llama-swap and how do I choose one?
+# Grounded in docs/kb/guides/routing/groups-and-matrix.md and profiles-and-selectors.md
+- id: routing-three-routers
+  question: What routing engines does llama-swap have and how do I choose one?
   tags: [routing]
-  expect_regex: ["group", "matrix"]
+  expect_regex: ["group", "matrix", "capacity"]
   expect_any: ["routing", "router"]
   expect_tools: [docs__search_docs]
   reference: |
-    `group` and `matrix`, selected with `routing.router.use`. group is the
-    default and simpler; matrix takes a list of allowed concurrent
-    combinations and solves for the cheapest way to satisfy a request.
+    `group`, `matrix` and `capacity`, selected with `routing.router.use`.
+    group is the default and simpler; matrix takes a list of allowed concurrent
+    combinations and solves for the cheapest way to satisfy a request; capacity
+    allows any combination that fits declared resource pools.
   rubric:
-    - Names both group and matrix
+    - Names group, matrix and capacity
     - Shows or names routing.router.use as the selector
 
 - id: routing-group-flags
@@ -31,7 +32,7 @@
   tags: [routing]
   expect_any: ["only one", "one group", "cannot", "can't", "no"]
   expect_tools: [docs__search_docs]
-  max_iterations: 5
+  max_iterations: 8
   reference: |
     No. A model can belong to only one group.
   rubric:
@@ -62,3 +63,40 @@
   rubric:
     - Describes profiles as switching a set of models at runtime
     - Describes selectors as resolving a virtual model id per request
+
+- id: routing-capacity-pools
+  question: I want any combination of models to run as long as they fit in my RAM, without listing the combinations. How?
+  tags: [routing, capacity]
+  expect_regex: ["capacity", "pools", "capacities"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Use the capacity router: `routing.router.use: capacity`, declare limits
+    under `routing.router.settings.capacity.pools`, and give each model
+    `capacities` in the same unit.
+  rubric:
+    - Selects the capacity router
+    - Shows pools and per-model capacities
+
+- id: routing-selector-warm
+  question: Which selector strategy uses whatever model is already loaded instead of making me wait?
+  tags: [routing, selectors]
+  expect_regex: ["warm"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `warm`: the first target already ready, then one already starting, and
+    failing that a cold start of the first.
+  rubric:
+    - Names the warm strategy
+    - Describes the ready, then starting, then cold start order
+
+- id: routing-queue-priority
+  question: How do I make queued requests for my interactive model go ahead of batch model requests?
+  tags: [routing, scheduler]
+  expect_regex: ["priority"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `routing.scheduler.settings.fifo.priority` per model. Higher numbers
+    are serviced first and models default to 0.
+  rubric:
+    - Shows the fifo priority block
+    - Says higher numbers go first

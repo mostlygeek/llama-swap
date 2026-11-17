@@ -13,7 +13,7 @@ import (
 
 func TestStore_InsertListAndFilterActivity(t *testing.T) {
 	ctx := context.Background()
-	st, err := New("")
+	st, err := New("", "")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestStore_InsertListAndFilterActivity(t *testing.T) {
 func seedFilterActivity(t *testing.T) (*Store, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	st, err := New("")
+	st, err := New("", "")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestStore_ListActivityFilterCombinedPaging(t *testing.T) {
 
 func TestStore_ListActivitySort(t *testing.T) {
 	ctx := context.Background()
-	st, err := New("")
+	st, err := New("", "")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestStore_ListActivitySort(t *testing.T) {
 
 func TestStore_ActivityStats(t *testing.T) {
 	ctx := context.Background()
-	st, err := New("")
+	st, err := New("", "")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestStore_ActivityStats(t *testing.T) {
 
 func TestStore_PruneActivity(t *testing.T) {
 	ctx := context.Background()
-	st, err := New("")
+	st, err := New("", "")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestStore_NewFilePersistsActivity(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "llama-swap.sqlite")
 
-	st, err := New(path)
+	st, err := New(path, "")
 	if err != nil {
 		t.Fatalf("New file store: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestStore_NewFilePersistsActivity(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	st, err = New(path)
+	st, err = New(path, "")
 	if err != nil {
 		t.Fatalf("reopen file store: %v", err)
 	}
@@ -433,31 +433,35 @@ func TestStore_NewFilePersistsActivity(t *testing.T) {
 	}
 }
 
-// The activity rows carry request paths, metadata and error messages, so the
-// database file must not be readable by other users.
+// Activity rows and captures carry request paths, bodies, metadata and error
+// messages, so neither database file may be readable by other users.
 func TestStore_NewFileIsOwnerOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("no POSIX file modes on Windows")
 	}
-	path := filepath.Join(t.TempDir(), "llama-swap.sqlite")
-	st, err := New(path)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "llama-swap.sqlite")
+	capturesPath := filepath.Join(dir, "llama-swap_captures.sqlite")
+	st, err := New(path, capturesPath)
 	if err != nil {
 		t.Fatalf("New file store: %v", err)
 	}
 	defer st.Close()
 
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("file mode = %v, want 0600", perm)
+	for _, p := range []string{path, capturesPath} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("Stat: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("%s mode = %v, want 0600", p, perm)
+		}
 	}
 }
 
 func TestStore_NewFileUsesWAL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "llama-swap.sqlite")
-	st, err := New(path)
+	st, err := New(path, "")
 	if err != nil {
 		t.Fatalf("New file store: %v", err)
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
@@ -56,9 +57,10 @@ type Server struct {
 	// discovery; Service methods are nil-receiver safe.
 	capcompat *capcompat.Service
 
-	// capcompatCancel unsubscribes the process-state listener that drives
-	// discovery. The event dispatcher is process-wide, so a hot config reload
-	// would otherwise leave the retired Server probing alongside the new one.
+	// capcompatCancel unsubscribes the listener that stores what processes
+	// detect about their upstream. The event dispatcher is process-wide, so a
+	// hot config reload would otherwise leave the retired Server storing
+	// alongside the new one.
 	capcompatCancel context.CancelFunc
 
 	// tools is the MCP tool surface served at /api/mcp. Providers are
@@ -69,6 +71,10 @@ type Server struct {
 
 	profileMu     sync.RWMutex
 	activeProfile string
+
+	// pause rejects requests for local models while inference is paused. It
+	// is shared across the Server instances a hot config reload creates.
+	pause *PauseState
 
 	local router.LocalRouter
 	peer  router.Router
@@ -178,27 +184,63 @@ var modelGetRoutes = []string{
 	"/v1/audio/voices",
 	"/sdapi/v1/loras",
 	"/props",
+
+	// websocket upgrade, OpenAI Realtime API style (?model=..., or the
+	// model named by the first session.update event)
+	"/v1/realtime",
 }
 
-// isMetricsRecordPath reports whether path is one of the model-dispatched
-// endpoints that the metrics middleware records in the activity log.
-func isMetricsRecordPath(path string) bool {
-	for _, p := range modelPostJSONRoutes {
-		if p == path {
-			return true
-		}
-	}
-	for _, p := range modelPostFormRoutes {
-		if p == path {
-			return true
-		}
-	}
-	for _, p := range modelGetRoutes {
-		if p == path {
-			return true
-		}
-	}
-	return false
+// meteredRoutes maps every endpoint the metrics middleware records to the
+// kind of inference it performs. A path is metered if and only if it is
+// listed here, so the table is both the gate and the task label. Listing-only
+// endpoints such as /v1/audio/voices, /props and /sdapi/v1/loras are left out.
+var meteredRoutes = map[string]hint.Task{
+	"/v1/chat/completions": hint.TaskChat,
+	"/v1/responses":        hint.TaskChat,
+	"/v1/completions":      hint.TaskChat,
+	"/v1/messages":         hint.TaskChat,
+	"/completion":          hint.TaskChat,
+	"/infill":              hint.TaskChat,
+
+	"/v1/embeddings": hint.TaskEmbedding,
+
+	"/rerank":       hint.TaskRerank,
+	"/reranking":    hint.TaskRerank,
+	"/v1/rerank":    hint.TaskRerank,
+	"/v1/reranking": hint.TaskRerank,
+
+	"/v1/messages/count_tokens": hint.TaskTokenCount,
+
+	"/v1/images/generations": hint.TaskImageGeneration,
+	"/sdapi/v1/txt2img":      hint.TaskImageGeneration,
+	"/v1/images/edits":       hint.TaskImageEdit,
+	"/sdapi/v1/img2img":      hint.TaskImageEdit,
+
+	"/v1/audio/speech":         hint.TaskSpeech,
+	"/v1/audio/transcriptions": hint.TaskTranscription,
+
+	"/v1/systemone":          hint.TaskDecision,
+	"/audioapi/v1/tasks/run": hint.TaskAudio,
+
+	// a websocket, recorded once per session when it closes
+	"/v1/realtime": hint.TaskRealtime,
+
+	// versionless routes, see issue #728
+	"/v/chat/completions":      hint.TaskChat,
+	"/v/responses":             hint.TaskChat,
+	"/v/completions":           hint.TaskChat,
+	"/v/messages":              hint.TaskChat,
+	"/v/messages/count_tokens": hint.TaskTokenCount,
+	"/v/embeddings":            hint.TaskEmbedding,
+	"/v/rerank":                hint.TaskRerank,
+	"/v/reranking":             hint.TaskRerank,
+}
+
+// meteredTask reports the task for a metered endpoint path, and whether the
+// path is metered at all.
+func meteredTask(path string) (hint.Task, bool) {
+	task, ok := meteredRoutes[path]
+	return task, ok
 }
 
 // BuildInfo carries version metadata surfaced by GET /api/version.
@@ -214,7 +256,10 @@ type BuildInfo struct {
 // code serves llama-swap's own source over MCP. It is built once by the caller
 // and shared across reloads, so its checkout is fetched once per process; nil
 // leaves the code__* tools out.
-func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs, code *sourcecode.Provider) (*Server, error) {
+//
+// pause is shared across reloads too, so a reload keeps inference paused; nil
+// starts a fresh, unpaused state.
+func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs, code *sourcecode.Provider, pause *PauseState) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
@@ -250,6 +295,11 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 		retentionDays = cfg.Store.RetentionDays
 	}
 
+	if pause == nil {
+		pause = NewPauseState()
+	}
+	local.SetStartGate(pause.startGate)
+
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	s := &Server{
 		cfg:           cfg,
@@ -262,13 +312,14 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 		hardware:      hardware,
 		reference:     refs,
 		activeProfile: cfg.Hooks.OnStartup.Profile,
+		pause:         pause,
 		local:         local,
 		peer:          peer,
 		shutdownCtx:   shutdownCtx,
 		shutdownFn:    shutdownFn,
 	}
 	s.capcompat = capcompat.New(st.Cache(), logs.ProxyLogs)
-	s.capcompatCancel = event.On(s.onProcessStateChange)
+	s.capcompatCancel = event.On(s.onUpstreamDetected)
 
 	// SysProvider is constructed here because this is where perf and hardware
 	// are in scope; wiring those in later is a change to internal/mcptools.
@@ -310,7 +361,7 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case s.local.Handles(data.ModelID):
 		s.logs.ProxyLogs.Debugf("dispatch: using local process for model: %s", data.ModelID)
-		s.local.ServeHTTP(w, r)
+		s.serveLocal(w, r)
 	case s.peer.Handles(data.ModelID):
 		s.logs.ProxyLogs.Debugf("dispatch: using peer for model: %s", data.ModelID)
 		s.peer.ServeHTTP(w, r)
@@ -391,7 +442,17 @@ func (s *Server) routes() {
 		mux.Handle("POST "+path, modelChain.Then(dispatch))
 	}
 	for _, path := range modelGetRoutes {
-		mux.Handle("GET "+path, modelChain.Then(dispatch))
+		h := modelChain.Then(dispatch)
+		switch path {
+		case "/v1/realtime":
+			// Realtime transcription clients name the model in a
+			// session.update event rather than the URL; see realtime_defer.go.
+			h = deferRealtimeModel(authMW, h)
+		case "/props":
+			// autoload=false must not start the model; see props.go.
+			h = modelChain.ThenFunc(s.handleProps)
+		}
+		mux.Handle("GET "+path, h)
 	}
 
 	// llama-swap API + custom endpoints.
@@ -461,6 +522,8 @@ func (s *Server) routes() {
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiStateChain.ThenFunc(s.handleAPIUnloadAll))
 	mux.Handle("POST /api/models/unload/{model...}", apiStateChain.ThenFunc(s.handleAPIUnloadModel))
+	mux.Handle("POST /api/models/pause", apiStateChain.ThenFunc(s.handleAPIPause))
+	mux.Handle("POST /api/models/resume", apiStateChain.ThenFunc(s.handleAPIResume))
 	mux.Handle("GET /api/profiles", apiChain.ThenFunc(s.handleAPIProfiles))
 	mux.Handle("PUT /api/profiles/active", apiStateChain.ThenFunc(s.handleAPIActiveProfile))
 	mux.Handle("POST /api/models/sleep/{model...}", apiStateChain.ThenFunc(s.handleAPISleepModel))
@@ -661,5 +724,14 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 	}
 
 	wg.Wait()
+
+	// Stop the capture prune goroutine before the caller closes the store.
+	// A request still finishing can store a capture after this; its prune
+	// request is dropped and the next server's pruner catches up.
+	if s.metrics != nil {
+		if err := s.metrics.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return errors.Join(errs...)
 }

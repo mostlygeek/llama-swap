@@ -13,6 +13,11 @@ on:
       - "cmd/kubeswap/**"
       - "go.mod"
       - "go.sum"
+      # copied into docs/ by go generate; TestDocs_GeneratedFilesAreCurrent
+      - "config-schema.json"
+      - "ui/src/lib/prompts/docsAgent.ts"
+      - "docs/config-schema.json"
+      - "docs/docs-agent-prompt.md"
       - "Makefile"
       - ".github/workflows/go-ci.yml"
 
@@ -24,6 +29,11 @@ on:
       - "cmd/kubeswap/**"
       - "go.mod"
       - "go.sum"
+      # copied into docs/ by go generate; TestDocs_GeneratedFilesAreCurrent
+      - "config-schema.json"
+      - "ui/src/lib/prompts/docsAgent.ts"
+      - "docs/config-schema.json"
+      - "docs/docs-agent-prompt.md"
       - "Makefile"
       - ".github/workflows/go-ci.yml"
 

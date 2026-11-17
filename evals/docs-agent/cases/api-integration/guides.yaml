@@ -1,0 +1,119 @@
+# Grounded in docs/kb/guides/api-integration/cors.md, set-if-undefined.md,
+# filters-and-request-rewriting.md, v1-realtime.md and mcp-endpoint.md
+- id: cors-allow-one-origin
+  question: How do I make llama-swap send CORS headers only to https://dashboard.example.com?
+  tags: [cors]
+  expect_regex: ["allowedOrigins", "dashboard\\.example\\.com"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    ```yaml
+    security:
+      cors:
+        allowedOrigins: ["https://dashboard.example.com"]
+    ```
+    Once allowedOrigins is set, only the listed origins get CORS headers.
+  rubric:
+    - Shows security.cors.allowedOrigins in a yaml snippet
+    - Says other origins get no CORS headers
+
+- id: cors-curl-no-headers
+  question: curl shows no Access-Control headers in llama-swap's responses. Is CORS broken?
+  tags: [cors, troubleshooting]
+  expect_regex: ["origin"]
+  expect_any: ["\\bno\\b", "not", "expected"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No, that is expected. Headers are only sent when the request carries an
+    `Origin`, and curl does not send one. Add `-H 'Origin: http://example.com'`
+    to see what a browser gets.
+  rubric:
+    - Says this is expected behaviour
+    - Explains headers depend on the request's Origin header
+
+- id: set-if-undefined-default
+  question: How do I give a model a default max_tokens that a client can still override per request?
+  tags: [filters]
+  expect_regex: ["max_tokens\\?"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Append `?` to the key in setParams: `max_tokens?: 4096`. It applies only
+    when the request does not already carry that parameter.
+  rubric:
+    - Shows the max_tokens? key under filters.setParams
+    - Says a value sent by the client wins
+
+- id: filters-params-by-id
+  question: How can one loaded model be offered under several model ids with different parameters, without a reload?
+  tags: [filters]
+  expect_regex: ["setParamsByID"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `filters.setParamsByID` maps a model ID to parameters and creates an alias
+    for each key. All of them hit the same running process, with no swap.
+  rubric:
+    - Names filters.setParamsByID
+    - Says each key becomes an alias of the same running process
+
+- id: realtime-endpoint
+  question: Which endpoint gives me speech to speech voice chat with a model through llama-swap?
+  tags: [realtime]
+  expect_regex: ["/v1/realtime"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `/v1/realtime?model=<id>`, a websocket in the style of OpenAI's Realtime
+    API. llama-swap starts or swaps the model and passes the websocket through.
+  rubric:
+    - Gives /v1/realtime with the model in the query
+    - Says it is a websocket
+
+- id: realtime-mmproj
+  question: Besides the main GGUF, what does an LFM3 Audio model need in its cmd for /v1/realtime to work?
+  tags: [realtime, cmd]
+  expect_regex: ["mmproj"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    The `--mmproj` file. It carries both the audio encoder and the speech
+    generator.
+  rubric:
+    - Names the --mmproj file
+    - Says it carries the audio encoder and speech generator
+
+- id: realtime-mic-over-http
+  question: The Playground's Realtime tab says microphone unavailable when I open http://myserver:8080. Why?
+  tags: [realtime, troubleshooting]
+  expect_any: ["secure context", "https", "localhost"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Browsers only give a page the microphone in a secure context: https, or a
+    page opened as localhost. Use an SSH tunnel and open http://localhost:8080,
+    a browser flag, or https.
+  rubric:
+    - Attributes it to the browser requiring a secure context
+    - Gives at least one workaround
+
+- id: mcp-disable-help
+  question: How do I turn off the Help page and the MCP endpoint on my instance?
+  tags: [mcp]
+  expect_regex: ["helpagent", "disable"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    ```yaml
+    helpagent:
+      disable: true
+    ```
+    The Help item leaves the sidebar and /api/mcp answers 404.
+  rubric:
+    - Shows helpagent.disable set to true
+    - Says it covers both the Help page and /api/mcp
+
+- id: mcp-protocol-version
+  question: My MCP client gets an "unsupported protocol version" error from llama-swap. What do I change?
+  tags: [mcp, troubleshooting]
+  expect_regex: ["2026-07-28"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Update the client. The endpoint speaks MCP revision 2026-07-28 only, and
+    there is nothing to configure on the llama-swap side.
+  rubric:
+    - Names revision 2026-07-28
+    - Says the client needs updating, not llama-swap

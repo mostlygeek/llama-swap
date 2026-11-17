@@ -1,0 +1,49 @@
+# Grounded in docs/kb/guides/upstreams/comfyui.md and audiocpp.md
+- id: upstream-comfyui-setup
+  question: How do I run ComfyUI behind llama-swap so its open websocket does not block model swapping?
+  tags: [comfyui]
+  expect_regex: ["comfyui_auto", "/comfyui/"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Name the model exactly `comfyui_auto` and use `/comfyui/`, which forces
+    `compat.ignoreWebsockets` on.
+  rubric:
+    - Gives the reserved model id and the endpoint
+    - Sets checkEndpoint or cmdStop for the container
+
+- id: upstream-audiocpp-ui
+  question: How do I reach audio.cpp's own web UI through llama-swap?
+  tags: [audiocpp]
+  expect_regex: ["audiocpp_auto", "/audiocpp/"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Name the model exactly `audiocpp_auto` and open `/audiocpp/`. Start
+    `audiocpp_server` with `--ui`.
+  rubric:
+    - Gives the reserved model id and the endpoint
+    - Mentions the --ui flag
+
+- id: hard-comfyui-alias
+  question: My model is called comfy with the alias comfyui_auto, and /comfyui/ answers 404. Why?
+  tags: [comfyui, trap]
+  expect_regex: ["alias"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    The lookup is by model ID, so an alias does not work. Rename the model
+    itself to `comfyui_auto`.
+  rubric:
+    - Says aliases do not work on /comfyui/
+    - Says to rename the model
+
+- id: hard-comfyui-unloads-during-render
+  question: My ComfyUI model unloads while I watch a long render. Why, and what do I change?
+  tags: [comfyui, ttl, trap]
+  expect_regex: ["ttl"]
+  expect_any: ["websocket", "idle"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Websocket traffic is ignored, so it does not reset the ttl timer and a long
+    render counts as idle. Use a longer ttl, or `ttl: 0`.
+  rubric:
+    - Says websocket traffic does not reset the timer
+    - Suggests a longer ttl or ttl 0

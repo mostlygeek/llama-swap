@@ -9,3 +9,41 @@
   expect_regex: ["sendLoadingState", "true"]
   expect_tools_any: [docs__search_docs, docs__get_doc]
   require_tools: true
+
+- id: capabilities-auto-discovery
+  question: Do I need to write a capabilities block for a llama-server vision model?
+  tags: [capabilities]
+  expect_any: ["automatic", "discover", "detect"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. llama-swap asks the server what it supports through automatic discovery
+    the first time the model becomes ready, and reports context length and
+    image input in /v1/models on its own.
+  rubric:
+    - Says no block is needed
+    - Says the values appear once the model has been loaded
+
+- id: capabilities-embeddings-flag
+  question: How do I mark an embedding model so /v1/models can tell it apart from a chat model?
+  tags: [capabilities, embeddings]
+  expect_regex: ["embeddings:\\s*true"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `capabilities: { embeddings: true }` by hand, in the form
+    `embeddings: true`. Discovery never fills it in, because no endpoint can
+    tell an embedding model from a chat model.
+  rubric:
+    - Shows capabilities.embeddings true
+    - Says it has to be set by hand
+
+- id: capabilities-voices
+  question: How do I define the voice list for a text to speech model in the config?
+  tags: [capabilities, speech]
+  expect_regex: ["voices"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `capabilities.voices`. GET /v1/audio/voices is then answered from the
+    config without starting the model.
+  rubric:
+    - Names capabilities.voices
+    - Says the model is not started to answer

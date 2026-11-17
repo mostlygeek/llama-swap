@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"github.com/mostlygeek/llama-swap/internal/mcpserver"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -74,10 +75,10 @@ func newMCPServer() *Server {
 }
 
 type rpcEnvelope struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  json.RawMessage `json:"result"`
-	Error   *rpcError       `json:"error"`
+	JSONRPC string              `json:"jsonrpc"`
+	ID      json.RawMessage     `json:"id"`
+	Result  json.RawMessage     `json:"result"`
+	Error   *mcpserver.RPCError `json:"error"`
 }
 
 // mcpRequest posts a JSON-RPC body with the standard MCP headers. A blank
@@ -87,13 +88,13 @@ func mcpRequest(body, version, method, name string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, "/api/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if version != "" {
-		req.Header.Set(headerMCPProtocolVersion, version)
+		req.Header.Set(mcpserver.HeaderProtocolVersion, version)
 	}
 	if method != "" {
-		req.Header.Set(headerMCPMethod, method)
+		req.Header.Set(mcpserver.HeaderMethod, method)
 	}
 	if name != "" {
-		req.Header.Set(headerMCPName, name)
+		req.Header.Set(mcpserver.HeaderName, name)
 	}
 	return req
 }
@@ -109,7 +110,7 @@ func rpc(t *testing.T, s *Server, method, name, params string) (*httptest.Respon
 	body += `}`
 
 	w := httptest.NewRecorder()
-	s.ServeHTTP(w, mcpRequest(body, mcpProtocolVersion, method, name))
+	s.ServeHTTP(w, mcpRequest(body, mcpserver.ProtocolVersion, method, name))
 
 	var env rpcEnvelope
 	if w.Code == http.StatusOK {
@@ -145,6 +146,9 @@ func callToolRPC(t *testing.T, s *Server, name, args string) callToolResult {
 	return result
 }
 
+// callToolResult is the wire result, redeclared so the test can add text().
+type callToolResult mcpserver.CallToolResult
+
 // text joins a result's text blocks the way a client would.
 func (r callToolResult) text() string {
 	var parts []string
@@ -178,7 +182,7 @@ func TestServer_APIMCP_DisabledWithoutReference(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 
 	w := httptest.NewRecorder()
-	s.ServeHTTP(w, mcpRequest(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, mcpProtocolVersion, "tools/list", ""))
+	s.ServeHTTP(w, mcpRequest(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, mcpserver.ProtocolVersion, "tools/list", ""))
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", w.Code)
@@ -193,10 +197,10 @@ func TestServer_APIMCP_DisabledWithoutReference(t *testing.T) {
 }
 
 func TestServer_APIMCP_RejectsOversizedBody(t *testing.T) {
-	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + strings.Repeat("x", maxMCPBodyBytes) + `"}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + strings.Repeat("x", mcpserver.MaxBodyBytes) + `"}}`
 
 	w := httptest.NewRecorder()
-	newMCPServer().ServeHTTP(w, mcpRequest(body, mcpProtocolVersion, "tools/call", "x"))
+	newMCPServer().ServeHTTP(w, mcpRequest(body, mcpserver.ProtocolVersion, "tools/call", "x"))
 
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413", w.Code)
@@ -237,8 +241,8 @@ func TestServer_APIMCP_RejectsUnsupportedProtocolVersion(t *testing.T) {
 			if env.Error == nil {
 				t.Fatalf("want an error, got result %s", env.Result)
 			}
-			if env.Error.Code != codeUnsupportedProtocolVersion {
-				t.Errorf("code = %d, want %d", env.Error.Code, codeUnsupportedProtocolVersion)
+			if env.Error.Code != mcpserver.CodeUnsupportedProtocolVersion {
+				t.Errorf("code = %d, want %d", env.Error.Code, mcpserver.CodeUnsupportedProtocolVersion)
 			}
 
 			var data struct {
@@ -248,8 +252,8 @@ func TestServer_APIMCP_RejectsUnsupportedProtocolVersion(t *testing.T) {
 			if err := json.Unmarshal(env.Error.Data, &data); err != nil {
 				t.Fatalf("decoding error data: %v", err)
 			}
-			if len(data.Supported) != 1 || data.Supported[0] != mcpProtocolVersion {
-				t.Errorf("supported = %v, want [%s]", data.Supported, mcpProtocolVersion)
+			if len(data.Supported) != 1 || data.Supported[0] != mcpserver.ProtocolVersion {
+				t.Errorf("supported = %v, want [%s]", data.Supported, mcpserver.ProtocolVersion)
 			}
 			if data.Requested != tt.version {
 				t.Errorf("requested = %q, want %q", data.Requested, tt.version)
@@ -297,7 +301,7 @@ func TestServer_APIMCP_ValidatesStandardHeaders(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			s.ServeHTTP(w, mcpRequest(tt.body, mcpProtocolVersion, tt.method, tt.nameHdr))
+			s.ServeHTTP(w, mcpRequest(tt.body, mcpserver.ProtocolVersion, tt.method, tt.nameHdr))
 
 			var env rpcEnvelope
 			if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
@@ -306,8 +310,8 @@ func TestServer_APIMCP_ValidatesStandardHeaders(t *testing.T) {
 			if env.Error == nil {
 				t.Fatalf("want an error, got result %s", env.Result)
 			}
-			if env.Error.Code != codeInvalidRequest {
-				t.Errorf("code = %d, want %d", env.Error.Code, codeInvalidRequest)
+			if env.Error.Code != mcpserver.CodeInvalidRequest {
+				t.Errorf("code = %d, want %d", env.Error.Code, mcpserver.CodeInvalidRequest)
 			}
 			if !strings.Contains(env.Error.Message, tt.wantHas) {
 				t.Errorf("message = %q, want it to contain %q", env.Error.Message, tt.wantHas)
@@ -321,14 +325,14 @@ func TestServer_APIMCP_RejectsBatch(t *testing.T) {
 	body := `[{"jsonrpc":"2.0","id":1,"method":"tools/list"}]`
 
 	w := httptest.NewRecorder()
-	newMCPServer().ServeHTTP(w, mcpRequest(body, mcpProtocolVersion, "tools/list", ""))
+	newMCPServer().ServeHTTP(w, mcpRequest(body, mcpserver.ProtocolVersion, "tools/list", ""))
 
 	var env rpcEnvelope
 	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if env.Error == nil || env.Error.Code != codeInvalidRequest {
-		t.Fatalf("error = %+v, want code %d", env.Error, codeInvalidRequest)
+	if env.Error == nil || env.Error.Code != mcpserver.CodeInvalidRequest {
+		t.Fatalf("error = %+v, want code %d", env.Error, mcpserver.CodeInvalidRequest)
 	}
 }
 
@@ -336,14 +340,14 @@ func TestServer_APIMCP_MalformedBody(t *testing.T) {
 	s := newMCPServer()
 	for _, body := range []string{"{not json", `"a string"`, "42", "", `{"jsonrpc":"2.0","id":1}`} {
 		w := httptest.NewRecorder()
-		s.ServeHTTP(w, mcpRequest(body, mcpProtocolVersion, "tools/list", ""))
+		s.ServeHTTP(w, mcpRequest(body, mcpserver.ProtocolVersion, "tools/list", ""))
 
 		var env rpcEnvelope
 		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 			t.Fatalf("body %q: decode: %v", body, err)
 		}
-		if env.Error == nil || env.Error.Code != codeParseError {
-			t.Errorf("body %q: error = %+v, want code %d", body, env.Error, codeParseError)
+		if env.Error == nil || env.Error.Code != mcpserver.CodeParseError {
+			t.Errorf("body %q: error = %+v, want code %d", body, env.Error, mcpserver.CodeParseError)
 		}
 	}
 }
@@ -351,8 +355,8 @@ func TestServer_APIMCP_MalformedBody(t *testing.T) {
 func TestServer_APIMCP_UnknownMethod(t *testing.T) {
 	_, env := rpc(t, newMCPServer(), "resources/list", "", "")
 
-	if env.Error == nil || env.Error.Code != codeMethodNotFound {
-		t.Fatalf("error = %+v, want code %d", env.Error, codeMethodNotFound)
+	if env.Error == nil || env.Error.Code != mcpserver.CodeMethodNotFound {
+		t.Fatalf("error = %+v, want code %d", env.Error, mcpserver.CodeMethodNotFound)
 	}
 }
 
@@ -360,7 +364,7 @@ func TestServer_APIMCP_NotificationReturns202(t *testing.T) {
 	body := `{"jsonrpc":"2.0","method":"notifications/cancelled"}`
 
 	w := httptest.NewRecorder()
-	newMCPServer().ServeHTTP(w, mcpRequest(body, mcpProtocolVersion, "notifications/cancelled", ""))
+	newMCPServer().ServeHTTP(w, mcpRequest(body, mcpserver.ProtocolVersion, "notifications/cancelled", ""))
 
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", w.Code)
@@ -398,8 +402,8 @@ func TestServer_APIMCP_Discover(t *testing.T) {
 		t.Fatalf("decode: %v (result=%s)", err, env.Result)
 	}
 
-	if len(result.SupportedVersions) != 1 || result.SupportedVersions[0] != mcpProtocolVersion {
-		t.Errorf("supportedVersions = %v, want [%s]", result.SupportedVersions, mcpProtocolVersion)
+	if len(result.SupportedVersions) != 1 || result.SupportedVersions[0] != mcpserver.ProtocolVersion {
+		t.Errorf("supportedVersions = %v, want [%s]", result.SupportedVersions, mcpserver.ProtocolVersion)
 	}
 	if result.Capabilities.Tools == nil {
 		t.Error("capabilities.tools is absent, so a client will not call tools/list")
@@ -429,8 +433,8 @@ func TestServer_APIMCP_Ping(t *testing.T) {
 func TestServer_APIMCP_EchoesProtocolVersionHeader(t *testing.T) {
 	w, _ := rpc(t, newMCPServer(), "tools/list", "", "")
 
-	if got := w.Header().Get(headerMCPProtocolVersion); got != mcpProtocolVersion {
-		t.Errorf("%s = %q, want %q", headerMCPProtocolVersion, got, mcpProtocolVersion)
+	if got := w.Header().Get(mcpserver.HeaderProtocolVersion); got != mcpserver.ProtocolVersion {
+		t.Errorf("%s = %q, want %q", mcpserver.HeaderProtocolVersion, got, mcpserver.ProtocolVersion)
 	}
 }
 
@@ -443,14 +447,14 @@ func TestServer_APIMCP_RequiresAPIKey(t *testing.T) {
 
 	t.Run("without a key", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		s.ServeHTTP(w, mcpRequest(body, mcpProtocolVersion, "tools/list", ""))
+		s.ServeHTTP(w, mcpRequest(body, mcpserver.ProtocolVersion, "tools/list", ""))
 		if w.Code != http.StatusUnauthorized {
 			t.Errorf("status = %d, want 401", w.Code)
 		}
 	})
 
 	t.Run("with a key", func(t *testing.T) {
-		req := mcpRequest(body, mcpProtocolVersion, "tools/list", "")
+		req := mcpRequest(body, mcpserver.ProtocolVersion, "tools/list", "")
 		req.Header.Set("Authorization", "Bearer sk-test")
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, req)
@@ -586,8 +590,8 @@ func TestServer_APIMCP_ToolsListRejectsBadCursor(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
-	if env.Error == nil || env.Error.Code != codeInvalidParams {
-		t.Fatalf("error = %+v, want code %d", env.Error, codeInvalidParams)
+	if env.Error == nil || env.Error.Code != mcpserver.CodeInvalidParams {
+		t.Fatalf("error = %+v, want code %d", env.Error, mcpserver.CodeInvalidParams)
 	}
 }
 
@@ -646,8 +650,8 @@ func TestServer_APIMCP_RoutesAcrossProviders(t *testing.T) {
 func TestServer_APIMCP_UnknownToolIsAProtocolError(t *testing.T) {
 	_, env := rpc(t, newMCPServer(), "tools/call", "nope", `{"name":"nope"}`)
 
-	if env.Error == nil || env.Error.Code != codeInvalidRequest {
-		t.Fatalf("error = %+v, want code %d", env.Error, codeInvalidRequest)
+	if env.Error == nil || env.Error.Code != mcpserver.CodeInvalidRequest {
+		t.Fatalf("error = %+v, want code %d", env.Error, mcpserver.CodeInvalidRequest)
 	}
 }
 
@@ -891,7 +895,7 @@ func TestServer_MCPNotServedWhenHelpAgentDisabled(t *testing.T) {
 
 	enabled := newMCPServer()
 	w := httptest.NewRecorder()
-	enabled.ServeHTTP(w, mcpRequest(body, mcpProtocolVersion, "tools/list", ""))
+	enabled.ServeHTTP(w, mcpRequest(body, mcpserver.ProtocolVersion, "tools/list", ""))
 	if w.Code != http.StatusOK {
 		t.Fatalf("enabled: status = %d, want 200", w.Code)
 	}
@@ -899,7 +903,7 @@ func TestServer_MCPNotServedWhenHelpAgentDisabled(t *testing.T) {
 	cfg := config.Config{HelpAgent: config.HelpAgentConfig{Disable: true}}
 	disabled := newTestServerWithConfig(cfg, newStubRouter(nil, ""), newStubRouter(nil, ""))
 	w = httptest.NewRecorder()
-	disabled.ServeHTTP(w, mcpRequest(body, mcpProtocolVersion, "tools/list", ""))
+	disabled.ServeHTTP(w, mcpRequest(body, mcpserver.ProtocolVersion, "tools/list", ""))
 	if w.Code != http.StatusNotFound {
 		t.Errorf("disabled: status = %d, want 404: helpagent.disable leaves /api/mcp unregistered", w.Code)
 	}

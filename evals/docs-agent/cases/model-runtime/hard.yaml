@@ -2,7 +2,10 @@
   question: Does setting ttl to 0 on a model make it unload as soon as it goes idle?
   tags: [ttl, trap]
   expect_any: ["no", "never", "not", "not unload", "prevents"]
-  forbid_regex: ["immediat(e|ely) unload", "unloads? right away"]
+  # Only the claim about ttl 0 itself: "ttl: 0 does not unload immediately" is
+  # right, and so is mentioning a short ttl for fast unloading.
+  forbid_regex:
+    ["ttl`?:? *(of )?`?0\\b(?![^.\\n]*(not|never|n't))[^.\\n]{0,40}(immediat|right away)"]
   expect_tools_any: [docs__search_docs, docs__get_config_schema]
   reference: |
     No -- the opposite. `ttl: 0` means never unload automatically. `-1` is the
@@ -40,7 +43,7 @@
   question: If I never set startPort, what port number does llama-swap assign to the first model it starts?
   tags: [defaults, trap]
   expect_regex: ["5800"]
-  forbid_regex: ["10001"]
+  forbid_regex: ["(?:default|assign|first model)[^\\n.]{0,60}\\b10001\\b"]
   expect_tools_any: [docs__get_config_schema, docs__search_docs]
   reference: |
     5800. config.example.yaml sets startPort to 10001 as an example value, but
@@ -76,3 +79,41 @@
   rubric:
     - Identifies 8080 / the right-hand side as the container-internal port
     - Says the ${PORT} side is the host port llama-swap assigned
+
+- id: hard-pause-after-restart
+  question: Does paused inference survive restarting llama-swap, and what do clients get while it is paused?
+  tags: [pause, trap]
+  expect_regex: ["503"]
+  expect_any: ["clear", "does not", "doesn't", "\\bno\\b", "not"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No: restarting clears the pause, though a config reload keeps it. While
+    paused, requests for local models get a 503 with the message
+    `all inference is paused`.
+  rubric:
+    - Says a restart clears the pause
+    - Gives the 503 response
+
+- id: hard-progress-percentage
+  question: My server reports progress as 42 meaning 42 percent. What will llama-swap show?
+  tags: [health-check, trap]
+  expect_any: ["clamp", "fully loaded", "fully complete", "fraction"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Fully loaded. `progress` is a fraction from 0 to 1 and values outside that
+    range are clamped, so 42 reads as 100%. Report 0.42.
+  rubric:
+    - Says values are clamped so 42 reads as fully loaded
+    - Says to report a fraction from 0 to 1
+
+- id: hard-healthcheck-per-model
+  question: One of my models is slow to load. How do I set healthCheckTimeout on just that model?
+  tags: [health-check, trap]
+  expect_regex: ["global"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    You cannot. `healthCheckTimeout` is global and a per-model entry is
+    silently discarded, so size it for the slowest backend.
+  rubric:
+    - Says healthCheckTimeout is global
+    - Says a per-model entry has no effect

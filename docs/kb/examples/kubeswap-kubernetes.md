@@ -4,7 +4,7 @@ summary: A verified llama-swap config that runs llama-server, sd-server, whisper
 category: examples
 tags: [kubeswap, kubernetes, multi-backend, sd-server, whisper-server, audiocpp_server, llama-server, pvc, gpu, exclusive-group, helm]
 config_keys: [models.*.cmd, models.*.cmdStop, models.*.proxy, models.*.capabilities, healthCheckTimeout, unloadTimeout, routing]
-updated: 2026-09-14
+updated: 2026-11-04
 ---
 
 # kubeswap: a complete multi-engine Kubernetes configuration
@@ -18,6 +18,9 @@ servers ship in **one image** (the unified llama-swap image), so every
 model below uses the same `--image` and only `--command` selects the
 server. This exact shape was verified end to end on a k3s cluster
 (request in, generated artifact out, `cmdStop` teardown).
+
+To have the chart generate the routing section instead of writing the matrix
+DSL by hand, see "Matrix router builder" in `guides/tools/kubeswap`.
 
 Prerequisites: a head-end deployment — the Helm chart in
 `cmd/kubeswap/chart/` is the standard path (below). The head-end

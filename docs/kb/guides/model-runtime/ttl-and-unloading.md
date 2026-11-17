@@ -1,10 +1,10 @@
 ---
 title: Automatic model unloading with ttl
-summary: How ttl, globalTTL, unloadTimeout and Docker cmdStop interact, plus how to unload on demand.
+summary: How ttl, globalTTL, unloadTimeout and Docker cmdStop interact, plus how to unload on demand or pause inference.
 category: guides
-tags: [ttl, unload, vram, memory, idle, docker, container, cmd-stop]
-config_keys: [globalTTL, unloadTimeout, models.*.ttl, models.*.unloadTimeout, models.*.cmdStop]
-updated: 2026-10-27
+tags: [ttl, unload, vram, memory, idle, docker, container, cmd-stop, pause, resume, gaming]
+config_keys: [globalTTL, unloadTimeout, models.*.ttl, models.*.unloadTimeout, models.*.cmdStop, models.*.compat.ignoreWebsockets]
+updated: 2026-11-04
 ---
 
 # Automatic model unloading with ttl
@@ -39,6 +39,10 @@ So `globalTTL: 600` with no per-model `ttl` unloads every model after 10
 minutes idle. A model that should stay resident sets `ttl: 0` to opt out.
 
 The timer measures **inactivity**, not lifetime — it resets on every request.
+Websocket traffic is not a request here when `compat.ignoreWebsockets` is on,
+which it always is for ComfyUI, so a long render you watch over its websocket
+counts as idle and can be unloaded. Use a longer `ttl`, or `ttl: 0`; see
+`guides/upstreams/comfyui`.
 
 ## `unloadTimeout` is a different thing
 
@@ -85,6 +89,25 @@ or an `<img>` tag on another site no longer stops every model.
 
 The web UI's model list has an unload button per model that hits the same
 endpoint.
+
+## Pausing inference
+
+An unload only lasts until the next request loads a model again. To keep the
+GPU free, for example while playing a game, pause inference:
+
+```console
+$ curl -X POST http://localhost:8080/api/models/pause    # unload all, reject requests
+$ curl -X POST http://localhost:8080/api/models/resume
+```
+
+The Models page has a Pause / Resume button that does the same, and a banner
+across the top of the web UI shows while inference is paused.
+
+While paused, every request for a local model (`/v1/...`, `/upstream/...`,
+`/comfyui/...`, `/audiocpp/...`) gets a `503` with the message
+`all inference is paused`, and startup preloading is skipped. Requests that
+are running when you pause are stopped with their model. Peer models are not
+affected. A config reload keeps the pause; restarting llama-swap clears it.
 
 ## Picking a value
 

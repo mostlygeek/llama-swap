@@ -24,9 +24,11 @@ That single instance serves both halves:
 `-config-dir` merges the model fixture in; see [The running-config
 fixture](#the-running-config-fixture). `run.sh` passes it for you.
 
-> **Do not point `--base-url` at a remote llama-swap you did not build.**
-> `/api/mcp` does not exist in releases and answers 404. The CLI refuses to
-> start in that case rather than running a silent, tool-less suite.
+> **Do not point `--base-url` at a remote llama-swap you did not build.** A
+> release serves the docs of its own version, not your working tree, so the
+> score says nothing about your change. `/api/mcp` also answers 404 on a release
+> older than v252 or with `helpagent.disable` set. The CLI refuses to start in
+> that case rather than running a silent, tool-less suite.
 
 ## Running it
 
@@ -83,13 +85,13 @@ Change **one at a time**, and nothing outside this list.
 |---|---|---|---|
 | 1 | System prompt | `ui/src/lib/prompts/docsAgent.ts` | no |
 | 2 | Knowledge base | `docs/kb/**/*.md` | yes |
-| 3 | Tool descriptions and schemas | `internal/docagent/mcpprovider.go`, `internal/config/mcpprovider.go`, `internal/mcptools/sys.go` | yes |
-| 4 | Search ranking | `internal/reference/search.go` | yes |
+| 3 | Tool descriptions and schemas | `internal/docagent/mcpprovider.go`, `internal/config/mcpprovider.go`, `internal/mcptools/sys.go`, `internal/mcptools/sourcecode/tools.go` | yes |
+| 4 | Search ranking | `internal/docagent/search.go` | yes |
 | 5 | MCP instructions | `internal/server/apimcp.go` (`mcpInstructions`) | yes |
 
 Surface 1 is the fast loop: the prompt is sent by the client, so an edit is
 live on the next run with no restart. Surfaces 2–5 are compiled in — `docs/kb`
-reaches the binary through `//go:embed` in `reference_embed.go` — so they need
+reaches the binary through `//go:embed` in `docs/embed.go` — so they need
 `run.sh` without `--base-url`.
 
 Surface 5 currently reaches external MCP clients only. `agentTools.ts` calls
@@ -156,7 +158,9 @@ was tried and rejected.
 
 `cases/` and `cases-holdout/` are recursively grouped by topic. The first
 directory below either root is the group name, such as `routing/` or
-`model-runtime/`; `safety/` is eval-only negative coverage. Use repeatable
+`model-runtime/`, and mirrors the directories of `docs/kb/guides/`; two groups
+have no guide directory: `safety/` is eval-only negative coverage, and
+`source-code/` measures the `code__*` tools. Use repeatable
 `--group NAME` to select a union of groups. No `--group` runs every group, and
 `--only` further filters the chosen groups. Unknown or empty selections fail
 and list available groups.
@@ -189,7 +193,7 @@ Regexes are case-insensitive. A turn that errored or hit the iteration ceiling
 fails regardless of its text. A case with no assertions is rejected at load
 time rather than passing for free.
 
-`safety/negative.yaml` is the group that matters most and is easiest to overlook: five
+`safety/negative.yaml` is the group that matters most and is easiest to overlook:
 questions about features llama-swap **does not have**. The correct answer is to
 say so. A model that invents a plausible config key passes nothing there, and
 no other case in the suite would catch it.
@@ -241,15 +245,20 @@ assert — grep the model id first.
 ## Adding cases
 
 Every assertion must be grounded in something `docs/kb/` actually says, or —
-for a question about the running setup — in `fixture/models.yaml`. Check before
-you write it. A case asserting a fact neither source contains tests the model's
-pretraining, not this agent, and it can never be fixed by any of the five
-surfaces.
+for a question about the running setup — in `fixture/models.yaml`, or — for a
+`source-code/` case — in the source tree. Check before you write it. A case
+asserting a fact none of those contain tests the model's pretraining, not this
+agent, and it can never be fixed by any of the five surfaces.
+
+A guide added to `docs/kb/` should arrive with a training case and a differently
+worded holdout in the matching group, plus a `hard.yaml` trap if the guide has a
+"what goes wrong" section. A `forbid_regex` for an invented key should match the
+key form (`basePath:`), so an answer saying the key does not exist still passes.
 
 Constraints to respect while editing:
 
 - `docs/kb/` frontmatter is validated by `TestKB_FrontmatterIsValid`
-  (`internal/reference/golden_test.go`); every `config_keys` entry must resolve
+  (`internal/docagent/golden_test.go`); every `config_keys` entry must resolve
   in `config-schema.json`. Run `make test-dev`.
 - MCP tool names must match `[a-zA-Z0-9_-]{1,64}`. `agentTools.ts` silently
   drops anything else, because these names are forwarded as OpenAI function
@@ -266,3 +275,6 @@ Constraints to respect while editing:
 `sippy/gemma-4-12B` and that is the score being optimized, but a case that
 fails on **every** model is usually a bad case or missing documentation rather
 than a prompt problem — and that distinction decides which surface to edit.
+
+To fine-tune a small model until it can run the Docs Agent, see
+[training/README.md](training/README.md).

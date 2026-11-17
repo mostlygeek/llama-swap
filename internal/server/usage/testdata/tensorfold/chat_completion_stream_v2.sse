@@ -1,0 +1,7 @@
+data: {"id": "chatcmpl-d5f93edfc74d954b6500eba53fe750be", "object": "chat.completion.chunk", "created": 1794098638, "model": "Qwen3.8-Flash-Next", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-d5f93edfc74d954b6500eba53fe750be", "object": "chat.completion.chunk", "created": 1794098638, "model": "Qwen3.8-Flash-Next", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}], "exact_mode": "exact", "tensorfold": {"enable_thinking": true, "reasoning_effort": "xhigh", "engine": "lanes", "tokens_per_second": 46.31119504068745, "seconds": 312.49084192, "prefill_seconds": 57.476540016, "prefill_widths": [], "prefill_raised": [], "time_to_first_token": 57.669783184, "sampling": "exact", "drafts": true, "token_sha": "4b6487122e29", "min_rows": 2}, "speculative": {"rounds": 6102, "drafted": 9952, "accepted": 5713, "acceptance_rate": 0.5740554662379421, "tokens_per_round": 1.9355948869223205}}
+
+data: {"id": "chatcmpl-d5f93edfc74d954b6500eba53fe750be", "object": "chat.completion.chunk", "created": 1794098638, "model": "Qwen3.8-Flash-Next", "choices": [], "usage": {"prompt_tokens": 160029, "completion_tokens": 11811, "total_tokens": 171840, "prompt_tokens_details": {"cached_tokens": 0}, "completion_tokens_details": {"reasoning_tokens": 11577}}}
+
+data: [DONE]

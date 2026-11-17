@@ -50,7 +50,7 @@
   let message = $derived(loadingMessage(model));
 </script>
 
-<div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
+<div class="flex h-full flex-col gap-3 overflow-y-auto p-0 sm:gap-4 sm:p-2">
   {#if !model}
     <Card.Root class="shrink-0 p-6">
       <p class="text-muted-foreground">Model “{modelId}” not found.</p>
@@ -130,7 +130,7 @@
       {/if}
     </Card.Root>
 
-    <Tabs value="activity" class="min-h-0 flex-1">
+    <Tabs value="activity" class="min-h-[min(20rem,70vh)] flex-1">
       <TabsList variant="line">
         <TabsTrigger value="activity">Activity</TabsTrigger>
         <TabsTrigger value="logs">Logs</TabsTrigger>

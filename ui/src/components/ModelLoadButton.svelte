@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Model } from "../lib/types";
   import { pendingLoads, onToggleLoad, canStop } from "../stores/modelLoad";
+  import { inferencePaused } from "../stores/api";
   import { Play, PowerOff, Loader2, Square } from "@lucide/svelte";
 
   interface Props {
@@ -17,8 +18,11 @@
     model.state === "starting" || model.state === "waking" || model.state === "going-to-sleep"
   );
   let loaded = $derived(model.state === "ready" || model.state === "sleeping");
+  // Loading is rejected while inference is paused; unloading and stopping still work.
+  let pausedLoad = $derived($inferencePaused && !canStop(model));
 
   function buttonTitle(): string {
+    if (pausedLoad) return "Inference is paused";
     if (loaded) return "Unload";
     if (transitioning) return "Stop";
     if (model.state === "stopping") return "Stopping";
@@ -31,7 +35,7 @@
   class="group text-muted-foreground hover:bg-accent hover:text-accent-foreground flex {btnSize} shrink-0 items-center justify-center disabled:opacity-50"
   title={buttonTitle()}
   aria-label={canStop(model) ? "Stop model" : "Load model"}
-  disabled={model.state === "stopping"}
+  disabled={model.state === "stopping" || pausedLoad}
   onclick={() => onToggleLoad(model)}
 >
   {#if $pendingLoads[model.id] && model.state === "stopped"}

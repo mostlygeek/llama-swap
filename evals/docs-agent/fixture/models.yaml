@@ -141,6 +141,7 @@ models:
   eval-glm4-32b:
     cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/glm-4-32b-0414-Q4_K_M.gguf --ctx-size 32768
     useModelName: glm-4-32b
+    disableKeepAlives: true
     ttl: 900
 
   eval-deepseek-r1-distill-32b:
@@ -192,12 +193,15 @@ models:
     capabilities:
       in: [text]
       out: [text]
+      embeddings: true
       context: 8192
 
   eval-qwen3-embed-8b:
     cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/qwen3-embedding-8b-Q8_0.gguf --embedding --pooling last
     ttl: 7200
     concurrencyLimit: 4
+    capabilities:
+      embeddings: true
 
   eval-bge-reranker-v2:
     cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/bge-reranker-v2-m3-Q8_0.gguf --reranking

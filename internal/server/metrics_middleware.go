@@ -9,6 +9,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hint"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -40,10 +41,14 @@ func ensureStreamUsage(body []byte) ([]byte, bool) {
 // CreateMetricsMiddleware returns middleware that records token metrics for
 // model-dispatched POST requests. It resolves the model, tees the response into
 // a buffer, and parses token usage once the upstream handler returns.
+//
+// /v1/realtime websocket upgrades are recorded too, once per session when the
+// socket closes; see realtime.go.
 func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if mm == nil || r.Method != http.MethodPost {
+			websocket := r.Method == http.MethodGet && swaputil.IsWebSocketUpgrade(r)
+			if mm == nil || (r.Method != http.MethodPost && !websocket) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -61,7 +66,8 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 				}
 			}
 
-			if !isMetricsRecordPath(checkPath) {
+			task, metered := meteredTask(checkPath)
+			if !metered || websocket != (task == hint.TaskRealtime) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -115,12 +121,27 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 				r.Header.Set("Accept-Encoding", filterAcceptEncoding(ae))
 			}
 
+			// The router or peer proxy fills the hint in while dispatching:
+			// where the request went and what kind of server answered it.
+			ctx, _ := hint.New(r.Context())
+			r = r.WithContext(ctx)
+
 			recorder := newBodyCopier(w)
+			if websocket {
+				recorder.realtime = newRealtimeSession()
+			}
+			// For a websocket this returns when the session ends.
 			next.ServeHTTP(recorder, r)
 			// A request abandoned before any response was written must not be
 			// filed as a successful (empty-body) metric. See #1029.
 			swaputil.MarkClientClosed(recorder, r)
-			mm.record(data.ModelID, r, recorder, cf, reqBody, reqHeaders)
+			if websocket && recorder.Status() == http.StatusSwitchingProtocols {
+				mm.recordRealtime(data.ModelID, task, r, recorder)
+				return
+			}
+			// A refused upgrade (model failed to start, upstream error) is an
+			// ordinary failed request.
+			mm.record(data.ModelID, task, r, recorder, cf, reqBody, reqHeaders)
 		})
 	}
 }

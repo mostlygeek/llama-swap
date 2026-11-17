@@ -1,0 +1,25 @@
+# Held-out abstention cases. See cases/safety/negative.yaml.
+- id: holdout-negative-cors-rate
+  question: What does security.cors.blockUnknownOrigins do?
+  tags: [negative, holdout]
+  expect_any: ["not", "no ", "does not", "doesn't", "exist", "isn't"]
+  forbid_regex: ["blockUnknownOrigins (is|sets|controls|enables|makes|lets|blocks)"]
+  expect_tools: [docs__search_docs, docs__get_config_schema]
+  reference: |
+    There is no such setting. An unlisted origin simply gets no CORS headers
+    once allowedOrigins is set, and enforcement is the browser's.
+  rubric:
+    - States that blockUnknownOrigins is not a real setting
+    - Does not fabricate a description for it
+
+- id: holdout-negative-selector-random
+  question: Show me a selector that picks a random target on each request.
+  tags: [negative, holdout]
+  expect_any: ["not", "no ", "does not", "doesn't", "cannot", "isn't"]
+  forbid_regex: ["strategy:\\s*[\"']?random"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    There is no random strategy. Selectors have warm, pin and spillover.
+  rubric:
+    - States there is no random strategy
+    - Names the real strategies

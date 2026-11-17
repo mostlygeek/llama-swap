@@ -1,0 +1,17 @@
+{
+  "kb_commit": "56f94903b73e44fe0f7574a89aa22c53c775516b",
+  "system_prompt_sha256": "24db898ea3d6a6deb9367c9f99feedd2e1b6ffbc1a64a3926db1280a43d3bbd2",
+  "tools_sha256": "788dad14523fc10e0e5f4d901aa06347715f13d16a7751d73919aca73adac798",
+  "teacher_conversations": {
+    "Q3.8-27B-rad": 417
+  },
+  "generated_at": "2026-11-05T10:46:44+00:00",
+  "kept_by_kind": {
+    "answerable": 231,
+    "running-config": 137,
+    "nonexistent": 49
+  },
+  "train": 377,
+  "validation": 40,
+  "address_replaced": "A peer address in 12 config__get_config results became sippy:8080"
+}

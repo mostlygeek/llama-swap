@@ -215,7 +215,7 @@
   }
 </script>
 
-<div class="flex min-w-0 flex-col {role === 'user' ? 'items-end' : 'items-start'}" class:mb-4={!isReasoningOnly}>
+<div class="flex min-w-0 flex-col [overflow-wrap:anywhere] {role === 'user' ? 'items-end' : 'items-start'}" class:mb-4={!isReasoningOnly}>
   {#if role === "assistant"}
     <!-- Replies sit directly on the page: no box, full width, so a phone
          gets the whole line for the text. -->
@@ -251,7 +251,7 @@
             {/if}
           </button>
           {#if showReasoning}
-            <div class="border-border text-muted-foreground mt-1 mb-2 whitespace-pre-wrap border-l-2 pl-3 text-sm break-words">
+            <div class="border-border text-muted-foreground mt-1 mb-2 whitespace-pre-wrap border-l-2 pl-3 text-sm">
               {reasoning_content}{#if isReasoning}<span class="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-current"></span>{/if}
             </div>
           {/if}
@@ -289,9 +289,9 @@
         </div>
       {/if}
       {#if showRaw}
-        <div class="whitespace-pre-wrap font-mono text-sm break-words">{textContent}</div>
+        <div class="whitespace-pre-wrap font-mono text-sm">{textContent}</div>
       {:else}
-        <div class="prose prose-sm dark:prose-invert max-w-none min-w-0 break-words" use:codeBlockCopy>
+        <div class="prose prose-sm dark:prose-invert max-w-none min-w-0" use:codeBlockCopy>
           {#each renderedParts.blocks as block (block.id)}
             {@html block.html}
           {/each}
@@ -387,7 +387,7 @@
           </div>
         </div>
       {:else}
-        <div class="bg-primary text-primary-foreground rounded-2xl rounded-br-md px-3.5 py-2 sm:px-4">
+        <div class="bg-primary text-primary-foreground min-w-0 max-w-full rounded-2xl rounded-br-md px-3.5 py-2 sm:px-4">
           {#if hasImages}
             <div class="flex flex-wrap gap-2" class:mb-2={hasMessageText}>
               {#each imageUrls as imageUrl, idx (idx)}
@@ -405,7 +405,7 @@
             </div>
           {/if}
           {#if hasMessageText}
-            <div class="whitespace-pre-wrap break-words">{textContent}</div>
+            <div class="whitespace-pre-wrap">{textContent}</div>
           {/if}
         </div>
       {/if}
@@ -589,7 +589,7 @@
   }
 
   .prose :global(a) {
-    color: var(--primary);
+    color: var(--link);
     text-decoration: underline;
   }
 

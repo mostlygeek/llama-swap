@@ -50,6 +50,15 @@ type apiModel struct {
 	// LoadingMessage is the loading step the upstream last reported. Only set
 	// while the model is starting.
 	LoadingMessage string `json:"loadingMessage,omitempty"`
+	// Modalities mirrors the architecture block /v1/models reports, shaped to
+	// the UI's Model.modalities so the SSE feed and the OpenAI listing agree.
+	// Nil for peers and models without declared or discovered modalities.
+	Modalities *apiModalities `json:"modalities,omitempty"`
+}
+
+type apiModalities struct {
+	In  []string `json:"in,omitempty"`
+	Out []string `json:"out,omitempty"`
 }
 
 type apiProfile struct {
@@ -154,7 +163,17 @@ func (s *Server) modelStatus() []apiModel {
 		// shutdownCtx rather than a request: modelStatus is also called from
 		// event callbacks that have no request of their own.
 		caps := s.resolveCapabilities(s.shutdownCtx, id, mc)
-		_, capsMap, _, ctxLen := renderCapabilities(caps)
+		arch, capsMap, _, ctxLen := renderCapabilities(caps)
+		var modalities *apiModalities
+		if in, ok := arch["input_modalities"].([]string); ok {
+			modalities = &apiModalities{In: in}
+		}
+		if out, ok := arch["output_modalities"].([]string); ok {
+			if modalities == nil {
+				modalities = &apiModalities{}
+			}
+			modalities.Out = out
+		}
 		models = append(models, apiModel{
 			Id:               id,
 			Name:             mc.Name,
@@ -163,6 +182,7 @@ func (s *Server) modelStatus() []apiModel {
 			Unlisted:         mc.Unlisted,
 			Aliases:          mc.Aliases,
 			Capabilities:     capsMap,
+			Modalities:       modalities,
 			SleepWakeEnabled: mc.SleepWake.Enabled,
 			ContextLength:    ctxLen,
 			ReadySince:       readySince,
@@ -560,10 +580,11 @@ func (s *Server) handleAPIHardware(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleAPICapture returns the stored request/response capture for a metric ID.
+// handleAPICapture returns the stored request/response capture for the
+// capture ID recorded on an activity row.
 func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	id := r.PathValue("id")
+	if !store.ValidCaptureID(id) {
 		swaputil.SendResponse(w, r, http.StatusBadRequest, "invalid capture ID")
 		return
 	}
@@ -605,6 +626,7 @@ const (
 	msgTypeInFlight    messageType = "inflight"
 	msgTypeUIConfig    messageType = "uiConfig"
 	msgTypeProfile     messageType = "profileChanged"
+	msgTypePause       messageType = "pauseChanged"
 )
 
 // sendDropReportInterval is how often an SSE handler reports messages that
@@ -696,8 +718,8 @@ func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request, name string, s
 }
 
 // handleAPIEvents streams server events (model status, activity, in-flight
-// requests, UI config, profile changes) to the client as Server-Sent Events.
-// Log data has its own stream, handleAPILogEvents.
+// requests, UI config, profile and pause changes) to the client as Server-Sent
+// Events. Log data has its own stream, handleAPILogEvents.
 func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	s.serveSSE(w, r, "handleAPIEvents", func(send func(messageEnvelope)) func() {
 		sendModels := func() {
@@ -734,6 +756,12 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		sendPause := func() {
+			if j, err := json.Marshal(map[string]bool{"paused": s.pause.Paused()}); err == nil {
+				send(messageEnvelope{Type: msgTypePause, Data: string(j)})
+			}
+		}
+
 		unsubscribe := []context.CancelFunc{
 			event.On(func(e swaputil.ProcessStateChangeEvent) { sendModels() }),
 			event.On(func(e swaputil.ProcessLoadingEvent) { sendModels() }),
@@ -745,12 +773,14 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			}),
 			event.On(func(e ActivityLogEvent) { sendActivity(e.Metrics.ID) }),
 			event.On(func(e swaputil.InFlightRequestsEvent) { sendInFlight(e) }),
+			event.On(func(e swaputil.InferencePausedEvent) { sendPause() }),
 		}
 
 		// initial payload
 		sendModels()
 		sendUIConfig()
 		sendProfile()
+		sendPause()
 		sendInFlight(s.inflight.Current())
 
 		return func() { cancelAll(unsubscribe) }

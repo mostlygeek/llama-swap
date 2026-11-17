@@ -14,8 +14,26 @@ endif
 # Capture the current build date in RFC3339 format
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Default target: Builds binaries for both OSX and Linux
-all: mac linux simple-responder
+# Target platform for the `native`, `wol-proxy` and `kubeswap` targets.
+# Override on the command line to cross compile: make GOOS=linux GOARCH=arm64
+GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
+GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
+ifeq ($(GOOS),windows)
+EXE = .exe
+else
+EXE =
+endif
+
+LDFLAGS = -X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}
+
+# Default target: build llama-swap for the platform running make
+native: ui src
+	@echo "Building $(APP_NAME) for $(GOOS)-$(GOARCH)..."
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-$(GOOS)-$(GOARCH)$(EXE)
+
+# Build binaries for every platform this Makefile supports (see the per OS
+# groups below) plus the test responder
+all: mac linux windows freebsd simple-responder
 
 # Clean build directory
 clean:
@@ -27,11 +45,11 @@ test-dev:
 	staticcheck ./... || true
 
 test:
-	go test -short -count=1 ./internal/...
+	go test -short -count=1 ./internal/... ./docs/... ./docbot/...
 
 # for CI - full test (takes longer)
 test-all:
-	go test -race -count=1 ./internal/...
+	go test -race -count=1 ./internal/... ./docs/... ./docbot/...
 
 # Test suites for the cmd utilities (kubeswap, vllm-wrapper). Kept
 # separate from test-all: those packages are unix-only (vllm-wrapper
@@ -62,12 +80,19 @@ test-chart:
 		fi; \
 	done
 
-ui/node_modules: ui/package.json ui/package-lock.json
-	cd ui && npm install && touch node_modules
+# Stamp file so the install re-runs whenever the dependencies change. The
+# ui/node_modules directory itself can't be the target because make treats an
+# existing directory as up to date. The stamp lives inside node_modules so
+# deleting node_modules also forces a reinstall.
+UI_DEPS_STAMP = ui/node_modules/.stamp
+
+$(UI_DEPS_STAMP): ui/package.json ui/package-lock.json
+	cd ui && npm ci
+	touch $@
 
 # build the UI into internal/server/ui_dist; the `embed_ui` build tag embeds
 # this output into the binary (see internal/server/embed.go)
-ui: ui/node_modules
+ui: $(UI_DEPS_STAMP)
 	cd ui && npm run build
 
 # copy the Go and TypeScript source, without tests, into
@@ -80,26 +105,34 @@ src:
 	git ls-files -z --cached --others --exclude-standard -- '*.go' 'ui/*.ts' 'ui/*.svelte' \
 		':(exclude)*_test.go' ':(exclude)*.test.ts' | tar -cf - --null -T - | tar -xf - -C $(SRC_DIR)
 
-# Build OSX binary
-mac: ui src
-	@echo "Building Mac binary..."
-	GOOS=darwin GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
-
-# Build Linux binary
-linux: linux-arm64 linux-amd64
+# One target per GOOS/GOARCH pair. CGO is off so these cross compile on any
+# host, same as the release builds in .goreleaser.yaml. Intel Mac binaries are
+# not built here; GoReleaser publishes them.
+darwin-arm64: ui src
+	@echo "Building Darwin ARM64 binary..."
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
 
 linux-amd64: ui src
 	@echo "Building Linux AMD64 binary..."
-	GOOS=linux GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
 linux-arm64: ui src
 	@echo "Building Linux ARM64 binary..."
-	GOOS=linux GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
 
-# Build Windows binary
-windows: ui src
-	@echo "Building Windows binary..."
-	GOOS=windows GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
+windows-amd64: ui src
+	@echo "Building Windows AMD64 binary..."
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
+
+freebsd-amd64: ui src
+	@echo "Building FreeBSD AMD64 binary..."
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -tags embed_ui,embed_src -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)-freebsd-amd64
+
+# Per OS groups: the architectures built from this Makefile
+mac: darwin-arm64
+linux: linux-arm64 linux-amd64
+windows: windows-amd64
+freebsd: freebsd-amd64
 
 # for testing with real external processes
 simple-responder:
@@ -127,15 +160,13 @@ release:
 	@highest_tag=$$(git tag --sort=-v:refname | grep -E '^v[0-9]+$$' | head -n 1 || echo "v0"); \
 	new_tag="v$$(( $${highest_tag#v} + 1 ))"; \
 	echo "Checking for a changelog entry for: $$new_tag"; \
-	if ! grep -qE "^## $$new_tag( |$$)" CHANGELOG.md; then \
-		echo "Error: CHANGELOG.md has no entry for $$new_tag. Add a '## $$new_tag' section and commit it." >&2; \
+	if [ ! -f "changelog/$$new_tag.md" ]; then \
+		echo "Error: changelog/$$new_tag.md does not exist. Add it (scripts/add-changelog.sh) and commit it." >&2; \
 		exit 1; \
 	fi; \
 	echo "tagging new version: $$new_tag"; \
 	git tag "$$new_tag"
 
-GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
-GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
 wol-proxy: $(BUILD_DIR)
 	@echo "Building wol-proxy"
 	go build -o $(BUILD_DIR)/wol-proxy-$(GOOS)-$(GOARCH)-$(shell date +%Y-%m-%d) cmd/wol-proxy/wol-proxy.go
@@ -157,5 +188,6 @@ eval-docs-agent:
 	./evals/docs-agent/run.sh $(EVAL_ARGS)
 
 # Phony targets
-.PHONY: all clean ui src mac windows simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
-.PHONY: linux linux-arm64 linux-amd64
+.PHONY: all native clean ui src simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
+.PHONY: mac linux windows freebsd
+.PHONY: darwin-arm64 linux-arm64 linux-amd64 windows-amd64 freebsd-amd64

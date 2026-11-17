@@ -1,0 +1,45 @@
+- id: holdout-cors-lan-address
+  question: An HTTPS dashboard can't reach llama-swap on 192.168.1.50 in Chrome, even with its origin allowed. Which setting do I need?
+  tags: [cors, holdout]
+  expect_regex: ["allowPrivateNetwork"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `security.cors.allowPrivateNetwork: true`, which cannot be combined with
+    `allowedOrigins: ["*"]`.
+  rubric:
+    - Names allowPrivateNetwork
+    - Says it cannot be used with a wildcard origin
+
+- id: holdout-cors-credentials-wildcard
+  question: What happens if I combine allowCredentials true with allowedOrigins set to "*"?
+  tags: [cors, holdout]
+  expect_any: ["refuse", "fail", "error", "not start", "won't start"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    llama-swap refuses to start. The Fetch spec forbids that pairing.
+  rubric:
+    - Says llama-swap refuses to start
+    - Does not say one setting is silently ignored
+
+- id: holdout-realtime-holds-slot
+  question: Does an idle /v1/realtime session count against globalConcurrencyLimit?
+  tags: [realtime, holdout]
+  expect_any: ["yes", "holds", "counts", "429"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Yes. A session holds one slot until it closes, idle or not, so a few open
+    sessions can turn other requests away with HTTP 429.
+  rubric:
+    - Says it counts until the session closes
+    - Mentions the 429 consequence
+
+- id: holdout-mcp-source-not-embedded
+  question: My MCP client's code tools say "source code is not embedded in this build". How do I fix it?
+  tags: [mcp, holdout]
+  expect_regex: ["embed_src"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Run `make src` and build with `-tags embed_src`, or use a release build.
+  rubric:
+    - Names the embed_src build tag
+    - Mentions make src or a release build

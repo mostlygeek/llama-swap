@@ -1,0 +1,6 @@
+data: {"id": "chatcmpl-842d99ffdcfc4dde873697c7", "created": 1793471082, "model": "halogen-qwen3.8-flash-next", "object": "chat.completion.chunk", "choices": [{"index": 0, "finish_reason": "stop", "delta": {}}], "usage": null, "timings": {"prompt_n": 712, "predicted_n": 610, "prompt_ms": 791.2, "predicted_ms": 12049.0, "prompt_per_second": 899.899, "predicted_per_second": 50.627, "cache_n": 5188, "disk_restore_n": 0, "disk_restore_ms": 0.0, "prefix_n": 5318, "draft_n": 484, "draft_n_accepted": 332}}
+
+data: {"id": "chatcmpl-842d99ffdcfc4dde873697c7", "created": 1793471082, "model": "halogen-qwen3.8-flash-next", "object": "chat.completion.chunk", "choices": [], "usage": {"prompt_tokens": 5900, "completion_tokens": 610, "total_tokens": 6510, "prompt_tokens_details": {"cached_tokens": 5188}, "completion_tokens_details": {"reasoning_tokens": 93}}, "timings": {"prompt_n": 712, "predicted_n": 610, "prompt_ms": 791.2, "predicted_ms": 12049.0, "prompt_per_second": 899.899, "predicted_per_second": 50.627, "cache_n": 5188, "disk_restore_n": 0, "disk_restore_ms": 0.0, "prefix_n": 5318, "draft_n": 484, "draft_n_accepted": 332}}
+
+data: [DONE]
+

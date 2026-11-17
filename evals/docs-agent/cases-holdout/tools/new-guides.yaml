@@ -1,0 +1,46 @@
+- id: holdout-fake-model-load
+  question: Which fake-model flag simulates a slow model load?
+  tags: [fake-model, holdout]
+  expect_regex: ["-load"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `-load`, for example `-load 10s`. /health returns 503 until it has passed.
+  rubric:
+    - Gives the -load flag
+    - Says /health returns 503 until then
+
+- id: holdout-wol-require-confirm
+  question: Background clients keep waking my suspended server through wol-proxy. How do I stop that?
+  tags: [wol-proxy, holdout]
+  expect_regex: ["-require-confirm"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Use `-require-confirm`. Browsers get a "Start server" button and API calls
+    fail with 503.
+  rubric:
+    - Gives -require-confirm
+    - Says API calls then fail rather than wake the server
+
+- id: holdout-kubeswap-no-gpu
+  question: Does kubeswap require a GPU for a model's backend pod?
+  tags: [kubeswap, holdout]
+  expect_any: ["\\bno\\b", "not"]
+  expect_regex: ["cpu"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. A model without `--gpu` is a plain CPU pod that schedules on any node.
+  rubric:
+    - Answers no
+    - Says leaving out --gpu gives a CPU pod
+
+- id: holdout-vllm-env-systemd
+  question: Environment variables are missing in vLLM when vllm-wrapper starts it with systemd-run. How do I pass them?
+  tags: [vllm-wrapper, holdout]
+  expect_regex: ["--setenv"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Pass each one with `--setenv=NAME`, because the unit does not inherit the
+    environment.
+  rubric:
+    - Gives --setenv
+    - Says the unit does not inherit the environment

@@ -10,6 +10,8 @@
 #   ./build-image.sh --cuda --no-cache                   # Build without cache
 #   LLAMA_REF=b1234 ./build-image.sh --vulkan            # Pin llama.cpp to a commit hash
 #   LLAMA_REF=v1.2.3 ./build-image.sh --cuda             # Pin llama.cpp to a tag
+#   (with no LLAMA_REF, llama.cpp comes from the master branch of
+#    https://github.com/mostlygeek/mg-llama.cpp)
 #   WHISPER_REF=v1.0.0 ./build-image.sh --vulkan         # Pin whisper.cpp to a tag
 #   SD_REF=master ./build-image.sh --cuda                # Pin stable-diffusion.cpp to a branch
 #   AUDIO_REF=main ./build-image.sh --cuda               # Pin audio.cpp to a branch
@@ -86,8 +88,25 @@ DATE_TAG="${DATE_TAG:-}"
 # in containers.yml, which is scoped to `package: llama-swap`.
 ARTIFACT_REPO="${ARTIFACT_REPO:-ghcr.io/mostlygeek/llama-swap-build}"
 
+# Registry holding each project's compiler cache between --stage runs.
+#
+# A package of its own because a cache tag is overwritten every run, leaving the
+# previous version untagged. Kept apart from ARTIFACT_REPO, every version here
+# that has no tag is garbage, so CI deletes them after each run without any risk
+# to the base and artifacts images.
+CCACHE_REPO="${CCACHE_REPO:-ghcr.io/mostlygeek/llama-swap-ccache}"
+
 # Upstream projects compiled into the image.
 ALL_PROJECTS=(whisper sd audio llama ik-llama)
+
+# Minutes a --stage compile may run before it is stopped. Empty means no limit.
+# CI sets it below the job's own timeout: a compile stopped here still
+# publishes the ccache it built up, so the next run continues from there, while
+# a job cancelled by GitHub publishes nothing. See ccache-build.sh.
+COMPILE_TIMEOUT_MINUTES="${COMPILE_TIMEOUT_MINUTES:-}"
+
+# --consumer narrows ik_llama.cpp's CUDA architectures; see IK_CUDA_ARCHITECTURES.
+CONSUMER=false
 
 for arg in "$@"; do
     case $arg in
@@ -96,6 +115,7 @@ for arg in "$@"; do
         --vulkan)  BACKEND="vulkan"; VARIANT="vulkan" ;;
         --no-cache) NO_CACHE=true ;;
         --push)     PUSH=true ;;
+        --consumer) CONSUMER=true ;;
         --resolve)  MODE="resolve" ;;
         --assemble) MODE="assemble" ;;
         --manifest) MODE="manifest" ;;
@@ -114,6 +134,8 @@ for arg in "$@"; do
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
             echo "  --platform=PLATFORM  linux/amd64 or linux/arm64 (default: this host)"
+            echo "  --consumer  Compile ik_llama.cpp for consumer GPUs only on --cuda13 amd64"
+            echo "              (75-virtual;86-real;89-real;120-real), so it fits the CI time limit"
             echo "  --help, -h  Show this help message"
             echo ""
             echo "Split build (CI only):"
@@ -130,6 +152,8 @@ for arg in "$@"; do
             echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:unified-<variant>,"
             echo "                       e.g. llama-swap:unified-cuda13)"
             echo "  LLAMA_REF            Pin llama.cpp to a commit, tag, or branch"
+            echo "                       (default: master of"
+            echo "                       https://github.com/mostlygeek/mg-llama.cpp)"
             echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
             echo "  AUDIO_REF            Pin audio.cpp to a commit, tag, or branch"
@@ -139,12 +163,19 @@ for arg in "$@"; do
             echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
             echo "                       (default: 60;61;70;75;86;89 for --cuda,"
             echo "                       75;80;86;89;90;100;120 for --cuda13 on amd64,"
-            echo "                       90;100;120;121 for --cuda13 on arm64)"
+            echo "                       121 for --cuda13 on arm64)"
+            echo "  IK_CUDA_ARCHITECTURES  CUDA architectures for ik_llama.cpp only; overrides"
+            echo "                       --consumer. Empty uses CMAKE_CUDA_ARCHITECTURES"
+            echo "                       (default: empty)"
             echo "  CUDA_VERSION         CUDA toolkit/runtime version as an nvidia/cuda image tag"
             echo "                       (default: 12.9.1 for --cuda, 13.3.1 for --cuda13)"
             echo "  DATE_TAG             Date suffix for published tags (default: today, UTC)"
             echo "  ARTIFACT_REPO        Registry for base and artifacts images"
             echo "                       (default: ghcr.io/mostlygeek/llama-swap-build)"
+            echo "  CCACHE_REPO          Registry for --stage compiler caches"
+            echo "                       (default: ghcr.io/mostlygeek/llama-swap-ccache)"
+            echo "  COMPILE_TIMEOUT_MINUTES  Stop a --stage compile after this many minutes,"
+            echo "                       keeping its ccache for the next run (default: no limit)"
             exit 0
             ;;
     esac
@@ -198,10 +229,11 @@ fi
 #
 # The architecture lists differ by platform because the hardware does. On amd64
 # the range is Turing through Blackwell on PCIe cards. On arm64 the only NVIDIA
-# parts that exist are Grace pairings, so Pascal through Ada are pointless and
-# 121 -- GB10, the Blackwell GPU in DGX Spark, and the whole reason for an arm64
-# image -- is essential. 90 is GH200, 100 is GB200, 120 covers a discrete
-# GeForce or RTX PRO card in an aarch64 host.
+# parts that exist are Grace pairings, and the arm64 image exists for one of
+# them: GB10, the Blackwell GPU in DGX Spark, at 121. Nothing else is compiled,
+# to keep the build short. GH200 (90), GB200 (100) and a discrete RTX 50xx or
+# RTX PRO card in an aarch64 host (120) cannot run this image: 12.x targets are
+# real-only (see below) and 9.0/10.x have no PTX in it to JIT from.
 #
 # Two things about Blackwell shape these lists. It spans two CUDA major versions
 # -- datacenter parts are compute 10.x (100, 103), GeForce, RTX PRO and GB10 are
@@ -220,7 +252,7 @@ fi
 case "${VARIANT}:${ARCH}" in
     cuda13:arm64)
         CUDA_VERSION="${CUDA_VERSION:-13.3.1}"
-        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-90;100;120;121}"
+        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-121}"
         ;;
     cuda13:*)
         CUDA_VERSION="${CUDA_VERSION:-13.3.1}"
@@ -231,6 +263,25 @@ case "${VARIANT}:${ARCH}" in
         CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;70;75;86;89}"
         ;;
 esac
+
+# ik_llama.cpp compiles far more CUDA template instances than the other
+# projects, and a change to a shared ggml header (most days, upstream) misses
+# every one of them in ccache. Compiled for the full cuda13 amd64 list that
+# overran the CI job's time limit, so on that image ik_llama.cpp targets
+# consumer cards only: SASS for Ampere (RTX 30xx), Ada (RTX 40xx) and
+# Blackwell (RTX 50xx, RTX PRO), plus Turing PTX that RTX 20xx / GTX 16xx JIT
+# on first load. Datacenter parts (A100, H100, B200) are not supported by
+# ik-llama-server in that image: ik picks kernels from the GPU's compute
+# capability, so running lower PTX can launch a kernel that was never compiled
+# and abort (issue #1185).
+#
+# --consumer turns that list on (CI passes it by default). An explicit
+# IK_CUDA_ARCHITECTURES wins either way; empty means use CMAKE_CUDA_ARCHITECTURES.
+IK_CUDA_ARCHITECTURES="${IK_CUDA_ARCHITECTURES:-}"
+if [[ "${CONSUMER}" == true && -z "${IK_CUDA_ARCHITECTURES}" \
+      && "${VARIANT}:${ARCH}" == "cuda13:amd64" ]]; then
+    IK_CUDA_ARCHITECTURES="75-virtual;86-real;89-real;120-real"
+fi
 
 # Resolved once here rather than per stage: a build that crosses UTC midnight
 # would otherwise tag its platforms and its manifest with different dates.
@@ -256,7 +307,10 @@ DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${VARIANT}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Git repository URLs
-LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
+# llama.cpp is built from mostlygeek/mg-llama.cpp master, not ggml-org/llama.cpp:
+# the fork carries the patches the unified image needs on top of upstream.
+LLAMA_REPO="https://github.com/mostlygeek/mg-llama.cpp.git"
+LLAMA_DEFAULT_REF="master"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
 SD_REPO="https://github.com/leejet/stable-diffusion.cpp.git"
 AUDIO_REPO="https://github.com/0xShug0/audio.cpp.git"
@@ -368,10 +422,23 @@ artifact_tag() {
     recipe="$( {
         cat "${SCRIPT_DIR}/${project}.Dockerfile"
         cat "${SCRIPT_DIR}/install-${project}.sh"
+        cat "${SCRIPT_DIR}/ccache-build.sh"
         echo "base=$(base_tag)"
         echo "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
+        # Only ik_llama.cpp reads it, so only its tag moves when it changes.
+        if [[ "${project}" == "ik-llama" ]]; then
+            echo "IK_CUDA_ARCHITECTURES=${IK_CUDA_ARCHITECTURES}"
+        fi
     } | sha256sum | cut -c1-8 )"
     echo "${ARTIFACT_REPO}:art-${project}-${VARIANT}${ARCH_TAG}-${commit:0:12}-${recipe}"
+}
+
+# Where --stage keeps a project's compiler cache between runs. One mutable tag
+# per project, variant and platform: each run seeds from it and overwrites it.
+# Not keyed on the commit, since the point is to reuse objects across commits;
+# ccache itself checks the compiler and every input of each object.
+ccache_tag() {
+    echo "${CCACHE_REPO}:ccache-${1}-${VARIANT}${ARCH_TAG}"
 }
 
 image_exists() {
@@ -476,9 +543,9 @@ if [[ -n "${LLAMA_REF:-}" ]]; then
     LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_REF}") || exit 1
     log "llama.cpp: ${LLAMA_REF} -> ${LLAMA_HASH}"
 else
-    LLAMA_HASH=$(get_latest_hash "${LLAMA_REPO}")
-    [[ -n "${LLAMA_HASH}" ]] || { echo "ERROR: Could not determine latest commit for llama.cpp" >&2; exit 1; }
-    log "llama.cpp: latest HEAD: ${LLAMA_HASH}"
+    LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_DEFAULT_REF}") || exit 1
+    [[ -n "${LLAMA_HASH}" ]] || { echo "ERROR: Could not determine latest commit for llama.cpp (${LLAMA_DEFAULT_REF})" >&2; exit 1; }
+    log "llama.cpp: ${LLAMA_DEFAULT_REF} (default): ${LLAMA_HASH}"
 fi
 
 if [[ -n "${WHISPER_REF:-}" ]]; then
@@ -583,20 +650,35 @@ build_base() {
         "${SCRIPT_DIR}"
 }
 
+# The ccache image a project build seeds from. --stage sets it to the
+# previously published cache when there is one; otherwise it is the builder
+# base, which has no cache in it, and the compile starts cold.
+CCACHE_SEED=""
+# 1 makes the compile stage copy its cache out for the `ccache` target.
+CCACHE_EXPORT=""
+
+# build_project <project> <tag> <target> <output flags...>
+# An empty target builds the Dockerfile's last stage, the artifacts image.
 build_project() {
-    local project="$1"; shift
+    local project="$1" tag="$2" target="$3"; shift 3
     local output=("$@")
-    local tag
-    tag="$(artifact_tag "${project}")"
+    local target_args=()
+    if [[ -n "${target}" ]]; then
+        target_args+=(--target "${target}")
+    fi
     echo ""
     echo "=========================================="
-    echo "Building ${project} artifacts (${VARIANT})..."
+    echo "Building ${project} ${target:-artifacts} (${VARIANT})..."
     echo "=========================================="
     echo ""
     DOCKER_BUILDKIT=1 docker buildx build "${output[@]}" \
         -f "${SCRIPT_DIR}/${project}.Dockerfile" \
         -t "${tag}" \
+        "${target_args[@]}" \
         --build-arg "BUILDER_BASE=${BASE_TAG}" \
+        --build-arg "CCACHE_SEED=${CCACHE_SEED:-${BASE_TAG}}" \
+        --build-arg "CCACHE_EXPORT=${CCACHE_EXPORT}" \
+        --build-arg "COMPILE_TIMEOUT_MINUTES=${COMPILE_TIMEOUT_MINUTES}" \
         --build-arg "BACKEND=${BACKEND}" \
         --build-arg "WHISPER_FFMPEG=${WHISPER_FFMPEG}" \
         --build-arg "WHISPER_COMMIT_HASH=${WHISPER_HASH}" \
@@ -604,6 +686,7 @@ build_project() {
         --build-arg "AUDIO_COMMIT_HASH=${AUDIO_HASH}" \
         --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}" \
         --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}" \
+        --build-arg "IK_CUDA_ARCHITECTURES=${IK_CUDA_ARCHITECTURES}" \
         "${PLATFORM_ARGS[@]}" \
         "${CACHE_ARGS[@]}" \
         "${SCRIPT_DIR}"
@@ -621,6 +704,7 @@ build_runtime() {
         --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
         --build-arg "CUDA_VERSION=${CUDA_VERSION}"
         --build-arg "CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
+        --build-arg "IK_CUDA_ARCHITECTURES=${IK_CUDA_ARCHITECTURES}"
         --build-arg "VARIANT=${VARIANT}"
     )
     local project
@@ -687,7 +771,34 @@ if [[ "$MODE" == "stage" ]]; then
             echo "  Run: build-image.sh --${VARIANT} --stage=base" >&2
             exit 1
         fi
-        build_project "${STAGE_TARGET}" --push
+        # Two builds from one compile. The first publishes the compiler cache
+        # and succeeds even when the compile failed or ran out of time, so the
+        # next run can start from it. The second reuses that compile from the
+        # builder's cache and publishes the artifacts, failing if the install
+        # did not complete.
+        CCACHE_TAG="$(ccache_tag "${STAGE_TARGET}")"
+        if seed_digest="$(docker buildx imagetools inspect "${CCACHE_TAG}" --format '{{.Manifest.Digest}}' 2>/dev/null)" \
+            && [[ -n "${seed_digest}" ]]; then
+            # Pinned by digest: the first build overwrites this tag, and the
+            # second has to resolve the same seed to reuse the compile rather
+            # than run it again.
+            CCACHE_SEED="${CCACHE_TAG}@${seed_digest}"
+            echo "Seeding the compiler cache from ${CCACHE_SEED}"
+        else
+            echo "No compiler cache published at ${CCACHE_TAG} yet, compiling cold"
+        fi
+        CCACHE_EXPORT=1
+        # No provenance attestation: it would turn the cache into an index with
+        # untagged children, which the untagged-version cleanup would delete.
+        if build_project "${STAGE_TARGET}" "${CCACHE_TAG}" ccache --push --provenance=false; then
+            echo "Published compiler cache: ${CCACHE_TAG}"
+        else
+            echo "WARNING: could not publish the compiler cache, the next run compiles cold" >&2
+        fi
+        # --no-cache already applied to the compile above; repeating it here
+        # would compile everything a second time.
+        CACHE_ARGS=()
+        build_project "${STAGE_TARGET}" "${TARGET_TAG}" "" --push
     fi
 
     echo ""
@@ -722,7 +833,7 @@ else
     # Unified: compile everything locally, then assemble from the local images.
     build_base --load
     while read -r project; do
-        build_project "${project}" --load
+        build_project "${project}" "$(artifact_tag "${project}")" "" --load
     done < <(backend_projects)
 fi
 
@@ -881,6 +992,9 @@ echo "  ik_llama.cpp:         ${IK_LLAMA_HASH}"
 if [[ "$BACKEND" == "cuda" ]]; then
     echo "  CUDA version:         ${CUDA_VERSION}"
     echo "  CUDA architectures:   ${CMAKE_CUDA_ARCHITECTURES}"
+    if [[ -n "${IK_CUDA_ARCHITECTURES}" ]]; then
+        echo "  ik_llama.cpp CUDA:    ${IK_CUDA_ARCHITECTURES}"
+    fi
 fi
 echo "  llama-swap:           $(docker run --rm --entrypoint cat "${RUNTIME_TAG}" /versions.txt | grep llama-swap | cut -d' ' -f2-)"
 echo ""

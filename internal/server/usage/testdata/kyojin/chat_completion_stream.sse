@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl-20eb20b2966c48d9966854fcb0d812be","object":"chat.completion.chunk","created":1793467773,"model":"qwen-3.8-next-kyojin","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-20eb20b2966c48d9966854fcb0d812be","object":"chat.completion.chunk","created":1793467773,"model":"qwen-3.8-next-kyojin","choices":[{"index":0,"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":97,"completion_tokens":25,"total_tokens":122,"prompt_tokens_details":{"cached_tokens":0}},"timings":{"cache_n":0,"prompt_n":97,"prompt_ms":259.84883308410645,"predicted_n":25,"predicted_ms":503.8900375366211,"prompt_per_second":373.29396037196585,"predicted_per_second":49.61399936029313,"speculative":true,"accepted_draft_tokens":15,"rejected_draft_tokens":6}}
+
+data: [DONE]
+

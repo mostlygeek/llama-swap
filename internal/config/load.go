@@ -101,7 +101,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	config.UI.Activity.SessionID = normalizeHeaderNames(config.UI.Activity.SessionID)
 
 	if config.Store != nil {
-		if err := validateStorePath(config.Store.Path); err != nil {
+		if err := validateStore(config.Store); err != nil {
 			return Config{}, err
 		}
 	}
@@ -379,4 +379,19 @@ func normalizeHeaderNames(names []string) []string {
 		normalized = append(normalized, name)
 	}
 	return normalized
+}
+
+// validateStore checks the store section: store.path must be a writable file
+// location, and so must the captures file derived from it when captures are
+// persisted.
+func validateStore(st *Store) error {
+	if err := validateStorePath("store.path", strings.TrimSpace(st.Path)); err != nil {
+		return err
+	}
+	if capturesPath := st.CapturesPath(); capturesPath != "" {
+		if err := validateStorePath("store.persistCaptures", capturesPath); err != nil {
+			return err
+		}
+	}
+	return nil
 }

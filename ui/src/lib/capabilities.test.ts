@@ -108,6 +108,7 @@ describe("listCapabilityBadges", () => {
       "image_to_image",
       "function_calling",
       "reranker",
+      "decisions",
     ]) {
       expect(capabilityLabels[key]).toBeTruthy();
     }
@@ -131,5 +132,18 @@ describe("listCapabilityBadges", () => {
     for (const badge of badges) {
       expect(capabilityBadgeClass[badge.key], `missing color for ${badge.key}`).toBeTruthy();
     }
+  });
+
+  it("shows Decisions after the other capabilities and before context", () => {
+    const badges = listCapabilityBadges({
+      context_length: 16000,
+      capabilities: { decisions: true, vision: true },
+    });
+    expect(badges).toEqual([
+      { key: "vision", label: "Vision" },
+      { key: "decisions", label: "Decisions" },
+      { key: "context", label: "16K" },
+    ]);
+    expect(capabilityBadgeClass.decisions).toBeTruthy();
   });
 });

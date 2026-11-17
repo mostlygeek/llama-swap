@@ -210,6 +210,27 @@ func parseKeyValues(entries []string, what string) (map[string]string, error) {
 	return out, nil
 }
 
+// parseAnnotations parses repeated "K=V" entries, validating K with the
+// API server's own annotation key rule (the label-key rule, case-
+// insensitive — objectmeta.ValidateAnnotations lowercases before checking)
+// so bad keys fail at flag parse instead of at Deployment creation.
+// Values are free-form: they may contain '=', spaces and be any length
+// (the API server's cap is the 256KiB total per object).
+func parseAnnotations(entries []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, e := range entries {
+		k, v, ok := strings.Cut(e, "=")
+		if !ok || k == "" {
+			return nil, fmt.Errorf("invalid --annotation %q (want key=value)", e)
+		}
+		if errs := content.IsLabelKey(strings.ToLower(k)); len(errs) > 0 {
+			return nil, fmt.Errorf("invalid --annotation key %q: %v", k, errs)
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
 // parseGPUs parses "resource=count" entries like "amd.com/gpu=1"; the count
 // is a positive whole number — GPUs are exclusive, non-shareable devices, so
 // fractions and words like "many" are errors, not quantities.

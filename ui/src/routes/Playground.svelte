@@ -4,6 +4,7 @@
   import ImageInterface from "../components/playground/ImageInterface.svelte";
   import AudioInterface from "../components/playground/AudioInterface.svelte";
   import SpeechInterface from "../components/playground/SpeechInterface.svelte";
+  import RealtimeInterface from "../components/playground/RealtimeInterface.svelte";
   import RerankInterface from "../components/playground/RerankInterface.svelte";
   import ConcurrencyInterface from "../components/playground/ConcurrencyInterface.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -16,6 +17,7 @@
     images: ImageInterface,
     speech: SpeechInterface,
     audio: AudioInterface,
+    realtime: RealtimeInterface,
     rerank: RerankInterface,
     concurrency: ConcurrencyInterface,
   };

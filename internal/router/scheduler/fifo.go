@@ -42,6 +42,7 @@ type FIFO struct {
 	effects Effects
 
 	limits   map[string]int
+	costs    map[string]int64
 	active   map[string]*activeSwap
 	reserved map[string]int
 	inFlight map[string]int
@@ -55,7 +56,9 @@ type FIFO struct {
 // when set to a value greater than zero.
 func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, cfg config.FifoConfig, models map[string]config.ModelConfig, eff Effects) *FIFO {
 	limits := make(map[string]int, len(models))
+	costs := make(map[string]int64, len(models))
 	for id, mc := range models {
+		costs[id] = mc.EvictCost
 		limit := defaultConcurrencyLimit
 		if mc.ConcurrencyLimit > 0 {
 			limit = mc.ConcurrencyLimit
@@ -70,6 +73,7 @@ func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, cfg config.Fi
 		cfg:      cfg,
 		effects:  eff,
 		limits:   limits,
+		costs:    costs,
 		active:   make(map[string]*activeSwap),
 		reserved: make(map[string]int),
 		inFlight: make(map[string]int),
@@ -269,6 +273,34 @@ func (s *FIFO) OnUnload(targets []string, timeout time.Duration) {
 	// Removing entries from active above may have unblocked queued requests
 	// that previously collided with the now-cancelled swaps.
 	s.drainQueue()
+}
+
+// Evictions plans each target against the same running set OnRequest would
+// use, so in-flight swaps the scheduler has committed to are accounted for.
+func (s *FIFO) Evictions(targets []string) map[string]Eviction {
+	out := make(map[string]Eviction, len(targets))
+	for _, target := range targets {
+		state, ok := s.effects.ModelState(target)
+		if !ok {
+			continue
+		}
+		// A request for a target with a swap in flight joins that swap
+		// (OnRequest step 2), so it stops nothing beyond what is committed.
+		if _, swapping := s.active[target]; swapping {
+			if state != process.StateReady {
+				state = process.StateStarting
+			}
+			out[target] = Eviction{State: state}
+			continue
+		}
+		evict := s.planner.EvictionFor(target, s.runningSet(target))
+		var cost int64
+		for _, id := range evict {
+			cost += s.costs[id]
+		}
+		out[target] = Eviction{Models: evict, Cost: cost, State: state}
+	}
+	return out
 }
 
 // OnShutdown grants err to every waiter still held by the scheduler.

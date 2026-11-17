@@ -111,8 +111,10 @@ type Monitor struct {
 	// broadcastCh hands log data to a dedicated goroutine that owns the
 	// (backpressuring) event bus. Write performs a non-blocking send so that
 	// slow subscribers can never stall the upstream process's stdout drain.
-	broadcastCh chan []byte
-	dropped     atomic.Uint64
+	broadcastCh   chan []byte
+	dropped       atomic.Uint64
+	closed        bool // guarded by bufferMu
+	broadcastDone chan struct{}
 
 	level      Level
 	prefix     string
@@ -125,13 +127,14 @@ func New() *Monitor {
 
 func NewWriter(stdout io.Writer) *Monitor {
 	m := &Monitor{
-		eventbus:    event.NewDispatcherConfig(1000),
-		buffer:      nil,
-		stdout:      stdout,
-		broadcastCh: make(chan []byte, 1024),
-		level:       LevelInfo,
-		prefix:      "",
-		timeFormat:  "",
+		eventbus:      event.NewDispatcherConfig(1000),
+		buffer:        nil,
+		stdout:        stdout,
+		broadcastCh:   make(chan []byte, 1024),
+		broadcastDone: make(chan struct{}),
+		level:         LevelInfo,
+		prefix:        "",
+		timeFormat:    "",
 	}
 	go m.broadcastLoop()
 	return m
@@ -148,11 +151,14 @@ func (w *Monitor) Write(p []byte) (n int, err error) {
 	}
 
 	w.bufferMu.Lock()
+	if w.closed {
+		w.bufferMu.Unlock()
+		return n, nil
+	}
 	if w.buffer == nil {
 		w.buffer = newCircularBuffer(BufferSize)
 	}
 	w.buffer.Write(p)
-	w.bufferMu.Unlock()
 
 	bufferCopy := make([]byte, len(p))
 	copy(bufferCopy, p)
@@ -167,6 +173,7 @@ func (w *Monitor) Write(p []byte) (n int, err error) {
 		// below.
 		w.dropped.Add(uint64(len(p)))
 	}
+	w.bufferMu.Unlock()
 	return n, nil
 }
 
@@ -188,9 +195,31 @@ func (w *Monitor) Clear() {
 }
 
 func (w *Monitor) OnLogData(callback func(data []byte)) context.CancelFunc {
+	w.bufferMu.RLock()
+	defer w.bufferMu.RUnlock()
+	if w.closed {
+		return func() {}
+	}
 	return event.Subscribe(w.eventbus, func(e DataEvent) {
 		callback(e.Data)
 	})
+}
+
+// Close stops live broadcasts and releases history and queued log data.
+// It is safe to call concurrently with Write, subscriptions and other Close
+// calls. Later writes still reach stdout, but are not retained or broadcast.
+func (w *Monitor) Close() error {
+	w.bufferMu.Lock()
+	if !w.closed {
+		w.closed = true
+		w.buffer = nil
+		// Unblock a Publish waiting on a slow subscriber before joining the loop.
+		w.eventbus.Close()
+		close(w.broadcastCh)
+	}
+	w.bufferMu.Unlock()
+	<-w.broadcastDone
+	return nil
 }
 
 // broadcastLoop is the only place that publishes to the (backpressuring)
@@ -198,6 +227,7 @@ func (w *Monitor) OnLogData(callback func(data []byte)) context.CancelFunc {
 // delivering a message it flushes any pending dropped-byte count as an
 // in-stream marker so the UI shows where the gap is.
 func (w *Monitor) broadcastLoop() {
+	defer close(w.broadcastDone)
 	for msg := range w.broadcastCh {
 		if dropped := w.dropped.Swap(0); dropped > 0 {
 			notice := fmt.Appendf(nil, "\n— %d bytes dropped —\n", dropped)

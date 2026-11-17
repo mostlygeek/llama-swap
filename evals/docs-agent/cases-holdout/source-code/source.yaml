@@ -1,0 +1,11 @@
+# Held-out cases over the code__* tools. See cases/source-code/source.yaml.
+- id: holdout-code-health-timeout-message
+  question: In which source file is the "without loading progress" health check error raised?
+  tags: [code, holdout]
+  expect_regex: ["internal/process/process_command\\.go"]
+  expect_tools: [code__grep]
+  reference: |
+    `internal/process/process_command.go`.
+  rubric:
+    - Names internal/process/process_command.go
+    - Found it by searching the source

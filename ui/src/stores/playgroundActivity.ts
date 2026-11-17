@@ -4,6 +4,7 @@ const chatStreaming = writable(false);
 const imageGenerating = writable(false);
 const speechGenerating = writable(false);
 const audioTranscribing = writable(false);
+const realtimeConnected = writable(false);
 const rerankLoading = writable(false);
 
 /**
@@ -13,8 +14,8 @@ const rerankLoading = writable(false);
 export const docsAgentStreaming = writable(false);
 
 export const playgroundActivity = derived(
-  [chatStreaming, imageGenerating, speechGenerating, audioTranscribing, rerankLoading],
-  ([$chat, $image, $speech, $audio, $rerank]) => $chat || $image || $speech || $audio || $rerank
+  [chatStreaming, imageGenerating, speechGenerating, audioTranscribing, realtimeConnected, rerankLoading],
+  ([$chat, $image, $speech, $audio, $realtime, $rerank]) => $chat || $image || $speech || $audio || $realtime || $rerank
 );
 
 export const playgroundStores = {
@@ -22,5 +23,6 @@ export const playgroundStores = {
   imageGenerating,
   speechGenerating,
   audioTranscribing,
+  realtimeConnected,
   rerankLoading,
 };

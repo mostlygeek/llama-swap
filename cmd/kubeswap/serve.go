@@ -25,6 +25,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -336,6 +337,8 @@ type serveFlags struct {
 	tols                 stringList
 	volumes              stringList
 	extraLbls            stringList
+	annotations          stringList
+	serviceAccount       string
 	pvcSize              string
 	pvcClass             string
 	pvcMode              string
@@ -398,6 +401,18 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 			return nil, fmt.Errorf("--label %q is reserved (managed by kubeswap); choose another key", k)
 		}
 	}
+	extraAnn, err := parseAnnotations(f.annotations)
+	if err != nil {
+		return nil, err
+	}
+	// The model-id annotation is set by kubeswap on every object and
+	// drives ownership checks (gc, adoption), so an extra annotation must
+	// not be able to override it. Reject it here, before it is stored.
+	for k := range extraAnn {
+		if k == annotationModelID {
+			return nil, fmt.Errorf("--annotation %q is reserved (managed by kubeswap); choose another key", k)
+		}
+	}
 	requests, err := parseResources(f.requests, "request")
 	if err != nil {
 		return nil, err
@@ -434,35 +449,37 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 		probeTimeout = 1
 	}
 	return &serveConfig{
-		Model:          f.model,
-		Sanitized:      sanitized,
-		DepName:        depName,
-		SvcName:        svcName,
-		Namespace:      f.namespace,
-		Image:          f.image,
-		Args:           nil, // set by the caller from the post "--" args
-		Port:           int32(f.port),
-		HealthPath:     f.healthPath,
-		CheckPath:      checkPath,
-		LivenessPath:   livenessPath,
-		ProbeTimeout:   probeTimeout,
-		StartupTimeout: int64(f.startupTimeout / time.Second),
-		Command:        []string(f.command),
-		Requests:       requests,
-		Limits:         limits,
-		ServicePorts:   servicePorts,
-		Env:            envs,
-		GPUs:           gpus,
-		ResourceClaims: claims,
-		NodeSel:        nodeSel,
-		Tolerations:    tols,
-		Volumes:        volumes,
-		ExtraLabels:    extra,
-		PVCSize:        f.pvcSize,
-		PVCClass:       f.pvcClass,
-		PVCAccessMode:  f.pvcMode,
-		GraceSeconds:   int64(f.grace / time.Second),
-		Strict:         f.strict,
+		Model:            f.model,
+		Sanitized:        sanitized,
+		DepName:          depName,
+		SvcName:          svcName,
+		Namespace:        f.namespace,
+		Image:            f.image,
+		Args:             nil, // set by the caller from the post "--" args
+		Port:             int32(f.port),
+		HealthPath:       f.healthPath,
+		CheckPath:        checkPath,
+		LivenessPath:     livenessPath,
+		ProbeTimeout:     probeTimeout,
+		StartupTimeout:   int64(f.startupTimeout / time.Second),
+		Command:          []string(f.command),
+		Requests:         requests,
+		Limits:           limits,
+		ServicePorts:     servicePorts,
+		Env:              envs,
+		GPUs:             gpus,
+		ResourceClaims:   claims,
+		NodeSel:          nodeSel,
+		Tolerations:      tols,
+		Volumes:          volumes,
+		ExtraLabels:      extra,
+		ExtraAnnotations: extraAnn,
+		ServiceAccount:   f.serviceAccount,
+		PVCSize:          f.pvcSize,
+		PVCClass:         f.pvcClass,
+		PVCAccessMode:    f.pvcMode,
+		GraceSeconds:     int64(f.grace / time.Second),
+		Strict:           f.strict,
 	}, nil
 }
 
@@ -489,6 +506,8 @@ func addServeFlags(fs *flag.FlagSet, f *serveFlags) {
 	fs.Var(&f.tols, "toleration", "toleration key:operator:value:effect (repeatable)")
 	fs.Var(&f.volumes, "volume", "volume pvc|emptydir|hostpath|nfs:name:path[:ro] (repeatable)")
 	fs.Var(&f.extraLbls, "label", "extra pod label K=V (repeatable)")
+	fs.Var(&f.annotations, "annotation", "extra pod annotation K=V (repeatable; the value may contain '=')")
+	fs.StringVar(&f.serviceAccount, "service-account", "", "service account for the backend pod (default: the namespace's default)")
 	fs.StringVar(&f.pvcSize, "pvc-size", "1Gi", "size used when kubeswap must create a missing PVC")
 	fs.StringVar(&f.pvcClass, "pvc-class", "", "storage class for created PVCs (default: cluster default)")
 	fs.StringVar(&f.pvcMode, "pvc-access-mode", "rwo", "access mode for created PVCs: rwo or rwx")
@@ -512,6 +531,13 @@ func (f *serveFlags) validateServeFlags() error {
 	}
 	if f.port < 1 || f.port > 65535 {
 		return fmt.Errorf("invalid --port %d (want 1-65535)", f.port)
+	}
+	if f.serviceAccount != "" {
+		// The API server's own object-name rule (DNS-1123 subdomain):
+		// a bad name must fail at flag parse, not at Deployment creation.
+		if errs := kvalidation.IsDNS1123Subdomain(f.serviceAccount); len(errs) > 0 {
+			return fmt.Errorf("invalid --service-account %q: %v", f.serviceAccount, errs)
+		}
 	}
 	return nil
 }

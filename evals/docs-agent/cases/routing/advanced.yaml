@@ -10,3 +10,14 @@
   expect_any: ["both", "and", "\\|", "either"]
   expect_tools_any: [docs__search_docs, docs__get_doc]
   require_tools: true
+
+- id: routing-global-concurrency
+  question: How do I cap how many inference requests run at once across all my models combined?
+  tags: [routing, limits]
+  expect_regex: ["globalConcurrencyLimit"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set the top-level `globalConcurrencyLimit`. The default is 0, no limit.
+  rubric:
+    - Names globalConcurrencyLimit
+    - Distinguishes it from the per-model concurrencyLimit

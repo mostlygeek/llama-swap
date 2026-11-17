@@ -1,13 +1,19 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
+
+// Eviction describes what starting a model would stop right now. It is an
+// alias for scheduler.Eviction so callers need not import the scheduler.
+type Eviction = scheduler.Eviction
 
 var (
 	ErrNoRouterFound     = swaputil.ErrNoRouterFound
@@ -63,4 +69,16 @@ type LocalRouter interface {
 	// modelID must be a real (non-alias) config key. Returns false when the
 	// model is not known to this router.
 	ProcessLogger(modelID string) (*logmon.Monitor, bool)
+
+	// Evictions reports, for each target, the models that would be stopped
+	// to start it, their total evict_cost, and the target's state, using the
+	// scheduler's live view including swaps it has committed to. Targets this
+	// router does not handle are omitted. It never starts or stops anything.
+	// ctx bounds the wait for the router's run loop.
+	Evictions(ctx context.Context, targets ...string) (map[string]Eviction, error)
+
+	// SetStartGate installs a check that runs before the router starts any
+	// process. While it returns an error no model starts, and the requests
+	// that needed one get that error.
+	SetStartGate(gate func() error)
 }

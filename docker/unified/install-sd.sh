@@ -35,6 +35,9 @@ if [ "$BACKEND" = "cuda" ]; then
         -DGGML_CUDA=ON
         -DGGML_VULKAN=OFF
         "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:?CMAKE_CUDA_ARCHITECTURES must be set}"
+        # ggml only routes CUDA through ccache itself when no C/C++ launcher is
+        # set, and the launchers above are set, so name it for CUDA too.
+        -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache
         "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler"
         "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"
         "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"

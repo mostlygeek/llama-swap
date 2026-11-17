@@ -769,6 +769,18 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 	})
 
+	t.Run("embeddings", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{Embeddings: true},
+		}))
+		if m.Capabilities == nil || m.Capabilities["embeddings"] != true {
+			t.Error("expected embeddings: true")
+		}
+		if m.Architecture != nil {
+			t.Error("should not have architecture")
+		}
+	})
+
 	t.Run("context", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
 			Capabilities: config.ModelCapConfig{Context: 32768},
@@ -811,6 +823,33 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 	})
 
+	t.Run("decisions", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text"}, Out: []string{"decisions"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["decisions"] != true {
+			t.Error("expected decisions: true")
+		}
+	})
+
+	t.Run("vision_decisions", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text", "image"}, Out: []string{"decisions"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["decisions"] != true || m.Capabilities["vision"] != true {
+			t.Errorf("expected decisions and vision, got %v", m.Capabilities)
+		}
+	})
+
+	t.Run("text_output_not_decisions", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text"}, Out: []string{"text"}},
+		}))
+		if _, ok := m.Capabilities["decisions"]; ok {
+			t.Errorf("text model should not report decisions, got %v", m.Capabilities)
+		}
+	})
+
 	t.Run("empty_skip", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{}))
 		if m.Architecture != nil {
@@ -830,32 +869,39 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 	})
 
-	t.Run("metadata_precedence", func(t *testing.T) {
+	t.Run("metadata_passthrough_with_caps", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
-			Capabilities: config.ModelCapConfig{In: []string{"text"}},
+			Capabilities: config.ModelCapConfig{In: []string{"text"}, Context: 4096},
 			Metadata: map[string]any{
-				"architecture":   "should-be-dropped",
-				"custom_field":   "should-remain",
-				"capabilities":   "also-dropped",
-				"context_window": "also-dropped",
-				"other_metadata": "also-remain",
+				"architecture":   "preserved",
+				"custom_field":   "preserved",
+				"capabilities":   "preserved",
+				"context_window": 8192,
 			},
 		}))
+		// generated top-level fields come from capabilities, not metadata
 		if m.Architecture == nil || m.Architecture["input_modalities"] == nil {
 			t.Fatal("architecture should be rendered, not from metadata")
+		}
+		if m.ContextWindow != 4096 {
+			t.Errorf("top-level context_window = %d, want 4096", m.ContextWindow)
 		}
 		if m.Meta == nil || m.Meta["llamaswap"] == nil {
 			t.Fatal("meta.llamaswap should exist")
 		}
+		// custom metadata is kept as configured under meta.llamaswap
 		meta := m.Meta["llamaswap"].(map[string]any)
-		if _, ok := meta["architecture"]; ok {
-			t.Error("architecture should be filtered from metadata")
+		if meta["architecture"] != "preserved" {
+			t.Errorf("architecture = %v, want preserved", meta["architecture"])
 		}
-		if _, ok := meta["custom_field"]; !ok {
-			t.Error("custom_field should remain in metadata")
+		if meta["capabilities"] != "preserved" {
+			t.Errorf("capabilities = %v, want preserved", meta["capabilities"])
 		}
-		if _, ok := meta["context_window"]; ok {
-			t.Error("context_window should be filtered from metadata when caps are set")
+		if meta["custom_field"] != "preserved" {
+			t.Errorf("custom_field = %v, want preserved", meta["custom_field"])
+		}
+		if meta["context_window"] != float64(8192) { // JSON numbers decode as float64
+			t.Errorf("context_window = %v, want 8192", meta["context_window"])
 		}
 	})
 
@@ -933,6 +979,46 @@ func TestServer_ModelStatus_Capabilities(t *testing.T) {
 		}
 		if m.ContextLength != 0 {
 			t.Errorf("expected no context_length, got %d", m.ContextLength)
+		}
+		if m.Modalities != nil {
+			t.Errorf("expected no modalities, got %v", m.Modalities)
+		}
+	})
+
+	// The Models list groups video models by output modality, which has no
+	// capability flag: this payload is its only source for modalities.
+	t.Run("carries output modalities for video models", func(t *testing.T) {
+		s := newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{Out: []string{"video"}},
+		})
+		m := s.modelStatus()[0]
+		if m.Modalities == nil {
+			t.Fatal("expected modalities, got none")
+		}
+		if len(m.Modalities.Out) != 1 || m.Modalities.Out[0] != "video" {
+			t.Errorf("modalities.out = %v, want [video]", m.Modalities.Out)
+		}
+		if m.Modalities.In != nil {
+			t.Errorf("modalities.in = %v, want none", m.Modalities.In)
+		}
+		if len(m.Capabilities) != 0 {
+			t.Errorf("expected no capability flags, got %v", m.Capabilities)
+		}
+	})
+
+	t.Run("carries input modalities for vision models", func(t *testing.T) {
+		s := newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text", "image"}, Out: []string{"text"}},
+		})
+		m := s.modelStatus()[0]
+		if m.Modalities == nil {
+			t.Fatal("expected modalities, got none")
+		}
+		if len(m.Modalities.In) != 2 || m.Modalities.In[1] != "image" {
+			t.Errorf("modalities.in = %v, want [text image]", m.Modalities.In)
+		}
+		if len(m.Modalities.Out) != 1 || m.Modalities.Out[0] != "text" {
+			t.Errorf("modalities.out = %v, want [text]", m.Modalities.Out)
 		}
 	})
 }
