@@ -211,9 +211,14 @@ export interface APIEventEnvelope {
 
 export interface HistogramData {
   bins: number[];
+  // range of the binned values; extremes left out as outliers are not counted
   min: number;
   max: number;
   binSize: number;
+  // how many values were left out of bins because they are outliers
+  outliers: number;
+  // computed from all values, outliers included, so they can exceed max or
+  // fall below min
   p99: number;
   p95: number;
   p50: number;

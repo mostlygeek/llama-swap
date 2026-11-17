@@ -108,8 +108,8 @@ func TestActivity_NewHistogram(t *testing.T) {
 	for _, n := range h.Bins {
 		count += n
 	}
-	if count != len(values) {
-		t.Fatalf("bins %v hold %d values, want %d", h.Bins, count, len(values))
+	if count != len(values) || h.Outliers != 0 {
+		t.Fatalf("bins %v hold %d values with %d outliers, want %d and 0", h.Bins, count, h.Outliers, len(values))
 	}
 	// The max value lands in the last bucket instead of overflowing.
 	if h.Bins[len(h.Bins)-1] != 1 {
@@ -122,5 +122,97 @@ func TestActivity_NewHistogram(t *testing.T) {
 	// Input must not be sorted in place.
 	if values[0] != 30 {
 		t.Fatalf("input was modified: %v", values)
+	}
+
+	// Values outside the Tukey fences are counted and left out of the bins.
+	outlierTests := []struct {
+		name         string
+		values       []float64
+		wantMin      float64
+		wantMax      float64
+		wantBins     int
+		wantOutliers int
+		wantP99      float64
+	}{
+		{
+			name:         "high outlier",
+			values:       []float64{868380, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100},
+			wantMin:      10,
+			wantMax:      100,
+			wantBins:     5,
+			wantOutliers: 1,
+			wantP99:      781552,
+		},
+		{
+			name:         "low outlier",
+			values:       []float64{-5000, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100},
+			wantMin:      10,
+			wantMax:      100,
+			wantBins:     5,
+			wantOutliers: 1,
+			wantP99:      99,
+		},
+		{
+			// q1 3, q3 7: 15 is past 1.5 IQR but within 3 IQR, so it stays.
+			name:         "moderate tail stays",
+			values:       []float64{15, 1, 2, 3, 4, 5, 6, 7, 8},
+			wantMin:      1,
+			wantMax:      15,
+			wantBins:     5,
+			wantOutliers: 0,
+			wantP99:      14.44,
+		},
+		{
+			name:         "zero iqr",
+			values:       []float64{7, 7, 7, 7, 100},
+			wantMin:      7,
+			wantMax:      7,
+			wantBins:     1,
+			wantOutliers: 1,
+			wantP99:      96.28,
+		},
+	}
+	for _, tt := range outlierTests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewHistogram(tt.values)
+			if h == nil {
+				t.Fatal("nil histogram")
+			}
+			if h.Min != tt.wantMin || h.Max != tt.wantMax || h.Outliers != tt.wantOutliers {
+				t.Fatalf("histogram = %+v, want min %v max %v outliers %d", h, tt.wantMin, tt.wantMax, tt.wantOutliers)
+			}
+			if len(h.Bins) != tt.wantBins {
+				t.Fatalf("bins = %v, want %d buckets", h.Bins, tt.wantBins)
+			}
+			count := 0
+			for _, n := range h.Bins {
+				count += n
+			}
+			if want := len(tt.values) - tt.wantOutliers; count != want {
+				t.Fatalf("bins %v hold %d values, want %d", h.Bins, count, want)
+			}
+			if tt.wantMin == tt.wantMax {
+				if h.BinSize != 0 {
+					t.Fatalf("all-equal binned values have BinSize %v, want 0", h.BinSize)
+				}
+			} else if h.Bins[len(h.Bins)-1] == 0 {
+				t.Fatalf("binned max not in last bucket: %v", h.Bins)
+			}
+			// Percentiles ignore the fences.
+			if !near(h.P99, tt.wantP99) {
+				t.Fatalf("p99 = %v, want %v", h.P99, tt.wantP99)
+			}
+		})
+	}
+
+	// Bin count follows the binned values: 64 of them give 7 bins, 65 would
+	// give 8.
+	many := []float64{1e6}
+	for i := 1; i <= 64; i++ {
+		many = append(many, float64(i))
+	}
+	manyHistogram := NewHistogram(many)
+	if manyHistogram.Outliers != 1 || manyHistogram.Max != 64 || len(manyHistogram.Bins) != 7 {
+		t.Fatalf("histogram = %+v, want 7 bins, max 64 and 1 outlier", manyHistogram)
 	}
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { HistogramData } from "../lib/types";
+  import { formatOutlierNote, visiblePercentiles, type PercentileKey } from "../lib/histogram";
 
   let {
     data,
@@ -17,9 +18,17 @@
   const chartWidth = viewBoxWidth - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
+  const percentileClass: Record<PercentileKey, string> = {
+    p50: "text-gray-600 dark:text-gray-400",
+    p95: "text-orange-500 dark:text-orange-400",
+    p99: "text-green-500 dark:text-green-400",
+  };
+
   let maxCount = $derived(Math.max(...data.bins));
   let barWidth = $derived(chartWidth / data.bins.length);
   let range = $derived(data.max - data.min);
+  let markers = $derived(visiblePercentiles(data));
+  let outlierNote = $derived(formatOutlierNote(data.outliers));
 
   function getXPosition(value: number): number {
     return padding.left + ((value - data.min) / range) * chartWidth;
@@ -89,42 +98,20 @@
       </g>
     {/each}
 
-    <!-- Percentile lines -->
-    <line
-      x1={getXPosition(data.p50)}
-      y1={padding.top}
-      x2={getXPosition(data.p50)}
-      y2={height - padding.bottom}
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-dasharray="4 2"
-      opacity="0.7"
-      class="text-gray-600 dark:text-gray-400"
-    />
-
-    <line
-      x1={getXPosition(data.p95)}
-      y1={padding.top}
-      x2={getXPosition(data.p95)}
-      y2={height - padding.bottom}
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-dasharray="4 2"
-      opacity="0.7"
-      class="text-orange-500 dark:text-orange-400"
-    />
-
-    <line
-      x1={getXPosition(data.p99)}
-      y1={padding.top}
-      x2={getXPosition(data.p99)}
-      y2={height - padding.bottom}
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-dasharray="4 2"
-      opacity="0.7"
-      class="text-green-500 dark:text-green-400"
-    />
+    <!-- Percentile lines; markers outside the binned range are skipped -->
+    {#each markers as marker}
+      <line
+        x1={getXPosition(marker.value)}
+        y1={padding.top}
+        x2={getXPosition(marker.value)}
+        y2={height - padding.bottom}
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-dasharray="4 2"
+        opacity="0.7"
+        class={percentileClass[marker.key]}
+      />
+    {/each}
 
     <!-- X-axis labels -->
     <text x={padding.left} y={height - 8} font-size="26" fill="currentColor" opacity="0.8" text-anchor="start">
@@ -142,4 +129,7 @@
       {data.max.toFixed(1)}
     </text>
   </svg>
+  {#if outlierNote}
+    <div class="text-muted-foreground mt-1 text-xs">{outlierNote}</div>
+  {/if}
 </div>

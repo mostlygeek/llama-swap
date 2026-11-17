@@ -164,20 +164,29 @@ type ActivityStats struct {
 }
 
 // HistogramData is a binned distribution with percentile summaries.
+//
+// Min and Max span the values inside the Tukey fences. Values outside them are
+// counted in Outliers and left out of Bins; P50, P95 and P99 use every value.
 type HistogramData struct {
-	Bins    []int   `json:"bins"`
-	Min     float64 `json:"min"`
-	Max     float64 `json:"max"`
-	BinSize float64 `json:"binSize"`
-	P50     float64 `json:"p50"`
-	P95     float64 `json:"p95"`
-	P99     float64 `json:"p99"`
+	Bins     []int   `json:"bins"`
+	Min      float64 `json:"min"`
+	Max      float64 `json:"max"`
+	BinSize  float64 `json:"binSize"`
+	P50      float64 `json:"p50"`
+	P95      float64 `json:"p95"`
+	P99      float64 `json:"p99"`
+	Outliers int     `json:"outliers"` // number of values outside the Tukey fences, left out of Bins
 }
 
-// NewHistogram bins values into between 5 and 20 equal-width buckets (Sturges'
-// rule) and computes the p50/p95/p99 percentiles. It returns nil for no
-// values, and a single bucket with a zero BinSize when every value is equal.
-// The input is not modified.
+// outlierFence is Tukey's "far out" multiplier: values more than 3 IQR beyond
+// the quartiles are left out of histogram bins.
+const outlierFence = 3.0
+
+// NewHistogram bins the values inside the Tukey fences (q1-3*IQR through
+// q3+3*IQR) into between 5 and 20 equal-width buckets (Sturges' rule) and
+// computes the p50/p95/p99 percentiles from all values. It returns nil for no
+// values, and a single bucket with a zero BinSize when every binned value is
+// equal. The input is not modified.
 func NewHistogram(values []float64) *HistogramData {
 	if len(values) == 0 {
 		return nil
@@ -185,46 +194,43 @@ func NewHistogram(values []float64) *HistogramData {
 
 	sorted := append([]float64(nil), values...)
 	sort.Float64s(sorted)
-	minVal := sorted[0]
-	maxVal := sorted[len(sorted)-1]
 
-	p50 := percentile(sorted, 50)
-	p95 := percentile(sorted, 95)
-	p99 := percentile(sorted, 99)
+	q1 := percentile(sorted, 25)
+	q3 := percentile(sorted, 75)
+	iqr := q3 - q1
+	first := sort.SearchFloat64s(sorted, q1-outlierFence*iqr)
+	last := sort.Search(len(sorted), func(i int) bool { return sorted[i] > q3+outlierFence*iqr })
+	binned := sorted[first:last]
+	minVal := binned[0]
+	maxVal := binned[len(binned)-1]
 
+	histogram := &HistogramData{
+		Min:      minVal,
+		Max:      maxVal,
+		P50:      percentile(sorted, 50),
+		P95:      percentile(sorted, 95),
+		P99:      percentile(sorted, 99),
+		Outliers: len(sorted) - len(binned),
+	}
 	if minVal == maxVal {
-		return &HistogramData{
-			Bins:    []int{len(values)},
-			Min:     minVal,
-			Max:     maxVal,
-			BinSize: 0,
-			P50:     p50,
-			P95:     p95,
-			P99:     p99,
-		}
+		histogram.Bins = []int{len(binned)}
+		return histogram
 	}
 
 	const minBins = 5
 	const maxBins = 20
-	sturges := int(math.Ceil(math.Log2(float64(len(values))))) + 1
+	sturges := int(math.Ceil(math.Log2(float64(len(binned))))) + 1
 	binCount := min(maxBins, max(minBins, sturges))
 	binSize := (maxVal - minVal) / float64(binCount)
 
 	bins := make([]int, binCount)
-	for _, value := range values {
+	for _, value := range binned {
 		idx := min(int(math.Floor((value-minVal)/binSize)), binCount-1)
 		bins[idx]++
 	}
-
-	return &HistogramData{
-		Bins:    bins,
-		Min:     minVal,
-		Max:     maxVal,
-		BinSize: binSize,
-		P50:     p50,
-		P95:     p95,
-		P99:     p99,
-	}
+	histogram.Bins = bins
+	histogram.BinSize = binSize
+	return histogram
 }
 
 // percentile linearly interpolates the p-th percentile of sorted values.
