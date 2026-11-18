@@ -23,13 +23,20 @@ import (
 //   - SetParams injection (issue #453)
 //   - SetParamsByID per-alias overrides
 //
-// Non-JSON requests (GET, multipart forms) pass through untouched. The buffered
-// body is re-attached with Content-Length / Transfer-Encoding cleanup so the
-// downstream reverse proxy forwards the correct bytes (see issue #11).
+// Non-JSON requests (multipart forms) and GET/HEAD requests pass through
+// untouched. The buffered body is re-attached with Content-Length /
+// Transfer-Encoding cleanup so the downstream reverse proxy forwards the
+// correct bytes (see issue #11).
+//
+// GET is skipped even with a JSON Content-Type: the OpenAI SDK sends one on
+// its /v1/realtime websocket upgrade. Filtering would give that bodiless
+// request a {"model":...} body, which the upstream does not read as part of
+// the request and so parses as websocket frames, breaking the session.
 func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead ||
+				!strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 				next.ServeHTTP(w, r)
 				return
 			}

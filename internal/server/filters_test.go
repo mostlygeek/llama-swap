@@ -264,3 +264,32 @@ func TestServer_FormFilterMiddleware(t *testing.T) {
 		t.Errorf("request context = %+v, want original whisper model", gotContext)
 	}
 }
+
+// TestServer_FilterMiddleware_SkipsGet covers the OpenAI SDK's /v1/realtime
+// websocket upgrade, a GET that carries Content-Type: application/json. The
+// filters must not give it a {"model":...} body: the upstream would read
+// those bytes as websocket frames and drop the session.
+func TestServer_FilterMiddleware_SkipsGet(t *testing.T) {
+	cfg := config.Config{Models: map[string]config.ModelConfig{
+		"rt-model": {UseModelName: "org/rt-model-GGUF"},
+	}}
+
+	r := httptest.NewRequest(http.MethodGet, "/v1/realtime?intent=transcription&model=rt-model", nil)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Connection", "Upgrade")
+	r.Header.Set("Upgrade", "websocket")
+
+	called := false
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		body, _ := io.ReadAll(r.Body)
+		if len(body) != 0 || r.ContentLength != 0 || r.Header.Get("Content-Length") != "" {
+			t.Errorf("GET gained a body: %q (ContentLength %d, header %q)",
+				body, r.ContentLength, r.Header.Get("Content-Length"))
+		}
+	})
+	CreateFilterMiddleware(cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
+	if !called {
+		t.Fatal("request did not reach the next handler")
+	}
+}
