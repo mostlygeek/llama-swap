@@ -30,6 +30,13 @@
 
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
   const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
+  const parameterEnabledStore = persistentStore("playground-parameters-enabled", {
+    temperature: true,
+    topP: true,
+    minP: true,
+    topK: true,
+    maxTokens: true,
+  });
   const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
   const endpointStore = persistentStore<Endpoint>("playground-endpoint", "v1/chat/completions");
   const maxTokensStore = persistentStore<number>("playground-max-tokens", 4096);
@@ -52,6 +59,7 @@
     model: string;
     systemPrompt: string;
     endpoint: Endpoint;
+    parameterEnabled?: typeof $parameterEnabledStore;
     temperature: number;
     maxTokens: number;
     topP: number;
@@ -166,6 +174,7 @@
       model: $selectedModelStore,
       systemPrompt: $systemPromptStore,
       endpoint: $endpointStore,
+      parameterEnabled: { ...$parameterEnabledStore },
       temperature: $temperatureStore,
       maxTokens: $maxTokensStore,
       topP: $topPStore,
@@ -188,6 +197,7 @@
     }
     systemPromptStore.set(settings.systemPrompt);
     endpointStore.set(settings.endpoint);
+    if (settings.parameterEnabled) parameterEnabledStore.set(settings.parameterEnabled);
     temperatureStore.set(settings.temperature);
     maxTokensStore.set(settings.maxTokens);
     topPStore.set(settings.topP);
@@ -356,12 +366,12 @@
         requestMessages(),
         abortController.signal,
         {
-          temperature: $temperatureStore,
           endpoint: $endpointStore,
-          max_tokens: $maxTokensStore,
-          top_p: $topPStore,
-          top_k: $topKStore,
-          min_p: $minPStore,
+          temperature: $parameterEnabledStore.temperature ? $temperatureStore : undefined,
+          top_p: $parameterEnabledStore.topP ? $topPStore : undefined,
+          top_k: $parameterEnabledStore.topK ? $topKStore : undefined,
+          min_p: $parameterEnabledStore.minP ? $minPStore : undefined,
+          max_tokens: $parameterEnabledStore.maxTokens ? $maxTokensStore : undefined,
         }
       );
 
@@ -505,9 +515,18 @@
             </Select.Root>
           </div>
           <div>
-            <Label class="mb-1" for="temperature">
-              Temperature: {$temperatureStore.toFixed(2)}
-            </Label>
+            <div class="mb-1 flex items-center justify-between gap-2">
+              <Label for="temperature">
+                Temperature: {$temperatureStore.toFixed(2)}
+              </Label>
+              <input
+                type="checkbox"
+                class="accent-primary"
+                aria-label="Enable Temperature"
+                bind:checked={$parameterEnabledStore.temperature}
+                disabled={isStreaming}
+              />
+            </div>
             <input
               id="temperature"
               type="range"
@@ -516,7 +535,7 @@
               step="0.05"
               class="accent-primary w-full"
               bind:value={$temperatureStore}
-              disabled={isStreaming}
+              disabled={isStreaming || !$parameterEnabledStore.temperature}
             />
             <div class="text-muted-foreground mt-1 flex justify-between text-xs">
               <span>Precise (0)</span>
@@ -524,9 +543,18 @@
             </div>
           </div>
           <div>
-            <Label class="mb-1" for="top-p">
-              Top P (nucleus): {$topPStore.toFixed(2)}
-            </Label>
+            <div class="mb-1 flex items-center justify-between gap-2">
+              <Label for="top-p">
+                Top P (nucleus): {$topPStore.toFixed(2)}
+              </Label>
+              <input
+                type="checkbox"
+                class="accent-primary"
+                aria-label="Enable Top P"
+                bind:checked={$parameterEnabledStore.topP}
+                disabled={isStreaming}
+              />
+            </div>
             <input
               id="top-p"
               type="range"
@@ -535,7 +563,7 @@
               step="0.01"
               class="accent-primary w-full"
               bind:value={$topPStore}
-              disabled={isStreaming}
+              disabled={isStreaming || !$parameterEnabledStore.topP}
             />
             <div class="text-muted-foreground mt-1 flex justify-between text-xs">
               <span>Narrow (0.01)</span>
@@ -543,9 +571,18 @@
             </div>
           </div>
           <div>
-            <Label class="mb-1" for="min-p">
-              Min P: {$minPStore.toFixed(2)}
-            </Label>
+            <div class="mb-1 flex items-center justify-between gap-2">
+              <Label for="min-p">
+                Min P: {$minPStore.toFixed(2)}
+              </Label>
+              <input
+                type="checkbox"
+                class="accent-primary"
+                aria-label="Enable Min P"
+                bind:checked={$parameterEnabledStore.minP}
+                disabled={isStreaming}
+              />
+            </div>
             <input
               id="min-p"
               type="range"
@@ -554,12 +591,21 @@
               step="0.01"
               class="accent-primary w-full"
               bind:value={$minPStore}
-              disabled={isStreaming}
+              disabled={isStreaming || !$parameterEnabledStore.minP}
             />
             <p class="text-muted-foreground mt-1 text-xs">Off at 0. Only sent on /v1/chat/completions.</p>
           </div>
           <div>
-            <Label class="mb-1" for="top-k">Top K</Label>
+            <div class="mb-1 flex items-center justify-between gap-2">
+              <Label for="top-k">Top K</Label>
+              <input
+                type="checkbox"
+                class="accent-primary"
+                aria-label="Enable Top K"
+                bind:checked={$parameterEnabledStore.topK}
+                disabled={isStreaming}
+              />
+            </div>
             <Input
               id="top-k"
               type="number"
@@ -567,14 +613,23 @@
               max="10000"
               step="1"
               bind:value={$topKStore}
-              disabled={isStreaming}
+              disabled={isStreaming || !$parameterEnabledStore.topK}
             />
             <p class="text-muted-foreground mt-1 text-xs">0 disables it. Not sent on /v1/responses.</p>
           </div>
           <div>
-            <Label class="mb-1" for="max-tokens">Max Tokens</Label>
-            <Input id="max-tokens" type="number" min="1" bind:value={$maxTokensStore} disabled={isStreaming} />
-            <p class="text-muted-foreground mt-1 text-xs">Required for /v1/messages.</p>
+            <div class="mb-1 flex items-center justify-between gap-2">
+              <Label for="max-tokens">Max Tokens</Label>
+              <input
+                type="checkbox"
+                class="accent-primary"
+                aria-label="Enable Max Tokens"
+                bind:checked={$parameterEnabledStore.maxTokens}
+                disabled={isStreaming}
+              />
+            </div>
+            <Input id="max-tokens" type="number" min="1" bind:value={$maxTokensStore} disabled={isStreaming || !$parameterEnabledStore.maxTokens} />
+            <p class="text-muted-foreground mt-1 text-xs">Defaults to 4096 for /v1/messages when disabled.</p>
           </div>
         </TabsContent>
 
