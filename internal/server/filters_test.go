@@ -272,7 +272,8 @@ func TestServer_FilterMiddleware_SkipsBodylessRequests(t *testing.T) {
 		"whisper": {UseModelName: "whisper-large-v3"},
 	}}
 
-	var gotBody string
+	var reached bool
+	var gotBody, gotQuery string
 	var gotContentLength int64
 	var gotContentLengthHeader string
 	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -281,7 +282,9 @@ func TestServer_FilterMiddleware_SkipsBodylessRequests(t *testing.T) {
 			t.Errorf("read body: %v", err)
 			return
 		}
+		reached = true
 		gotBody = string(body)
+		gotQuery = r.URL.RawQuery
 		gotContentLength = r.ContentLength
 		gotContentLengthHeader = r.Header.Get("Content-Length")
 	})
@@ -289,13 +292,15 @@ func TestServer_FilterMiddleware_SkipsBodylessRequests(t *testing.T) {
 	requests := []struct {
 		name    string
 		method  string
-		target  string
+		path    string
+		query   string
 		headers map[string]string
 	}{
 		{
 			name:   "realtime websocket upgrade",
 			method: http.MethodGet,
-			target: "/v1/realtime?model=whisper&intent=transcription",
+			path:   "/v1/realtime",
+			query:  "model=whisper&intent=transcription",
 			headers: map[string]string{
 				"Content-Type": "application/json",
 				"Upgrade":      "websocket",
@@ -305,8 +310,38 @@ func TestServer_FilterMiddleware_SkipsBodylessRequests(t *testing.T) {
 		{
 			name:    "query model GET",
 			method:  http.MethodGet,
-			target:  "/props?model=whisper",
+			path:    "/props",
+			query:   "model=whisper",
 			headers: map[string]string{"Content-Type": "application/json"},
+		},
+		{
+			name:   "realtime upgrade, multipart content type",
+			method: http.MethodGet,
+			path:   "/v1/realtime",
+			query:  "model=whisper",
+			headers: map[string]string{
+				"Content-Type": "multipart/form-data; boundary=x",
+				"Upgrade":      "websocket",
+				"Connection":   "Upgrade",
+			},
+		},
+		{
+			name:    "query model GET, multipart content type",
+			method:  http.MethodGet,
+			path:    "/v1/audio/voices",
+			query:   "model=whisper",
+			headers: map[string]string{"Content-Type": "multipart/form-data; boundary=x"},
+		},
+		{
+			name:   "POST websocket upgrade",
+			method: http.MethodPost,
+			path:   "/v1/realtime",
+			query:  "model=whisper",
+			headers: map[string]string{
+				"Content-Type": "application/json",
+				"Upgrade":      "websocket",
+				"Connection":   "Upgrade",
+			},
 		},
 	}
 
@@ -321,14 +356,24 @@ func TestServer_FilterMiddleware_SkipsBodylessRequests(t *testing.T) {
 	for _, tc := range requests {
 		for _, m := range middlewares {
 			t.Run(tc.name+", "+m.name, func(t *testing.T) {
-				r := httptest.NewRequest(tc.method, tc.target, nil)
+				r := httptest.NewRequest(tc.method, tc.path+"?"+tc.query, nil)
 				for k, v := range tc.headers {
 					r.Header.Set(k, v)
 				}
-				m.mw(final).ServeHTTP(httptest.NewRecorder(), r)
+				reached, gotBody, gotQuery = false, "", ""
+				gotContentLength, gotContentLengthHeader = -1, ""
+				rec := httptest.NewRecorder()
+				m.mw(final).ServeHTTP(rec, r)
 
+				if !reached || rec.Code != http.StatusOK {
+					t.Errorf("request did not reach the next handler: reached=%v status=%d",
+						reached, rec.Code)
+				}
 				if gotBody != "" {
 					t.Errorf("body = %q, want it passed through empty", gotBody)
+				}
+				if gotQuery != tc.query {
+					t.Errorf("query = %q, want it passed through as %q", gotQuery, tc.query)
 				}
 				if gotContentLength != 0 {
 					t.Errorf("ContentLength = %d, want 0", gotContentLength)
