@@ -68,6 +68,16 @@ models:
 	assert.Contains(t, err.Error(), "duplicate alias m1 found in model: model")
 }
 
+func TestConfig_ModelAliasMustDifferFromID(t *testing.T) {
+	_, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  self-alias-demo:
+    proxy: "http://127.0.0.1:9999"
+    aliases: [self-alias-demo]
+`))
+	require.EqualError(t, err, "model self-alias-demo alias must not equal its own model ID")
+}
+
 func TestConfig_StorePath(t *testing.T) {
 	t.Run("path accepted in writable directory", func(t *testing.T) {
 		dir := t.TempDir()

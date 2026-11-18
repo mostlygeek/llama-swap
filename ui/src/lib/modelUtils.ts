@@ -109,7 +109,12 @@ export const MODEL_GROUP_PEERS = "Peers";
 
 function optionsFor(models: Model[], group: string, withAliases: boolean): ModelOption[] {
   const options: ModelOption[] = [];
+  // Reserve model IDs so a redundant alias cannot hide a model's own row.
+  const modelIDs = new Set(models.map((model) => model.id));
+  const seen = new Set<string>();
   for (const model of models) {
+    if (seen.has(model.id)) continue;
+    seen.add(model.id);
     options.push({
       value: model.id,
       group,
@@ -117,6 +122,8 @@ function optionsFor(models: Model[], group: string, withAliases: boolean): Model
     });
     if (!withAliases) continue;
     for (const alias of model.aliases ?? []) {
+      if (modelIDs.has(alias) || seen.has(alias)) continue;
+      seen.add(alias);
       options.push({ value: alias, group, aliasOf: model.id });
     }
   }

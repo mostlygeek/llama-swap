@@ -187,6 +187,33 @@ describe("groupModels", () => {
 });
 
 describe("buildModelOptions", () => {
+  it.each([undefined, { capabilities: ["vision"] }])("deduplicates model IDs and aliases within a group (%j)", (matcher) => {
+    const options = buildModelOptions({
+      models: [
+        makeModel({ id: "self-alias-demo", aliases: ["self-alias-demo", "chat", "chat", "other"], capabilities: { vision: true } }),
+        makeModel({ id: "other", aliases: ["chat"], capabilities: { vision: true } }),
+        makeModel({ id: "other", capabilities: { vision: true } }),
+      ],
+      matcher,
+    });
+    expect(options.map((option) => [option.value, option.aliasOf])).toEqual([
+      ["self-alias-demo", undefined],
+      ["chat", "self-alias-demo"],
+      ["other", undefined],
+    ]);
+  });
+
+  it("preserves the same value in different groups", () => {
+    const options = buildModelOptions({
+      models: [makeModel({ id: "chat" })],
+      profiles: [makeModel({ id: "chat" })],
+    });
+    expect(options.map((option) => [option.group, option.value])).toEqual([
+      [MODEL_GROUP_PROFILE, "chat"],
+      [MODEL_GROUP_LOCAL, "chat"],
+    ]);
+  });
+
   const models: Model[] = [
     makeModel({ id: "vision-model", name: "Vision", modalities: { in: ["text", "image"], out: ["text"] }, aliases: ["gpt-4o"] }),
     makeModel({ id: "draw-model", name: "draw-model", modalities: { in: ["text"], out: ["image"] } }),
