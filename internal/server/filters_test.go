@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tidwall/gjson"
@@ -262,5 +263,106 @@ func TestServer_FormFilterMiddleware(t *testing.T) {
 	}
 	if gotContext.Model != "whisper" || gotContext.ModelID != "whisper" {
 		t.Errorf("request context = %+v, want original whisper model", gotContext)
+	}
+}
+
+// A bodyless request must never be given a body of its own (#1352).
+func TestServer_FilterMiddleware_SkipsBodylessRequests(t *testing.T) {
+	cfg := config.Config{Models: map[string]config.ModelConfig{
+		"whisper": {UseModelName: "whisper-large-v3"},
+	}}
+
+	var gotBody string
+	var gotContentLength int64
+	var gotContentLengthHeader string
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		gotBody = string(body)
+		gotContentLength = r.ContentLength
+		gotContentLengthHeader = r.Header.Get("Content-Length")
+	})
+
+	requests := []struct {
+		name    string
+		method  string
+		target  string
+		headers map[string]string
+	}{
+		{
+			name:   "realtime websocket upgrade",
+			method: http.MethodGet,
+			target: "/v1/realtime?model=whisper&intent=transcription",
+			headers: map[string]string{
+				"Content-Type": "application/json",
+				"Upgrade":      "websocket",
+				"Connection":   "Upgrade",
+			},
+		},
+		{
+			name:    "query model GET",
+			method:  http.MethodGet,
+			target:  "/props?model=whisper",
+			headers: map[string]string{"Content-Type": "application/json"},
+		},
+	}
+
+	middlewares := []struct {
+		name string
+		mw   chain.Middleware
+	}{
+		{"json filters", CreateFilterMiddleware(cfg)},
+		{"form filters", CreateFormFilterMiddleware(cfg)},
+	}
+
+	for _, tc := range requests {
+		for _, m := range middlewares {
+			t.Run(tc.name+", "+m.name, func(t *testing.T) {
+				r := httptest.NewRequest(tc.method, tc.target, nil)
+				for k, v := range tc.headers {
+					r.Header.Set(k, v)
+				}
+				m.mw(final).ServeHTTP(httptest.NewRecorder(), r)
+
+				if gotBody != "" {
+					t.Errorf("body = %q, want it passed through empty", gotBody)
+				}
+				if gotContentLength != 0 {
+					t.Errorf("ContentLength = %d, want 0", gotContentLength)
+				}
+				if gotContentLengthHeader != "" {
+					t.Errorf("Content-Length header = %q, want it unset", gotContentLengthHeader)
+				}
+			})
+		}
+	}
+}
+
+// A POST with a JSON body is still rewritten.
+func TestServer_FilterMiddleware_RewritesPostJSON(t *testing.T) {
+	cfg := config.Config{Models: map[string]config.ModelConfig{
+		"whisper": {UseModelName: "whisper-large-v3"},
+	}}
+
+	var gotBody string
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		gotBody = string(body)
+	})
+
+	r := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions",
+		bytes.NewReader([]byte(`{"model":"whisper"}`)))
+	r.Header.Set("Content-Type", "application/json")
+	CreateFilterMiddleware(cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
+
+	if got := gjson.GetBytes([]byte(gotBody), "model").String(); got != "whisper-large-v3" {
+		t.Errorf("model = %q, want whisper-large-v3 (body %q)", got, gotBody)
 	}
 }
