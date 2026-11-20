@@ -31,11 +31,11 @@
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
   const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
   const parameterEnabledStore = persistentStore("playground-parameters-enabled", {
-    temperature: true,
-    topP: true,
-    minP: true,
-    topK: true,
-    maxTokens: true,
+    temperature: false,
+    topP: false,
+    minP: false,
+    topK: false,
+    maxTokens: false,
   });
   const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
   const endpointStore = persistentStore<Endpoint>("playground-endpoint", "v1/chat/completions");
