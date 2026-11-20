@@ -1,0 +1,3 @@
+# write the commit hash into .git-commit in `git archive` output, such as
+# GitHub release tarballs, so builds without a .git directory can read it
+/.git-commit export-subst
