@@ -102,8 +102,15 @@ SRC_DIR = internal/mcptools/sourcecode/_src
 src:
 	rm -rf $(SRC_DIR)
 	mkdir -p $(SRC_DIR)
-	git ls-files -z --cached --others --exclude-standard -- '*.go' 'ui/*.ts' 'ui/*.svelte' \
-		':(exclude)*_test.go' ':(exclude)*.test.ts' | tar -cf - --null -T - | tar -xf - -C $(SRC_DIR)
+	@# outside a git checkout (e.g. a release tarball) find the same files
+	if [ -e .git ]; then \
+		git ls-files -z --cached --others --exclude-standard -- '*.go' 'ui/*.ts' 'ui/*.svelte' \
+			':(exclude)*_test.go' ':(exclude)*.test.ts'; \
+	else \
+		find . -name node_modules -prune -o -path ./$(SRC_DIR) -prune -o -type f \
+			\( \( -name '*.go' ! -name '*_test.go' \) -o \( -path './ui/*' \
+			\( \( -name '*.ts' ! -name '*.test.ts' \) -o -name '*.svelte' \) \) \) -print0; \
+	fi | tar -cf - --null -T - | tar -xf - -C $(SRC_DIR)
 
 # One target per GOOS/GOARCH pair. CGO is off so these cross compile on any
 # host, same as the release builds in .goreleaser.yaml. Intel Mac binaries are
