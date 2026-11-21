@@ -100,6 +100,15 @@ func TestUsage_Auto_Precedence(t *testing.T) {
 	}
 }
 
+func TestUsage_Auto_TensorFoldSpeculative(t *testing.T) {
+	// A peer proxying TensorFold passes the speculative object through; auto
+	// must map its counters like the dedicated extractor does.
+	u := parseUsageJSON(t, hint.Unknown, "/v1/chat/completions",
+		`{"usage":{"prompt_tokens":56,"completion_tokens":8},"tensorfold":{"prefill_s":0.5},"speculative":{"drafted":10,"accepted":4}}`)
+	assert.Equal(t, 10, u.Tokens.DraftTokens)
+	assert.Equal(t, 4, u.Tokens.DraftAccTokens)
+}
+
 func TestUsage_Auto_TimingsDraftTokensSurviveEmptyMetrics(t *testing.T) {
 	// An empty speculative_decoding object must not clobber timings' counts.
 	u := parseUsageJSON(t, hint.Unknown, "/v1/chat/completions",

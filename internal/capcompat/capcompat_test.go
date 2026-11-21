@@ -552,6 +552,38 @@ func TestCapcompat_DetectYamz(t *testing.T) {
 	require.NoError(t, info.Capabilities.Validate())
 }
 
+func TestCapcompat_DetectTensorFold(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "tensorfold", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "qwen3.8-flash-next")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.TensorFold, info.Upstream, "tensorfold lists its models as owned_by tensorfold")
+	assert.Equal(t, 262144, info.Capabilities.Context)
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools, "the capabilities object is not read")
+	assert.Len(t, up.hits, 1, "only /v1/models is needed")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
+func TestCapcompat_DetectTensorFoldWithoutContext(t *testing.T) {
+	// A build that leaves the window unspecified omits both context fields;
+	// the owner match must still name it.
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": []byte(`{"object":"list","data":[{"id":"m","object":"model","owned_by":"tensorfold"}]}`),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "m")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.TensorFold, info.Upstream)
+	assert.Zero(t, info.Capabilities.Context, "a listing without a window advertises none")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
 func TestCapcompat_DetectHalogen(t *testing.T) {
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "halogen", "v1_models.json"),

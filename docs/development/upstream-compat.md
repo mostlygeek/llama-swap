@@ -52,6 +52,7 @@ Three packages are involved:
 | `llamaServerProber` | `owned_by` `llamacpp` | `/v1/models`, `/props` |
 | `halogenProber` | `owned_by` `halogen` | `/v1/models`, `/health` |
 | `hipfireProber` | `owned_by` `hipfire` | `/v1/models` (no context length reported) |
+| `tensorFoldProber` | `owned_by` `tensorfold` | `/v1/models` (context optional) |
 | `defaultProber` | any entry with a context length | `/v1/models` only |
 
 Pick the smallest change that works:
@@ -130,7 +131,7 @@ real answer.
 | `ReasoningTokens` | Reasoning share of `OutputTokens` | Anthropic does not report it |
 | `PromptPerSecond` | Uncached prompt tokens per second of prefill | vLLM TTFT includes queue time |
 | `TokensPerSecond` | Output tokens per second of decode, prefill excluded | vLLM's own `tokens_per_second` includes TTFT; use `mean_itl_ms` |
-| `DraftTokens` / `DraftAccTokens` | Speculative tokens drafted / accepted | Require both counters; kyojin reports accepted + rejected |
+| `DraftTokens` / `DraftAccTokens` | Speculative tokens drafted / accepted | Require both counters; kyojin reports accepted + rejected; TensorFold keeps them in a top-level `speculative` object beside `tensorfold` on native servers, inside the block on older ones |
 | `DurationMs` | Whole request time | Use a server total only when longer than wall time |
 
 If a server's numbers cannot be mapped with confidence, keep what it reports

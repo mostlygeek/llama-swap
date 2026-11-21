@@ -21,13 +21,14 @@ func (autoExtractor) newParser(path string, start time.Time) usageParser {
 }
 
 type autoParser struct {
-	start      time.Time
-	read       apiReader
-	api        apiUsage
-	block      gjson.Result // last usage block
-	timings    gjson.Result
-	metrics    gjson.Result
-	tensorfold gjson.Result
+	start       time.Time
+	read        apiReader
+	api         apiUsage
+	block       gjson.Result // last usage block
+	timings     gjson.Result
+	metrics     gjson.Result
+	tensorfold  gjson.Result
+	speculative gjson.Result
 }
 
 func (p *autoParser) event(ev gjson.Result) {
@@ -45,13 +46,16 @@ func (p *autoParser) event(ev gjson.Result) {
 	if tf := ev.Get("tensorfold"); tf.IsObject() {
 		p.tensorfold = tf
 	}
+	if sp := ev.Get("speculative"); sp.IsObject() {
+		p.speculative = sp
+	}
 }
 
 func (p *autoParser) usage() Usage {
 	u := p.api.toUsage(p.start)
 	applyOMLXRates(&u, p.block)
 	applyTabbyAPIRates(&u, p.block) // TabbyAPI's fields win when both appear
-	applyTensorFold(&u, p.tensorfold)
+	applyTensorFold(&u, p.tensorfold, p.speculative)
 	applyTimings(&u, p.timings)
 	applyKyojinDrafts(&u, p.timings)
 	applyRadianceTotal(&u, p.timings)
