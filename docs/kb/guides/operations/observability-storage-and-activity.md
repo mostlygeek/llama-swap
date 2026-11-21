@@ -2,9 +2,9 @@
 title: Observability, storage and Activity
 summary: Use logs, metrics, captures and the Activity view to diagnose requests and retain useful history.
 category: guides
-tags: [operations, logs, metrics, activity, captures, stdout, http, realtime, websocket]
+tags: [operations, logs, metrics, activity, captures, stdout, http, realtime, websocket, opentelemetry, otlp]
 config_keys: [logLevel, logToStdout, metricsMaxInMemory, captureBuffer, store.path, store.persistCaptures]
-updated: 2026-11-03
+updated: 2026-11-09
 ---
 
 # Observability, storage and Activity
@@ -34,6 +34,62 @@ stays unknown. `hipfire.tok_s` includes prefill time and is not used as a decode
 fallback. `tau` and `cycles` are not draft/accepted token counters, so those
 columns stay unknown too. Hipfire's model listing does not report context
 length or tool/vision capabilities; configure those manually when needed.
+
+## OpenTelemetry (OTLP) metrics
+
+llama-swap can push per-request metrics that follow the OpenTelemetry GenAI
+semantic conventions to an OTLP endpoint, such as an OpenTelemetry
+Collector. They come from the same record as the Activity view, so requests
+served by a model that has since been swapped out are still counted, even
+when the activity store fails to save the row. It is
+off unless an OTLP endpoint is set in the environment; there is no config
+file setting:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=homelab \
+llama-swap -config config.yaml
+```
+
+Histograms, labeled with `gen_ai.operation.name`, `gen_ai.provider.name` and
+`gen_ai.request.model`:
+
+- `gen_ai.server.request.duration` (s): every request, with `error.type` set
+  to the HTTP status for 4xx/5xx. A client that hung up (499) is not an
+  error. It includes model loading when the request started the model.
+- `gen_ai.client.token.usage` (`{token}`): input and output tokens, split by
+  `gen_ai.token.type`, when the upstream reported them.
+- `gen_ai.server.time_per_output_token` (s): successful requests with a known
+  decode rate (the Activity view's Decode column).
+
+It uses the OpenTelemetry Go SDK, which reads the standard variables:
+`OTEL_EXPORTER_OTLP_ENDPOINT` (`/v1/metrics` is appended for HTTP),
+`OTEL_EXPORTER_OTLP_PROTOCOL` (`http/protobuf`, the default, or `grpc`),
+`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` (used as-is),
+`OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_COMPRESSION`,
+`OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_SERVICE_NAME` (default `llama-swap`),
+`OTEL_RESOURCE_ATTRIBUTES`, `OTEL_METRIC_EXPORT_INTERVAL` (ms, default
+60000), and `OTEL_SDK_DISABLED=true` to turn it off. `OTEL_METRICS_EXPORTER`
+must be unset or include `otlp`; any other value (`none`, `prometheus`, ...)
+turns it off.
+
+What goes wrong:
+
+- The endpoint port must match the protocol: 4318 for the default
+  `http/protobuf`, 4317 for `grpc`. A mismatch shows up as failed exports in
+  the proxy log. `http/json` is not supported and falls back to
+  `http/protobuf` with a warning.
+- Totals are cumulative from llama-swap's start and survive config reloads,
+  but reset on restart. A failed push is logged and retried with the totals
+  at the next interval.
+- `gen_ai.provider.name` is `unknown` when llama-swap could not detect the
+  server behind a model (it reads `/v1/models`). llama-server shows as
+  `llama.cpp`.
+- Time to first token is not reported; llama-swap does not measure it.
+- Realtime (`/v1/realtime`) websocket sessions are not reported: one
+  session is not one request. They still show in the Activity view.
+- A malformed `OTEL_RESOURCE_ATTRIBUTES` entry is skipped with a warning;
+  the rest are still applied.
 
 ## Log streams
 
