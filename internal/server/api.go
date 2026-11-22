@@ -214,13 +214,19 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for peerID, peer := range s.cfg.Peers {
-		for _, modelID := range peer.Models {
+	for peerID := range s.cfg.Peers {
+		for _, modelID := range s.cfg.PeerModelIDs(peerID) {
 			fqn := config.PeerModelFQN(peerID, modelID)
 			modelIDs[fqn] = struct{}{}
 			if resolvedPeer, resolvedModel, found := s.cfg.ResolvePeerModel(modelID); found &&
 				resolvedPeer == peerID && resolvedModel == modelID {
 				modelIDs[modelID] = struct{}{}
+			}
+			if record, ok := s.cfg.PeerModelRecord(peerID, modelID); ok {
+				if rec, ok := peerCatalogRecord(fqn, peerID, modelID, record, created); ok {
+					data = append(data, rec)
+					continue
+				}
 			}
 			data = append(data, newRecord(
 				fqn,
@@ -536,4 +542,60 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	default:
 		swaputil.SendResponse(w, r, http.StatusNotFound, "no router for model "+modelID)
 	}
+}
+
+// peerCatalogRecord builds the /v1/models entry for a peer model from the
+// peer's own entry, so its name, description, context length, capabilities
+// and metadata carry through. meta.llamaswap is rewritten to describe the
+// model as this instance's peer model. ok is false if the record cannot be
+// read as a model entry.
+func peerCatalogRecord(fqn, peerID, modelID string, record map[string]any, created int64) (modelRecord, bool) {
+	raw, err := json.Marshal(record)
+	if err != nil {
+		return modelRecord{}, false
+	}
+	var rec modelRecord
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return modelRecord{}, false
+	}
+
+	rec.ID = fqn
+	rec.Object = "model"
+	if rec.Created == 0 {
+		rec.Created = created
+	}
+	if rec.OwnedBy == "" {
+		rec.OwnedBy = "llama-swap"
+	}
+	name := strings.TrimSpace(rec.Name)
+	if name == "" {
+		name = modelID
+	}
+	rec.Name = peerID + ": " + name
+	if rec.ContextWindow == 0 {
+		rec.ContextWindow = rec.ContextLength
+	}
+	if rec.Status == nil {
+		rec.Status = map[string]any{"value": "unloaded"}
+	}
+
+	// Keep the peer's custom metadata but drop fields that describe the
+	// model in the peer's own namespace.
+	llamaSwap := map[string]any{}
+	if peerMeta, ok := rec.Meta["llamaswap"].(map[string]any); ok {
+		for key, value := range peerMeta {
+			switch key {
+			case "type", "modelID", "peerID", "strategy":
+				continue
+			}
+			llamaSwap[key] = value
+		}
+	}
+	llamaSwap["type"] = "peer"
+	llamaSwap["peerID"] = peerID
+	if rec.Meta == nil {
+		rec.Meta = make(map[string]any)
+	}
+	rec.Meta["llamaswap"] = llamaSwap
+	return rec, true
 }

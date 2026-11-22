@@ -3,6 +3,8 @@ import {
   buildModelOptions,
   filterModelOptions,
   groupModels,
+  groupModelsByPeer,
+  peerLocalModelID,
   matchesCapabilities,
   matchesModel,
   modelServerPath,
@@ -287,5 +289,33 @@ describe("filterModelOptions", () => {
 
   it("matches an alias by its own name", () => {
     expect(filterModelOptions(options, "fast").map((o) => o.value)).toEqual(["fast"]);
+  });
+});
+
+describe("groupModelsByPeer", () => {
+  it("groups peer models by peer in numeric order and skips local models", () => {
+    const groups = groupModelsByPeer([
+      makeModel({ id: "local" }),
+      makeModel({ id: "peer10/b", peerID: "peer10" }),
+      makeModel({ id: "peer2/m10", peerID: "peer2" }),
+      makeModel({ id: "peer2/m9", peerID: "peer2" }),
+    ]);
+    expect(groups.map((g) => g.peerID)).toEqual(["peer2", "peer10"]);
+    expect(groups[0].models.map((m) => m.id)).toEqual(["peer2/m9", "peer2/m10"]);
+  });
+
+  it("returns no groups without peer models", () => {
+    expect(groupModelsByPeer([makeModel()])).toEqual([]);
+  });
+});
+
+describe("peerLocalModelID", () => {
+  it("strips the peer prefix", () => {
+    expect(peerLocalModelID(makeModel({ id: "kitchen/org/qwen", peerID: "kitchen" }))).toBe("org/qwen");
+  });
+
+  it("keeps IDs without the prefix", () => {
+    expect(peerLocalModelID(makeModel({ id: "qwen", peerID: "kitchen" }))).toBe("qwen");
+    expect(peerLocalModelID(makeModel({ id: "kitchen/qwen" }))).toBe("kitchen/qwen");
   });
 });

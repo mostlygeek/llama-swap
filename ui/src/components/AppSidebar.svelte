@@ -1,6 +1,6 @@
 <script lang="ts">
   import { link } from "svelte-spa-router";
-  import { FerrisWheel, Boxes, Activity, Cat, ScrollText, Gauge, Cpu, Sun, Moon, Monitor, ChevronRight, Settings, CircleQuestionMark } from "@lucide/svelte";
+  import { FerrisWheel, Boxes, Activity, Cat, ScrollText, Gauge, Cpu, Sun, Moon, Monitor, ChevronRight, Settings, CircleQuestionMark, Network } from "@lucide/svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -8,11 +8,12 @@
   import { currentRoute } from "../stores/route";
   import { playgroundActivity, docsAgentStreaming } from "../stores/playgroundActivity";
   import { performanceEnabled, models, tailcatStatus, helpAgentEnabled } from "../stores/api";
-  import { showUnlistedModels } from "../stores/modelDisplay";
-  import { modelsMenuOpen, modelsGroupsCollapsed } from "../stores/sidebar";
+  import { showUnlistedModels, groupByClass } from "../stores/modelDisplay";
+  import { modelsMenuOpen, peersMenuOpen, modelsGroupsCollapsed } from "../stores/sidebar";
   import { groupModelsByClass, modelClassLabels, sectionStatusDotColor } from "../lib/modelClasses";
   import type { Model } from "../lib/types";
   import { isComposingKey } from "../lib/ime";
+  import { groupModelsByPeer, peerLocalModelID } from "../lib/modelUtils";
   import ConnectionStatus from "./ConnectionStatus.svelte";
   import MiddleTruncate from "./MiddleTruncate.svelte";
 
@@ -59,8 +60,25 @@
   );
   // Category groups for the Models sub-menu, non-empty ones only, in
   // MODEL_CLASS_ORDER - the same grouping the Models dashboard uses.
+  let peerGroups = $derived(groupModelsByPeer(visiblePeerModels));
+  // A peer model's detail page highlights Peers rather than Models.
+  let peerModelRoute = $derived.by(() => {
+    if (!$currentRoute.startsWith("/models/")) return false;
+    let id: string;
+    try {
+      id = decodeURIComponent($currentRoute.slice("/models/".length));
+    } catch {
+      return false;
+    }
+    return $models.some((model) => model.peerID && model.id === id);
+  });
   let localClassGroups = $derived(
     groupModelsByClass(visibleLocalModels).filter((group) => group.models.length > 0),
+  );
+  // Without categories (the Models page's "Categories" display option), one
+  // list in the same order the Models page uses.
+  let sortedLocalModels = $derived(
+    [...visibleLocalModels].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true })),
   );
 
   function isGroupCollapsed(classId: string): boolean {
@@ -99,9 +117,14 @@
       isActive={$currentRoute === `/models/${encodeURIComponent(model.id)}`}
     >
       {#snippet child({ props })}
-        <a href="/models/{encodeURIComponent(model.id)}" use:link {...props}>
-          <span class={`size-2 shrink-0 rounded-full ${dotClass[statusDotColor(model)]}`}></span>
-          <MiddleTruncate text={model.id} class="flex-1" />
+        <a href="/models/{encodeURIComponent(model.id)}" use:link {...props} title={model.id}>
+          <!-- Peer models have no load state to show, and are listed under their peer. -->
+          {#if model.peerID}
+            <MiddleTruncate text={peerLocalModelID(model)} class="flex-1" />
+          {:else}
+            <span class={`size-2 shrink-0 rounded-full ${dotClass[statusDotColor(model)]}`}></span>
+            <MiddleTruncate text={model.id} class="flex-1" />
+          {/if}
         </a>
       {/snippet}
     </Sidebar.MenuSubButton>
@@ -138,6 +161,83 @@
       </Collapsible.Content>
     </Collapsible.Root>
   </li>
+{/snippet}
+
+<!-- A peer's folding heading row, aligned with the category labels under
+     Models so peer IDs do not push their model names further right. -->
+{#snippet peerHeading(peerID: string, count: number)}
+  {@const key = `peer:${peerID}`}
+  {@const open = !isGroupCollapsed(key)}
+  <button
+    type="button"
+    class="flex h-7 w-full cursor-pointer min-w-0 items-center gap-2 rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+    onclick={() => toggleGroup(key)}
+    aria-expanded={open}
+    aria-label={`Toggle peer ${peerID}`}
+  >
+    <span class="size-4 shrink-0"></span>
+    <span class="flex-1 truncate text-left">{peerID}</span>
+    <span class="text-sidebar-foreground/50 tabular-nums">{count}</span>
+    <ChevronRight class={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden="true" />
+  </button>
+{/snippet}
+
+{#snippet peersMenuItem()}
+  <Sidebar.MenuItem>
+    <Collapsible.Root
+      open={$peersMenuOpen}
+      onOpenChange={(v) => peersMenuOpen.set(v)}
+      class="gap-0"
+    >
+      <Sidebar.MenuButton isActive={peerModelRoute} tooltipContent="Peers">
+        {#snippet child({ props })}
+          <a href="/models" use:link {...props}>
+            <Network />
+            <span>Peers</span>
+            <span class="text-sidebar-foreground/50 ml-auto text-xs tabular-nums">{visiblePeerModels.length}</span>
+            <span
+              class="transition-transform duration-200 {$peersMenuOpen ? 'rotate-90' : ''}"
+              role="button"
+              tabindex="0"
+              aria-label="Toggle peers section"
+              onclick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                peersMenuOpen.update((v) => !v);
+              }}
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  peersMenuOpen.update((v) => !v);
+                }
+              }}
+            >
+              <ChevronRight />
+            </span>
+          </a>
+        {/snippet}
+      </Sidebar.MenuButton>
+      <Collapsible.Content>
+        <ul class="m-0 flex min-w-0 flex-col gap-0.5 p-0">
+          {#each peerGroups as group (group.peerID)}
+            <li>
+              <Collapsible.Root open={!isGroupCollapsed(`peer:${group.peerID}`)} class="gap-0">
+                {@render peerHeading(group.peerID, group.models.length)}
+                <Collapsible.Content>
+                  <Sidebar.MenuSub class="my-0.5">
+                    {#each group.models as model (model.id)}
+                      {@render modelMenuItem(model)}
+                    {/each}
+                  </Sidebar.MenuSub>
+                </Collapsible.Content>
+              </Collapsible.Root>
+            </li>
+          {/each}
+        </ul>
+      </Collapsible.Content>
+    </Collapsible.Root>
+  </Sidebar.MenuItem>
 {/snippet}
 
 <!-- Sits below the inference-paused banner; see --banner-h in App.svelte. -->
@@ -204,7 +304,7 @@
               class="gap-0"
             >
               <Sidebar.MenuButton
-                isActive={$currentRoute.startsWith("/models")}
+                isActive={$currentRoute.startsWith("/models") && !peerModelRoute}
                 tooltipContent="Models"
               >
                 {#snippet child({ props })}
@@ -235,28 +335,26 @@
                 {/snippet}
               </Sidebar.MenuButton>
               <Collapsible.Content>
-                <ul class="m-0 flex min-w-0 flex-col gap-0.5 p-0">
-                  {#each localClassGroups as group (group.class)}
-                    {@render categoryGroupItem(group.class, modelClassLabels[group.class], group.models)}
-                  {/each}
-                  {#if visiblePeerModels.length > 0}
-                    <li>
-                      <div class="flex h-7 min-w-0 items-center gap-2 rounded-md px-2 pt-1 text-xs font-medium text-sidebar-foreground/70">
-                        <span class="size-4 shrink-0"></span>
-                        <span class="flex-1 truncate">Peers</span>
-                        <span class="text-sidebar-foreground/50 tabular-nums">{visiblePeerModels.length}</span>
-                      </div>
-                      <Sidebar.MenuSub class="my-0.5">
-                        {#each visiblePeerModels as model (model.id)}
-                          {@render modelMenuItem(model)}
-                        {/each}
-                      </Sidebar.MenuSub>
-                    </li>
-                  {/if}
-                </ul>
+                {#if $groupByClass}
+                  <ul class="m-0 flex min-w-0 flex-col gap-0.5 p-0">
+                    {#each localClassGroups as group (group.class)}
+                      {@render categoryGroupItem(group.class, modelClassLabels[group.class], group.models)}
+                    {/each}
+                  </ul>
+                {:else if sortedLocalModels.length > 0}
+                  <Sidebar.MenuSub class="my-0.5">
+                    {#each sortedLocalModels as model (model.id)}
+                      {@render modelMenuItem(model)}
+                    {/each}
+                  </Sidebar.MenuSub>
+                {/if}
               </Collapsible.Content>
             </Collapsible.Root>
           </Sidebar.MenuItem>
+
+          {#if peerGroups.length > 0}
+            {@render peersMenuItem()}
+          {/if}
 
           <Sidebar.MenuItem>
             <Sidebar.MenuButton isActive={isActive("/logs", $currentRoute)} tooltipContent="Logs">

@@ -11,25 +11,79 @@
     resumeInference,
     selectorModels,
     unloadAllModels,
+    fetchPeers,
+    refreshPeer,
   } from "../stores/api";
   import { loadingMessage, loadingPercent, statusDotColor } from "../stores/modelLoad";
   import { showUnlistedModels as showUnlisted, showCapabilityTags, groupByClass, collapsedSections } from "../stores/modelDisplay";
   import { listCapabilityBadges, capabilityBadgeClass } from "../lib/capabilities";
   import { groupModelsByClass, modelClassLabels, sectionStatusDotColor } from "../lib/modelClasses";
-  import type { Model } from "../lib/types";
+  import type { Model, PeerStatus } from "../lib/types";
   import ModelLoadButton from "../components/ModelLoadButton.svelte";
   import Tag from "../components/Tag.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { PowerOff, Loader2, ExternalLink, Boxes, Pause, Play, ChevronDown, SlidersHorizontal } from "@lucide/svelte";
-  import { modelServerPath } from "../lib/modelUtils";
+  import { PowerOff, Loader2, ExternalLink, Boxes, Pause, Play, ChevronDown, ChevronRight, SlidersHorizontal, RefreshCw } from "@lucide/svelte";
+  import { modelServerPath, groupModelsByPeer, peerLocalModelID } from "../lib/modelUtils";
 
   let unloadingAll = $state(false);
   let togglingPause = $state(false);
 
+  // Catalog status per peer, from /api/peers. Only peers with model rules
+  // have a catalog, and only those can be refreshed.
+  let peerStatus = $state<Record<string, PeerStatus>>({});
+  let refreshingPeers = $state<Record<string, boolean>>({});
+  let peerRefreshErrors = $state<Record<string, string>>({});
+
+  // A fresh status replaces any manual refresh error: its lastError is the
+  // current word on the catalog, failure or recovery.
+  async function loadPeerStatus(): Promise<void> {
+    try {
+      const peers = await fetchPeers();
+      peerStatus = Object.fromEntries(peers.map((p) => [p.id, p]));
+      peerRefreshErrors = {};
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function handleRefreshPeer(peerID: string): Promise<void> {
+    refreshingPeers = { ...refreshingPeers, [peerID]: true };
+    const { [peerID]: _, ...otherErrors } = peerRefreshErrors;
+    peerRefreshErrors = otherErrors;
+    try {
+      const status = await refreshPeer(peerID);
+      peerStatus = { ...peerStatus, [peerID]: status };
+    } catch (e) {
+      await loadPeerStatus();
+      peerRefreshErrors = { ...peerRefreshErrors, [peerID]: e instanceof Error ? e.message : String(e) };
+    } finally {
+      const { [peerID]: _, ...rest } = refreshingPeers;
+      refreshingPeers = rest;
+    }
+  }
+
+  function peerRefreshTitle(peerID: string): string {
+    const catalog = peerStatus[peerID]?.catalog;
+    if (!catalog) return "No model rules; this peer's models are listed in the config";
+    const parts = ["Refresh models from this peer"];
+    if (catalog.fetchedAt) parts.push(`Last fetched ${new Date(catalog.fetchedAt).toLocaleString()}`);
+    if (catalog.lastError) parts.push(`Last error: ${catalog.lastError}`);
+    return parts.join("\n");
+  }
+
+  // Scheduled catalog fetches run in the background and only announce model
+  // list changes, so poll the status to show their errors and recoveries.
+  const PEER_STATUS_POLL_MS = 10_000;
+
   onMount(() => {
     void fetchPlaygroundModels();
+    void loadPeerStatus();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void loadPeerStatus();
+    }, PEER_STATUS_POLL_MS);
+    return () => clearInterval(timer);
   });
 
   let visibleModels = $derived(
@@ -47,6 +101,17 @@
     [...localModels].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
   );
   let peerModels = $derived(visibleModels.filter((model) => model.peerID));
+  // One section per configured peer from /api/peers, so a peer without
+  // models (a failed first fetch, an empty catalog) keeps its error and
+  // refresh button. Peers only known from the model list are kept too.
+  let peerGroups = $derived.by(() => {
+    const groups = groupModelsByPeer(peerModels);
+    const known = new Set(groups.map((g) => g.peerID));
+    for (const peerID of Object.keys(peerStatus)) {
+      if (!known.has(peerID)) groups.push({ peerID, models: [] });
+    }
+    return groups.sort((a, b) => a.peerID.localeCompare(b.peerID, undefined, { numeric: true }));
+  });
   let selectedProfile = $derived(
     $profiles.find((profile) => profile.id === $activeProfile)
   );
@@ -102,10 +167,10 @@
   }
 </script>
 
-{#snippet modelRow(model: Model)}
+{#snippet modelRow(model: Model, indented = false)}
   {@const percent = loadingPercent(model)}
   {@const message = loadingMessage(model)}
-  <div class="hover:bg-muted/50 relative flex items-center gap-3 px-3 py-2.5 sm:px-4">
+  <div class={`hover:bg-muted/50 relative flex items-center gap-3 py-2.5 pr-3 sm:pr-4 ${indented ? "pl-9 sm:pl-10" : "pl-3 sm:pl-4"}`}>
     {#if !model.peerID}
       <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(model)}`}></span>
     {/if}
@@ -114,7 +179,7 @@
       use:link
       class="min-w-0 flex-1"
     >
-      <div class="truncate text-sm font-medium">{model.name || model.id}</div>
+      <div class="truncate text-sm font-medium">{model.name || (indented ? peerLocalModelID(model) : model.id)}</div>
       <div class="text-muted-foreground truncate text-xs">
         {model.id}
         {#if model.aliases && model.aliases.length > 0}
@@ -201,6 +266,87 @@
         </div>
       {/if}
     </Card.Content>
+    {/if}
+  </Card.Root>
+{/snippet}
+
+{#snippet peerSection()}
+  {@const collapsed = isSectionCollapsed("peers")}
+  <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
+    <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
+      <button
+        type="button"
+        class="flex w-full cursor-pointer items-center gap-2"
+        onclick={() => toggleSection("peers")}
+        aria-expanded={!collapsed}
+      >
+        <Card.Title class="text-sm">Peer models</Card.Title>
+        <span class="text-muted-foreground text-xs">{peerModels.length}</span>
+        <ChevronDown
+          class={`text-muted-foreground ml-auto size-4 shrink-0 transition-transform ${collapsed ? "-rotate-90" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
+    </Card.Header>
+    {#if !collapsed}
+      <Card.Content class="p-0">
+        {#if peerGroups.length === 0}
+          <div class="text-muted-foreground px-3 py-6 sm:px-4 text-center text-sm">
+            No peer models available
+          </div>
+        {:else}
+          <div class="divide-y">
+            {#each peerGroups as group (group.peerID)}
+              {@const key = `peer:${group.peerID}`}
+              {@const peerCollapsed = isSectionCollapsed(key)}
+              {@const refreshing = refreshingPeers[group.peerID] === true}
+              {@const refreshError = peerRefreshErrors[group.peerID] ?? peerStatus[group.peerID]?.catalog?.lastError}
+              <div>
+                <div class="bg-muted/30 flex items-center gap-2 px-3 py-1.5 sm:px-4">
+                  <button
+                    type="button"
+                    class="flex min-w-0 flex-1 cursor-pointer items-center gap-2"
+                    onclick={() => toggleSection(key)}
+                    aria-expanded={!peerCollapsed}
+                  >
+                    <ChevronRight
+                      class={`text-muted-foreground size-4 shrink-0 transition-transform ${peerCollapsed ? "" : "rotate-90"}`}
+                      aria-hidden="true"
+                    />
+                    <span class="truncate text-sm font-medium">{group.peerID}</span>
+                    <span class="text-muted-foreground text-xs">{group.models.length}</span>
+                    {#if refreshError}
+                      <span class="text-destructive min-w-0 truncate text-xs" title={refreshError}>{refreshError}</span>
+                    {/if}
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="size-7 shrink-0"
+                    onclick={() => handleRefreshPeer(group.peerID)}
+                    disabled={refreshing || !peerStatus[group.peerID]?.catalog}
+                    title={peerRefreshTitle(group.peerID)}
+                    aria-label={`Refresh models from ${group.peerID}`}
+                  >
+                    <RefreshCw class={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                  </Button>
+                </div>
+                {#if !peerCollapsed}
+                  <div class="divide-y border-t">
+                    {#each group.models as model (model.id)}
+                      {@render modelRow(model, true)}
+                    {:else}
+                      <div class="text-muted-foreground py-3 pr-3 pl-9 text-sm sm:pr-4 sm:pl-10">
+                        No models from this peer
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </Card.Content>
     {/if}
   </Card.Root>
 {/snippet}
@@ -443,6 +589,6 @@
     {:else}
       {@render modelSection("local", "Local models", sortedLocalModels)}
     {/if}
-    {@render modelSection("peers", "Peer models", peerModels)}
+    {@render peerSection()}
   </div>
 </div>

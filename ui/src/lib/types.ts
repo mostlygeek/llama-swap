@@ -98,6 +98,26 @@ export interface TailcatStatus {
   models: string[];
 }
 
+/** Model discovery state for a peer with model rules, from /api/peers. */
+export interface PeerCatalogStatus {
+  peerID: string;
+  source?: "cache" | "live";
+  fetchedAt?: string;
+  lastAttempt?: string;
+  lastError?: string;
+  available: number;
+  models: number;
+  truncated?: number;
+  dropped?: string[];
+}
+
+export interface PeerStatus {
+  id: string;
+  models: number;
+  /** Present only for peers with model rules, which discover models. */
+  catalog?: PeerCatalogStatus;
+}
+
 export interface ActivityPage {
   data: ActivityLogEntry[];
   page: number;

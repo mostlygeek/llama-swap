@@ -15,6 +15,7 @@ import type {
   PlaygroundModelType,
   HardwareSnapshot,
   TailcatStatus,
+  PeerStatus,
 } from "../lib/types";
 import { appendActivityFilters, type ActivityFilters } from "../lib/activityFilters";
 import { apiUrl } from "../lib/apiPath";
@@ -394,6 +395,36 @@ export async function fetchTailcatStatus(): Promise<TailcatStatus> {
   const status = await response.json() as TailcatStatus;
   tailcatStatus.set(status);
   return status;
+}
+
+export async function fetchPeers(): Promise<PeerStatus[]> {
+  const response = await fetch(apiUrl("/api/peers"));
+  if (!response.ok) {
+    throw new Error(`Failed to fetch peers: ${response.status}`);
+  }
+  return await response.json() as PeerStatus[];
+}
+
+/**
+ * Fetches a peer's model catalog now. A no-op for peers without model rules.
+ * The model list updates through the events stream when it changes.
+ */
+export async function refreshPeer(peerID: string): Promise<PeerStatus> {
+  const response = await fetch(apiUrl(`/api/peers/${encodeURIComponent(peerID)}/refresh`), {
+    method: "POST",
+  });
+  if (!response.ok) {
+    // Errors come as {"error":{"message":...}}; fall back to the raw text.
+    const text = (await response.text()).trim();
+    let message = text;
+    try {
+      message = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? text;
+    } catch {
+      // not JSON
+    }
+    throw new Error(message || `Failed to refresh peer: ${response.status}`);
+  }
+  return await response.json() as PeerStatus;
 }
 
 export async function getActivityStats(model?: string): Promise<ActivityStatsData> {

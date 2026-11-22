@@ -37,6 +37,21 @@ type Router interface {
 	Handles(model string) bool
 }
 
+// PeerRouter is a Router that forwards to remote peers and reports the state
+// of model discovery from their catalogs.
+type PeerRouter interface {
+	Router
+
+	// CatalogStatus returns the discovery status of each peer with a
+	// catalog, sorted by peer ID.
+	CatalogStatus() []PeerCatalogStatus
+
+	// RefreshCatalog fetches a peer's catalog now and waits for the result.
+	// It reports false without fetching when the peer has no model
+	// discovery, and returns ErrPeerNotFound for an unknown peer.
+	RefreshCatalog(ctx context.Context, peerID string) (bool, error)
+}
+
 // LocalRouter is a Router backed by local processes whose state can be
 // inspected and which can be individually stopped. Peer routers, which only
 // forward to remote hosts, do not implement it.

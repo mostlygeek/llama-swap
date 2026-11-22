@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -15,6 +16,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
@@ -181,9 +183,17 @@ func (s *Server) modelStatus() []apiModel {
 		})
 	}
 
-	for peerID, peer := range s.cfg.Peers {
-		for _, modelID := range peer.Models {
-			models = append(models, apiModel{Id: config.PeerModelFQN(peerID, modelID), PeerID: peerID})
+	for peerID := range s.cfg.Peers {
+		for _, modelID := range s.cfg.PeerModelIDs(peerID) {
+			m := apiModel{Id: config.PeerModelFQN(peerID, modelID), PeerID: peerID}
+			if record, ok := s.cfg.PeerModelRecord(peerID, modelID); ok {
+				m.Name, _ = record["name"].(string)
+				m.Description, _ = record["description"].(string)
+				if n, ok := record["context_length"].(float64); ok {
+					m.ContextLength = int(n)
+				}
+			}
+			models = append(models, m)
 		}
 	}
 
@@ -451,8 +461,8 @@ func (s *Server) tailcatExposedModelIDs() []string {
 	for selectorID := range s.cfg.Selectors {
 		candidates[selectorID] = struct{}{}
 	}
-	for peerID, peer := range s.cfg.Peers {
-		for _, modelID := range peer.Models {
+	for peerID := range s.cfg.Peers {
+		for _, modelID := range s.cfg.PeerModelIDs(peerID) {
 			candidates[config.PeerModelFQN(peerID, modelID)] = struct{}{}
 			if resolvedPeer, resolvedModel, found := s.cfg.ResolvePeerModel(modelID); found &&
 				resolvedPeer == peerID && resolvedModel == modelID {
@@ -677,6 +687,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			event.On(func(e swaputil.ProcessLoadingEvent) { sendModels() }),
 			event.On(func(e swaputil.ModelCapabilitiesChangedEvent) { sendModels() }),
 			event.On(func(e swaputil.ConfigFileChangedEvent) { sendModels() }),
+			event.On(func(e swaputil.PeerCatalogChangedEvent) { sendModels() }),
 			event.On(func(e swaputil.ProfileChangedEvent) {
 				sendProfile()
 				sendModels()
@@ -748,4 +759,61 @@ func cancelAll(cancels []context.CancelFunc) {
 	for i := len(cancels) - 1; i >= 0; i-- {
 		cancels[i]()
 	}
+}
+
+// apiPeer is a configured peer as reported by /api/peers.
+type apiPeer struct {
+	ID      string                    `json:"id"`
+	Models  int                       `json:"models"`
+	Catalog *router.PeerCatalogStatus `json:"catalog,omitempty"`
+}
+
+// peerStatus returns each configured peer, how many models it provides and,
+// for peers with a catalog, the state of model discovery, sorted by ID.
+func (s *Server) peerStatus() []apiPeer {
+	statuses := make(map[string]router.PeerCatalogStatus)
+	for _, status := range s.peer.CatalogStatus() {
+		statuses[status.PeerID] = status
+	}
+
+	peers := make([]apiPeer, 0, len(s.cfg.Peers))
+	for peerID := range s.cfg.Peers {
+		p := apiPeer{ID: peerID, Models: len(s.cfg.PeerModelIDs(peerID))}
+		if status, ok := statuses[peerID]; ok {
+			p.Catalog = &status
+		}
+		peers = append(peers, p)
+	}
+	sort.Slice(peers, func(i, j int) bool { return peers[i].ID < peers[j].ID })
+	return peers
+}
+
+// handleAPIPeers reports each configured peer, how many models it provides
+// and, for peers with a catalog, the state of model discovery.
+func (s *Server) handleAPIPeers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.peerStatus())
+}
+
+// handleAPIRefreshPeer fetches a peer's model catalog now and responds with
+// the peer's updated status. Peers without model discovery are a no-op. A
+// failed fetch keeps the last model list and responds 502 with the error.
+func (s *Server) handleAPIRefreshPeer(w http.ResponseWriter, r *http.Request) {
+	peerID := r.PathValue("peer")
+	if _, err := s.peer.RefreshCatalog(r.Context(), peerID); err != nil {
+		if errors.Is(err, router.ErrPeerNotFound) {
+			swaputil.SendResponse(w, r, http.StatusNotFound, "peer not found: "+peerID)
+			return
+		}
+		swaputil.SendResponse(w, r, http.StatusBadGateway, "refreshing peer "+peerID+": "+err.Error())
+		return
+	}
+	for _, p := range s.peerStatus() {
+		if p.ID == peerID {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(p)
+			return
+		}
+	}
+	swaputil.SendResponse(w, r, http.StatusNotFound, "peer not found: "+peerID)
 }

@@ -32,8 +32,8 @@ func TestNewPeer_EmptyPeers(t *testing.T) {
 	if pr == nil {
 		t.Fatal("expected non-nil Peer")
 	}
-	if len(pr.peers) != 0 {
-		t.Fatalf("expected empty peers map, got %d entries", len(pr.peers))
+	if len(peerRoutes(pr)) != 0 {
+		t.Fatalf("expected empty peers map, got %d entries", len(peerRoutes(pr)))
 	}
 }
 
@@ -52,22 +52,22 @@ func TestNewPeer_SinglePeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pr.peers) != 4 {
-		t.Fatalf("expected 4 entries, got %d", len(pr.peers))
+	if len(peerRoutes(pr)) != 4 {
+		t.Fatalf("expected 4 entries, got %d", len(peerRoutes(pr)))
 	}
-	if _, ok := pr.peers["model-a"]; !ok {
+	if _, ok := peerRoutes(pr)["model-a"]; !ok {
 		t.Error("expected model-a to be mapped")
 	}
-	if _, ok := pr.peers["model-b"]; !ok {
+	if _, ok := peerRoutes(pr)["model-b"]; !ok {
 		t.Error("expected model-b to be mapped")
 	}
-	if _, ok := pr.peers["peer1/model-a"]; !ok {
+	if _, ok := peerRoutes(pr)["peer1/model-a"]; !ok {
 		t.Error("expected peer1/model-a to be mapped")
 	}
-	if _, ok := pr.peers["peer1/model-b"]; !ok {
+	if _, ok := peerRoutes(pr)["peer1/model-b"]; !ok {
 		t.Error("expected peer1/model-b to be mapped")
 	}
-	if _, ok := pr.peers["model-c"]; ok {
+	if _, ok := peerRoutes(pr)["model-c"]; ok {
 		t.Error("expected model-c to not be mapped")
 	}
 }
@@ -92,16 +92,16 @@ func TestNewPeer_MultiplePeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pr.peers) != 8 {
-		t.Fatalf("expected 8 entries, got %d", len(pr.peers))
+	if len(peerRoutes(pr)) != 8 {
+		t.Fatalf("expected 8 entries, got %d", len(peerRoutes(pr)))
 	}
 	for _, m := range []string{"model-a", "model-b", "model-c", "model-d"} {
-		if _, ok := pr.peers[m]; !ok {
+		if _, ok := peerRoutes(pr)[m]; !ok {
 			t.Errorf("expected %s to be mapped", m)
 		}
 	}
 	for _, m := range []string{"peer1/model-a", "peer1/model-b", "peer2/model-c", "peer2/model-d"} {
-		if _, ok := pr.peers[m]; !ok {
+		if _, ok := peerRoutes(pr)[m]; !ok {
 			t.Errorf("expected %s to be mapped", m)
 		}
 	}
@@ -151,16 +151,16 @@ func TestNewPeer_DuplicateModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pr.peers) != 2 {
-		t.Fatalf("expected 2 qualified entries for duplicate model, got %d", len(pr.peers))
+	if len(peerRoutes(pr)) != 2 {
+		t.Fatalf("expected 2 qualified entries for duplicate model, got %d", len(peerRoutes(pr)))
 	}
-	if _, ok := pr.peers["duplicate-model"]; ok {
+	if _, ok := peerRoutes(pr)["duplicate-model"]; ok {
 		t.Error("duplicate bare model should not be mapped")
 	}
-	if _, ok := pr.peers["alpha-peer/duplicate-model"]; !ok {
+	if _, ok := peerRoutes(pr)["alpha-peer/duplicate-model"]; !ok {
 		t.Error("expected alpha-peer/duplicate-model to be mapped")
 	}
-	if _, ok := pr.peers["beta-peer/duplicate-model"]; !ok {
+	if _, ok := peerRoutes(pr)["beta-peer/duplicate-model"]; !ok {
 		t.Error("expected beta-peer/duplicate-model to be mapped")
 	}
 }
@@ -181,10 +181,10 @@ func TestNewPeer_FQNPrecedesCollidingBareModel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := pr.peers["p1/model"]; got == nil || got.member.peerID != "p1" || got.modelID != "model" {
+	if got := peerRoutes(pr)["p1/model"]; got == nil || got.member.peerID != "p1" || got.modelID != "model" {
 		t.Fatalf("p1/model route = %#v, want p1 model", got)
 	}
-	if got := pr.peers["p2/p1/model"]; got == nil || got.member.peerID != "p2" || got.modelID != "p1/model" {
+	if got := peerRoutes(pr)["p2/p1/model"]; got == nil || got.member.peerID != "p2" || got.modelID != "p1/model" {
 		t.Fatalf("p2/p1/model route = %#v, want p2 p1/model", got)
 	}
 }
@@ -817,7 +817,7 @@ func TestNewPeer_CustomTimeouts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	member, ok := pr.peers["model1"]
+	member, ok := peerRoutes(pr)["model1"]
 	if !ok {
 		t.Fatal("expected model1 to be mapped")
 	}
@@ -862,7 +862,7 @@ peers:
 	if err != nil {
 		t.Fatal(err)
 	}
-	member := pr.peers["cat/remote"].member
+	member := peerRoutes(pr)["cat/remote"].member
 	if member.tailcat == nil {
 		t.Fatal("Tailcat client was not attached")
 	}
@@ -915,10 +915,10 @@ func TestNewPeer_UpstreamFromProxyHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := pr.peers["gpt"].member.upstream; got != hint.OpenAI {
+	if got := peerRoutes(pr)["gpt"].member.upstream; got != hint.OpenAI {
 		t.Errorf("oai upstream = %q, want openai", got)
 	}
-	if got := pr.peers["local"].member.upstream; got != hint.Unknown {
+	if got := peerRoutes(pr)["local"].member.upstream; got != hint.Unknown {
 		t.Errorf("other upstream = %q, want unknown", got)
 	}
 }

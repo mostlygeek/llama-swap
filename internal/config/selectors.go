@@ -96,8 +96,12 @@ func validateSelectors(config Config) error {
 				if local {
 					localTargets = append(localTargets, realName)
 				} else {
-					peerID, modelID, _ := config.ResolvePeerModel(target)
-					realName = PeerModelFQN(peerID, modelID)
+					if peerID, modelID, found := config.ResolvePeerModel(target); found {
+						realName = PeerModelFQN(peerID, modelID)
+					} else {
+						// A model expected from a peer's catalog.
+						realName = target
+					}
 				}
 				resolvedTargets = append(resolvedTargets, realName)
 			}

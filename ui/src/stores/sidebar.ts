@@ -2,6 +2,7 @@ import { persistentStore } from "./persistent";
 import { SIDEBAR_WIDTH_DEFAULT_PX } from "$lib/components/ui/sidebar/constants.js";
 
 export const modelsMenuOpen = persistentStore<boolean>("models-menu-open", true);
+export const peersMenuOpen = persistentStore<boolean>("peers-menu-open", true);
 
 // Category groups inside the Models sub-menu that are folded, keyed by class
 // id. Missing means open, so groups default to expanded and deleting the key

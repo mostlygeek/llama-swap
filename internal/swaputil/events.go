@@ -12,6 +12,7 @@ const ModelCapabilitiesChangedEventID = 0x09
 const ProcessLoadingEventID = 0x0A
 const InferencePausedEventID = 0x0B
 const UpstreamDetectedEventID = 0x0C
+const PeerCatalogChangedEventID = 0x0D
 
 // ProcessStateChangeEvent is emitted whenever a process transitions between
 // lifecycle states. States are carried as strings so this package stays a leaf
@@ -116,4 +117,14 @@ type InferencePausedEvent struct {
 
 func (e InferencePausedEvent) Type() uint32 {
 	return InferencePausedEventID
+}
+
+// PeerCatalogChangedEvent is emitted when catalog discovery changes the
+// models a peer provides, so model listings are pushed again.
+type PeerCatalogChangedEvent struct {
+	PeerID string
+}
+
+func (e PeerCatalogChangedEvent) Type() uint32 {
+	return PeerCatalogChangedEventID
 }
