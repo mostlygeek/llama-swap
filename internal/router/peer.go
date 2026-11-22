@@ -21,6 +21,8 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
 )
 
+var _ PeerRouter = (*Peer)(nil)
+
 type peerMember struct {
 	peerID       string
 	reverseProxy *httputil.ReverseProxy
@@ -30,18 +32,27 @@ type peerMember struct {
 	// upstream is the provider behind the peer, guessed once from its proxy
 	// host. hint.Unknown when no detection rule matches.
 	upstream hint.Upstream
-}
-
-type peerRoute struct {
-	member  *peerMember
-	modelID string
+	// refresh hands the peer's catalog loop a manual refresh. It holds at
+	// most one, the pending one, so sends never block. nil for peers
+	// without model discovery.
+	refresh chan *catalogRefresh
+	// pending is the manual refresh waiting for or being served by the
+	// catalog loop; concurrent callers share it. Guarded by refreshMu.
+	refreshMu sync.Mutex
+	pending   *catalogRefresh
 }
 
 type Peer struct {
 	cfg     config.Config
 	logger  *logmon.Monitor
-	peers   map[string]*peerRoute
+	byID    map[string]*peerMember
 	members []*peerMember
+
+	catalogMu     sync.Mutex
+	catalogStatus map[string]*PeerCatalogStatus
+	// minManualRefresh is how soon after a catalog fetch a manual refresh
+	// may fetch again. Sooner requests get the last fetch's result.
+	minManualRefresh time.Duration
 
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
@@ -55,8 +66,7 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 	}
 
 	peers := cfg.Peers
-	modelMap := make(map[string]*peerRoute)
-	bareRoutes := make(map[string][]*peerRoute)
+	byID := make(map[string]*peerMember, len(peers))
 
 	peerIDs := make([]string, 0, len(peers))
 	tailcatClients := make(map[string]*tailcat.Client)
@@ -164,29 +174,11 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 			apiKey:       peer.ApiKey,
 			upstream:     hint.ForURL(peer.ProxyURL),
 		}
+		if peer.Discovery() {
+			pp.refresh = make(chan *catalogRefresh, 1)
+		}
 		members = append(members, pp)
-
-		seen := make(map[string]struct{})
-		for _, modelID := range peer.Models {
-			if _, duplicate := seen[modelID]; duplicate {
-				continue
-			}
-			seen[modelID] = struct{}{}
-
-			route := &peerRoute{member: pp, modelID: modelID}
-			modelMap[config.PeerModelFQN(peerID, modelID)] = route
-			bareRoutes[modelID] = append(bareRoutes[modelID], route)
-		}
-	}
-
-	for modelID, routes := range bareRoutes {
-		if len(routes) != 1 {
-			continue
-		}
-		if _, reserved := modelMap[modelID]; reserved {
-			continue
-		}
-		modelMap[modelID] = routes[0]
+		byID[peerID] = pp
 	}
 
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
@@ -194,17 +186,31 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 	r := &Peer{
 		cfg:         cfg,
 		logger:      logger,
-		peers:       modelMap,
+		byID:        byID,
 		members:     members,
 		shutdownCtx: shutdownCtx,
 		shutdownFn:  shutdownFn,
+
+		minManualRefresh: peerCatalogMinManualRefresh,
 	}
 	return r, nil
 }
 
 func (r *Peer) Handles(model string) bool {
-	_, ok := r.peers[model]
+	_, _, ok := r.route(model)
 	return ok
+}
+
+// route resolves a model name to the peer member serving it and the peer's
+// own model ID. It reads the config's peer index, which catalog refreshes
+// update while the router runs.
+func (r *Peer) route(model string) (*peerMember, string, bool) {
+	peerID, modelID, found := r.cfg.ResolvePeerModel(model)
+	if !found {
+		return nil, "", false
+	}
+	member, ok := r.byID[peerID]
+	return member, modelID, ok
 }
 
 func (r *Peer) Shutdown(timeout time.Duration) error {
@@ -300,15 +306,14 @@ func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	route, found := r.peers[data.ModelID]
+	pp, peerModelID, found := r.route(data.ModelID)
 	if !found {
 		r.logger.Warnf("peer model not found: %s", data.ModelID)
 		swaputil.SendError(w, req, ErrNoPeerModelFound)
 		return
 	}
-	pp := route.member
 
-	r.logger.Debugf("peer: routing model %s to peer %s as %s", data.ModelID, pp.peerID, route.modelID)
+	r.logger.Debugf("peer: routing model %s to peer %s as %s", data.ModelID, pp.peerID, peerModelID)
 
 	if h := hint.From(req.Context()); h != nil {
 		h.Route = hint.RoutePeer
@@ -316,8 +321,8 @@ func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h.Upstream = pp.upstream
 	}
 
-	if data.Model != route.modelID {
-		req, err = swaputil.ReplaceRequestModel(req, data.Model, route.modelID)
+	if data.Model != peerModelID {
+		req, err = swaputil.ReplaceRequestModel(req, data.Model, peerModelID)
 		if err != nil {
 			swaputil.SendResponse(w, req, http.StatusBadRequest, err.Error())
 			return

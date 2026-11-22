@@ -59,8 +59,12 @@ func newSelectorSpilloverTracker(cfg config.Config) *selectorSpilloverTracker {
 		for _, target := range selector.Targets {
 			modelID, local := cfg.RealModelName(target)
 			if !local {
-				peerID, peerModelID, _ := cfg.ResolvePeerModel(target)
-				modelID = config.PeerModelFQN(peerID, peerModelID)
+				if peerID, peerModelID, found := cfg.ResolvePeerModel(target); found {
+					modelID = config.PeerModelFQN(peerID, peerModelID)
+				} else {
+					// A model expected from a peer's catalog.
+					modelID = target
+				}
 			}
 			state.targets = append(state.targets, spilloverTarget{
 				target:  target,

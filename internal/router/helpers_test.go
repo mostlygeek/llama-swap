@@ -357,3 +357,25 @@ func newStreamRequest(model string) *http.Request {
 func newRequestCtx(ctx context.Context, model string) *http.Request {
 	return newRequest(model).WithContext(ctx)
 }
+
+// testPeerRoute is where a name routes through a Peer router.
+type testPeerRoute struct {
+	member  *peerMember
+	modelID string
+}
+
+// peerRoutes returns every name the Peer router routes, keyed by name. Peer
+// routes are fully qualified names and unqualified peer model IDs.
+func peerRoutes(pr *Peer) map[string]*testPeerRoute {
+	routes := make(map[string]*testPeerRoute)
+	for peerID := range pr.cfg.Peers {
+		for _, modelID := range pr.cfg.PeerModelIDs(peerID) {
+			for _, name := range []string{config.PeerModelFQN(peerID, modelID), modelID} {
+				if member, id, ok := pr.route(name); ok {
+					routes[name] = &testPeerRoute{member: member, modelID: id}
+				}
+			}
+		}
+	}
+	return routes
+}

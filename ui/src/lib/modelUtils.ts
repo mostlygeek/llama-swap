@@ -165,3 +165,35 @@ export function filterModelOptions(options: ModelOption[], query: string): Model
     return terms.every((term) => haystack.includes(term));
   });
 }
+
+export interface PeerModelGroup {
+  peerID: string;
+  models: Model[];
+}
+
+/**
+ * Groups peer models by peer, peers and models in locale-aware numeric order.
+ * Local models (no peerID) are skipped.
+ */
+export function groupModelsByPeer(models: Model[]): PeerModelGroup[] {
+  const byPeer = new Map<string, Model[]>();
+  for (const model of models) {
+    if (!model.peerID) continue;
+    const group = byPeer.get(model.peerID);
+    if (group) group.push(model);
+    else byPeer.set(model.peerID, [model]);
+  }
+  const compare = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+  return [...byPeer.entries()]
+    .sort(([a], [b]) => compare(a, b))
+    .map(([peerID, peerModels]) => ({
+      peerID,
+      models: peerModels.sort((a, b) => compare(a.id, b.id)),
+    }));
+}
+
+/** A peer model's ID without its "<peer>/" prefix, for lists already grouped by peer. */
+export function peerLocalModelID(model: Model): string {
+  const prefix = `${model.peerID}/`;
+  return model.peerID && model.id.startsWith(prefix) ? model.id.slice(prefix.length) : model.id;
+}

@@ -98,7 +98,8 @@ func validateTailcatConfig(cfg *Config) error {
 				return fmt.Errorf("tailcat.models[%d]: model ID cannot be empty", i)
 			}
 			if model != "*" {
-				if _, ok := validModels[model]; !ok {
+				_, _, discoverable := cfg.DiscoveryPeerFor(model)
+				if _, ok := validModels[model]; !ok && !discoverable {
 					return fmt.Errorf("tailcat.models[%d]: unknown public model ID %q", i, model)
 				}
 			}
@@ -147,8 +148,8 @@ func publicTailcatModelIDs(cfg Config) map[string]struct{} {
 			ids[pin] = struct{}{}
 		}
 	}
-	for peerID, peer := range cfg.Peers {
-		for _, model := range peer.Models {
+	for peerID := range cfg.Peers {
+		for _, model := range cfg.PeerModelIDs(peerID) {
 			ids[PeerModelFQN(peerID, model)] = struct{}{}
 		}
 	}

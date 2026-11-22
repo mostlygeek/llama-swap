@@ -319,6 +319,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	if err := ValidatePeerNamespace(config); err != nil {
 		return Config{}, err
 	}
+	config.peerModels = newPeerModels(config)
 
 	if err := validateSelectors(config); err != nil {
 		return Config{}, err

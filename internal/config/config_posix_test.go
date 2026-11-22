@@ -302,6 +302,8 @@ groups:
 		},
 	}
 
+	// The peer model index is derived state, checked by the peer tests.
+	config.peerModels = nil
 	assert.Equal(t, expected, config)
 
 	realname, found := config.RealModelName("m1")
