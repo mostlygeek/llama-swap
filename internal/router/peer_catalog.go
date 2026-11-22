@@ -103,8 +103,11 @@ func (r *Peer) CatalogStatus() []PeerCatalogStatus {
 	return out
 }
 
+// peerCatalogCacheKey names a peer's cached catalog. The credentials are part
+// of it, so pointing a peer at another account at the same URL does not bring
+// back the old account's models. Only a hash of them is stored.
 func peerCatalogCacheKey(peerID string, peer config.PeerConfig) string {
-	sum := sha256.Sum256([]byte(peer.Proxy + "\n" + peer.Catalog.Path))
+	sum := sha256.Sum256([]byte(peer.Proxy + "\n" + peer.Catalog.Path + "\n" + peer.ApiKey + "\n" + peer.TailcatKey))
 	return "peercatalog:" + peerID + ":" + hex.EncodeToString(sum[:8])
 }
 

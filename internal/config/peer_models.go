@@ -197,10 +197,15 @@ type PeerTarget struct {
 
 // peerIndex is an immutable view of every routable peer model.
 type peerIndex struct {
-	discovered map[string][]DiscoveredPeerModel
-	models     map[string][]string
-	records    map[string]map[string]any
-	routes     map[string]PeerTarget
+	// catalogs is each peer's complete catalog input, as last given to
+	// SetDiscoveredPeerModels: literal models with their records and names
+	// that collided included. Rebuilds start from it, so one peer's refresh
+	// keeps every other peer's records and lets a name freed by a removed
+	// model route without its own peer refreshing.
+	catalogs map[string][]DiscoveredPeerModel
+	models   map[string][]string
+	records  map[string]map[string]any
+	routes   map[string]PeerTarget
 }
 
 // peerModels holds the current peer index. It is shared by every copy of the
@@ -232,10 +237,13 @@ func (c *Config) currentPeerIndex() *peerIndex {
 // selector, profile pin or another peer model are dropped and returned.
 func buildPeerIndex(c *Config, discovered map[string][]DiscoveredPeerModel) (*peerIndex, []PeerTarget) {
 	idx := &peerIndex{
-		discovered: make(map[string][]DiscoveredPeerModel),
-		models:     make(map[string][]string),
-		records:    make(map[string]map[string]any),
-		routes:     make(map[string]PeerTarget),
+		catalogs: make(map[string][]DiscoveredPeerModel, len(discovered)),
+		models:   make(map[string][]string),
+		records:  make(map[string]map[string]any),
+		routes:   make(map[string]PeerTarget),
+	}
+	for peerID, list := range discovered {
+		idx.catalogs[peerID] = list
 	}
 
 	peerIDs := make([]string, 0, len(c.Peers))
@@ -301,7 +309,6 @@ func buildPeerIndex(c *Config, discovered map[string][]DiscoveredPeerModel) (*pe
 				continue
 			}
 			add(peerID, model.ID)
-			idx.discovered[peerID] = append(idx.discovered[peerID], model)
 			if model.Record != nil {
 				idx.records[fqn] = model.Record
 			}
@@ -354,8 +361,8 @@ func (c *Config) SetDiscoveredPeerModels(peerID string, models []DiscoveredPeerM
 	defer pm.mu.Unlock()
 
 	cur := pm.cur.Load()
-	discovered := make(map[string][]DiscoveredPeerModel, len(cur.discovered)+1)
-	for id, list := range cur.discovered {
+	discovered := make(map[string][]DiscoveredPeerModel, len(cur.catalogs)+1)
+	for id, list := range cur.catalogs {
 		discovered[id] = list
 	}
 	discovered[peerID] = models

@@ -36,10 +36,13 @@
   let refreshingPeers = $state<Record<string, boolean>>({});
   let peerRefreshErrors = $state<Record<string, string>>({});
 
+  // A fresh status replaces any manual refresh error: its lastError is the
+  // current word on the catalog, failure or recovery.
   async function loadPeerStatus(): Promise<void> {
     try {
       const peers = await fetchPeers();
       peerStatus = Object.fromEntries(peers.map((p) => [p.id, p]));
+      peerRefreshErrors = {};
     } catch (e) {
       console.error(e);
     }
@@ -53,8 +56,8 @@
       const status = await refreshPeer(peerID);
       peerStatus = { ...peerStatus, [peerID]: status };
     } catch (e) {
+      await loadPeerStatus();
       peerRefreshErrors = { ...peerRefreshErrors, [peerID]: e instanceof Error ? e.message : String(e) };
-      void loadPeerStatus();
     } finally {
       const { [peerID]: _, ...rest } = refreshingPeers;
       refreshingPeers = rest;
@@ -70,9 +73,17 @@
     return parts.join("\n");
   }
 
+  // Scheduled catalog fetches run in the background and only announce model
+  // list changes, so poll the status to show their errors and recoveries.
+  const PEER_STATUS_POLL_MS = 10_000;
+
   onMount(() => {
     void fetchPlaygroundModels();
     void loadPeerStatus();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void loadPeerStatus();
+    }, PEER_STATUS_POLL_MS);
+    return () => clearInterval(timer);
   });
 
   let visibleModels = $derived(
@@ -90,7 +101,17 @@
     [...localModels].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
   );
   let peerModels = $derived(visibleModels.filter((model) => model.peerID));
-  let peerGroups = $derived(groupModelsByPeer(peerModels));
+  // One section per configured peer from /api/peers, so a peer without
+  // models (a failed first fetch, an empty catalog) keeps its error and
+  // refresh button. Peers only known from the model list are kept too.
+  let peerGroups = $derived.by(() => {
+    const groups = groupModelsByPeer(peerModels);
+    const known = new Set(groups.map((g) => g.peerID));
+    for (const peerID of Object.keys(peerStatus)) {
+      if (!known.has(peerID)) groups.push({ peerID, models: [] });
+    }
+    return groups.sort((a, b) => a.peerID.localeCompare(b.peerID, undefined, { numeric: true }));
+  });
   let selectedProfile = $derived(
     $profiles.find((profile) => profile.id === $activeProfile)
   );
@@ -314,6 +335,10 @@
                   <div class="divide-y border-t">
                     {#each group.models as model (model.id)}
                       {@render modelRow(model, true)}
+                    {:else}
+                      <div class="text-muted-foreground py-3 pr-3 pl-9 text-sm sm:pr-4 sm:pl-10">
+                        No models from this peer
+                      </div>
                     {/each}
                   </div>
                 {/if}

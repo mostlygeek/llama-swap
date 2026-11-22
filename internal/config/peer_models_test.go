@@ -239,3 +239,33 @@ profiles:
 		assert.False(t, ok)
 	})
 }
+
+func TestConfig_SetDiscoveredPeerModelsKeepsOtherPeers(t *testing.T) {
+	cfg, err := LoadConfigFromReader(strings.NewReader(`
+peers:
+  kitchen:
+    proxy: http://kitchen
+    models:
+      - static
+      - add .*
+  garage:
+    proxy: http://garage
+`))
+	require.NoError(t, err)
+
+	cfg.SetDiscoveredPeerModels("kitchen", []DiscoveredPeerModel{
+		{ID: "static", Record: map[string]any{"id": "static", "name": "Static"}},
+		{ID: "fresh", Record: map[string]any{"id": "fresh", "name": "Fresh"}},
+	})
+	cfg.SetDiscoveredPeerModels("garage", []DiscoveredPeerModel{{ID: "other"}})
+
+	// garage's refresh keeps kitchen's literal model record and its
+	// discovered model.
+	record, ok := cfg.PeerModelRecord("kitchen", "static")
+	require.True(t, ok, "literal model record kept")
+	assert.Equal(t, "Static", record["name"])
+	record, ok = cfg.PeerModelRecord("kitchen", "fresh")
+	require.True(t, ok)
+	assert.Equal(t, "Fresh", record["name"])
+	assert.Equal(t, []string{"static", "fresh"}, cfg.PeerModelIDs("kitchen"))
+}

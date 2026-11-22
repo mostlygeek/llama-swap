@@ -475,3 +475,14 @@ peers:
 	assert.NoError(t, err)
 	assert.EqualValues(t, 3, peer.fetches.Load())
 }
+
+func TestPeer_CatalogCacheKeyIncludesCredentials(t *testing.T) {
+	peer := config.PeerConfig{Proxy: "http://kitchen", ApiKey: "account-a", Catalog: &config.PeerCatalogConfig{Path: "/v1/models"}}
+	keyA := peerCatalogCacheKey("kitchen", peer)
+	peer.ApiKey = "account-b"
+	keyB := peerCatalogCacheKey("kitchen", peer)
+	assert.NotEqual(t, keyA, keyB, "another account at the same URL")
+	assert.NotContains(t, keyA, "account-a", "the key holds a hash, not the secret")
+	peer.ApiKey = "account-a"
+	assert.Equal(t, keyA, peerCatalogCacheKey("kitchen", peer), "stable for the same settings")
+}
