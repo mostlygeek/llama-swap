@@ -8,8 +8,7 @@ import (
 )
 
 // The auto extractor reads every server's fields. These tests cover the
-// order it applies them in when more than one appears: oMLX rates, then
-// TabbyAPI rates, then llama-server timings, then vLLM metrics.
+// order it applies them in when more than one appears.
 
 func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 	// Every server's fixture gives the same result through auto as through
@@ -59,6 +58,7 @@ func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 }
 
 func TestUsage_Auto_Precedence(t *testing.T) {
+	const flm = `,"prefill_speed_tps":20,"decoding_speed_tps":15`
 	const omlx = `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`
 	const tensorfold = `,"tensorfold":{"prefill_s":0.4,"decode_s":2,"cached":16}`
 	const timings = `,"timings":{"prompt_n":40,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40}`
@@ -70,6 +70,12 @@ func TestUsage_Auto_Precedence(t *testing.T) {
 		wantPrompt float64
 		wantGen    float64
 	}{
+		{"FastFlowLM zero is reported", `,"prefill_speed_tps":0,"decoding_speed_tps":0`, "", 0, 0},
+		{"FastFlowLM null and negative rates are unknown", `,"prefill_speed_tps":null,"decoding_speed_tps":-10`, "", -1, -1},
+		{"FastFlowLM missing and string rates are unknown", `,"decoding_speed_tps":"15"`, "", -1, -1},
+		{"FastFlowLM keeps the reported rate", `,"decoding_speed_tps":15`, "", -1, 15},
+		{"oMLX takes precedence over FastFlowLM", flm + omlx, "", 63.74, 66.38},
+		{"timings take precedence over FastFlowLM", flm, timings, 100, 40},
 		{"TabbyAPI over oMLX", `,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11` + omlx, "", 35.17, 17.11},
 		{"TabbyAPI zero over oMLX", `,"prompt_tokens_per_sec":0,"completion_tokens_per_sec":0` + omlx, "", 0, 0},
 		{"TabbyAPI null falls back to oMLX", `,"prompt_tokens_per_sec":null,"completion_tokens_per_sec":null` + omlx, "", 63.74, 66.38},

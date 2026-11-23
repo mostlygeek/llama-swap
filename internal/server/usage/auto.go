@@ -9,11 +9,9 @@ import (
 // autoExtractor is used when the upstream is unknown, and for llama-swap
 // peers, which pass through whatever their own upstream returns. It reads
 // the API usage block and then applies every server's extra fields it finds,
-// in the order oMLX rates, TabbyAPI rates, TensorFold, llama-server timings
-// (plus the kyojin and radiance fields kept in the same block), vLLM metrics,
-// so a more precise source overrides a less precise one. Hipfire's explicit
-// prefill and decode rates are applied after generic timings and before vLLM
-// metrics.
+// in this order: FastFlowLM, oMLX and TabbyAPI usage rates; TensorFold;
+// llama-server timings (including kyojin and radiance extras); Hipfire
+// timings; vLLM metrics. Later sources take precedence.
 type autoExtractor struct{}
 
 func (autoExtractor) newParser(path string, start time.Time) usageParser {
@@ -49,6 +47,7 @@ func (p *autoParser) event(ev gjson.Result) {
 
 func (p *autoParser) usage() Usage {
 	u := p.api.toUsage(p.start)
+	applyFastFlowLMRates(&u, p.block)
 	applyOMLXRates(&u, p.block)
 	applyTabbyAPIRates(&u, p.block) // TabbyAPI's fields win when both appear
 	applyTensorFold(&u, p.tensorfold)
