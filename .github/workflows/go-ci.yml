@@ -85,7 +85,7 @@ jobs:
 
       # The cmd utility suites are unix-only (vllm-wrapper uses
       # syscall.Kill), so they run here (Linux) and not in the Windows
-      # CI, which only runs make test-all (internal).
+      # CI, which only runs make test-windows (platform specific packages).
       - name: Test cmd utilities
         run: make test-cmd
 
