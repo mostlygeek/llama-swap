@@ -528,6 +528,14 @@ func TestParseNvidiaSmiLine_ValidLine(t *testing.T) {
 	assert.InDelta(t, 80.0, stat.MemUtilPct, 0.01)
 }
 
+func TestParseNvidiaSmiLine_FractionalTemperature(t *testing.T) {
+	line := "0, NVIDIA GeForce RTX 5060 Ti, GPU-12345678-1234-1234-1234-123456789abc, 56.90, 93, 15297, 16311, 38, 78.28"
+
+	stat := ParseNvidiaSmiLine(line)
+	require.NotNil(t, stat)
+	assert.Equal(t, 57, stat.TempC)
+}
+
 func TestParseNvidiaSmiLine_ShortLine(t *testing.T) {
 	line := "0, NVIDIA GPU, GPU-123"
 
