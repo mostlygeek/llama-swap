@@ -21,6 +21,7 @@ func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 		{hint.OpenAI, "/v1/chat/completions", "openai/chat_completion.json"},
 		{hint.OpenAI, "/v1/responses", "openai/responses_stream.sse"},
 		{hint.Anthropic, "/v1/messages", "anthropic/message_stream.sse"},
+		{hint.OpenAICompatible, "/v1/chat/completions", "fastflowlm/chat_completion.json"},
 		{hint.LlamaServer, "/v1/chat/completions", "llama-server/chat_completion.json"},
 		{hint.LlamaServer, "/infill", "llama-server/infill.json"},
 		{hint.VLLM, "/v1/chat/completions", "vllm/chat_completion.json"},
