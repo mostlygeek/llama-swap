@@ -72,6 +72,10 @@ test-cmd:
 # is not duplicated here.
 test-windows:
 	go test -race -count=1 ./internal/config ./internal/hw ./internal/perf ./internal/process
+	# Server level shutdown of real subprocesses (taskkill tree kill) is
+	# Windows specific behaviour; run only that suite instead of all of
+	# internal/server.
+	go test -race -count=1 -run '^TestServer_CapacityProcessLifecycle$$' ./internal/server
 
 # Lint and render the kubeswap Helm chart (requires helm on PATH).
 # Renders every supported config shape (stock defaults, structured with
