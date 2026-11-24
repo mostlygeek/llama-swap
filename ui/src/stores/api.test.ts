@@ -21,6 +21,7 @@ import {
   resumeInference,
   selectorModels,
   setActiveProfile,
+  pendingProfileSwitch,
   tailcatStatus,
   uiConfig,
   helpAgentEnabled,
@@ -279,6 +280,28 @@ describe("api store event handling", () => {
       method: "PUT",
       body: JSON.stringify({ name: "coding" }),
     }));
+  });
+
+  it("rejects a profile switch while another is in flight", async () => {
+    let finish!: (value: unknown) => void;
+    const mockFetch = vi.fn().mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const first = setActiveProfile("coding");
+    expect(get(pendingProfileSwitch)).toBe("coding");
+    await expect(setActiveProfile(null)).rejects.toThrow("already in progress");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    finish({ ok: true, json: async () => ({ active: "coding" }) });
+    await first;
+    expect(get(pendingProfileSwitch)).toBeUndefined();
+  });
+
+  it("clears the pending profile switch when it fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+
+    await expect(setActiveProfile("coding")).rejects.toThrow("Failed to switch profile: 500");
+    expect(get(pendingProfileSwitch)).toBeUndefined();
   });
 
   it("loads Playground models and virtual model types from v1/models", async () => {

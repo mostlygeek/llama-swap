@@ -1,4 +1,4 @@
-import { writable, derived } from "svelte/store";
+import { writable, derived, get } from "svelte/store";
 import type {
   Model,
   ActivityPage,
@@ -26,6 +26,12 @@ export const models = writable<Model[]>([]);
 export const playgroundModels = writable<Model[]>([]);
 export const profiles = writable<Profile[]>([]);
 export const activeProfile = writable<string | null>(null);
+/**
+ * Profile the UI is switching to (null when clearing it), or undefined when
+ * no switch is in flight. Every profile control disables while it is set, so
+ * two switches never race and the earlier one lands last.
+ */
+export const pendingProfileSwitch = writable<string | null | undefined>(undefined);
 /** True while inference is paused: the server rejects requests for local models. */
 export const inferencePaused = writable<boolean>(false);
 
@@ -226,17 +232,25 @@ export async function fetchProfiles(): Promise<ProfileState> {
 }
 
 export async function setActiveProfile(name: string | null): Promise<void> {
-  const revision = profileRevision;
-  const response = await fetch(apiUrl("/api/profiles/active"), {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to switch profile: ${response.status}`);
+  if (get(pendingProfileSwitch) !== undefined) {
+    throw new Error("A profile switch is already in progress");
   }
-  const state = await response.json() as Pick<ProfileState, "active">;
-  if (profileRevision === revision) activeProfile.set(state.active);
+  pendingProfileSwitch.set(name);
+  try {
+    const revision = profileRevision;
+    const response = await fetch(apiUrl("/api/profiles/active"), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to switch profile: ${response.status}`);
+    }
+    const state = await response.json() as Pick<ProfileState, "active">;
+    if (profileRevision === revision) activeProfile.set(state.active);
+  } finally {
+    pendingProfileSwitch.set(undefined);
+  }
 }
 
 // Fetch version info when connected

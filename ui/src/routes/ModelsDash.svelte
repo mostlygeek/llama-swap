@@ -14,6 +14,7 @@
     fetchPeers,
     refreshPeer,
     setActiveProfile,
+    pendingProfileSwitch,
   } from "../stores/api";
   import { loadingMessage, loadingPercent, statusDotColor } from "../stores/modelLoad";
   import {
@@ -122,21 +123,21 @@
     return groups.sort((a, b) => a.peerID.localeCompare(b.peerID, undefined, { numeric: true }));
   });
 
-  // Tabs with nothing to show are hidden. A stored tab that is hidden (no
-  // profiles configured any more, peers not loaded yet) falls back to Local
-  // without overwriting the stored choice, so it comes back once it has
-  // content again.
+  // Tabs with nothing to show are hidden; Local stays as the empty state when
+  // every tab is empty. A stored tab that is hidden (no profiles configured
+  // any more, peers not loaded yet) falls back to the first tab without
+  // overwriting the stored choice, so it comes back once it has content again.
   let tabs = $derived.by(() => {
-    const list: { id: ModelsDashTab; label: string; count: number }[] = [
-      { id: "local", label: "Local", count: localModels.length },
-    ];
+    const list: { id: ModelsDashTab; label: string; count: number }[] = [];
+    if (localModels.length > 0) list.push({ id: "local", label: "Local", count: localModels.length });
     if (peerGroups.length > 0) list.push({ id: "peers", label: "Peers", count: peerModels.length });
     if ($selectorModels.length > 0) list.push({ id: "selectors", label: "Selectors", count: $selectorModels.length });
     if ($profiles.length > 0) list.push({ id: "profiles", label: "Profiles", count: $profiles.length });
+    if (list.length === 0) list.push({ id: "local", label: "Local", count: 0 });
     return list;
   });
   let currentTab = $derived<ModelsDashTab>(
-    tabs.some((tab) => tab.id === $modelsDashTab) ? $modelsDashTab : "local"
+    tabs.some((tab) => tab.id === $modelsDashTab) ? $modelsDashTab : tabs[0].id
   );
 
   function profileMappings(profile: Profile): [string, string][] {
@@ -149,19 +150,14 @@
     return $models.find((m) => m.id === id) ?? $models.find((m) => m.aliases?.includes(id));
   }
 
-  // Profile being switched to (null while deactivating); undefined when idle.
-  let switchingProfile = $state<string | null | undefined>(undefined);
   let profileError = $state("");
 
   async function handleSetProfile(id: string | null): Promise<void> {
-    switchingProfile = id;
     profileError = "";
     try {
       await setActiveProfile(id);
     } catch (e) {
       profileError = e instanceof Error ? e.message : String(e);
-    } finally {
-      switchingProfile = undefined;
     }
   }
 
@@ -449,11 +445,11 @@
             variant={active ? "ghost" : "outline"}
             size="sm"
             class="shrink-0"
-            disabled={switchingProfile !== undefined}
+            disabled={$pendingProfileSwitch !== undefined}
             onclick={() => handleSetProfile(active ? null : profile.id)}
             title={active ? "Deactivate this profile" : "Make this the active profile"}
           >
-            {#if switchingProfile !== undefined && (switchingProfile === profile.id || (active && switchingProfile === null))}
+            {#if $pendingProfileSwitch !== undefined && ($pendingProfileSwitch === profile.id || (active && $pendingProfileSwitch === null))}
               <Loader2 class="size-3.5 animate-spin" />
             {/if}
             {active ? "Deactivate" : "Activate"}
@@ -587,7 +583,7 @@
   </Card.Root>
 
   <Tabs value={currentTab} onValueChange={(v) => v && modelsDashTab.set(v as ModelsDashTab)}>
-    <TabsList variant="line" class="max-w-full overflow-x-auto">
+    <TabsList variant="line" class="max-w-full justify-start overflow-x-auto">
       {#each tabs as tab (tab.id)}
         <TabsTrigger value={tab.id} class="flex-none px-2">
           {tab.label}
