@@ -13,17 +13,26 @@
     unloadAllModels,
     fetchPeers,
     refreshPeer,
+    setActiveProfile,
   } from "../stores/api";
   import { loadingMessage, loadingPercent, statusDotColor } from "../stores/modelLoad";
-  import { showUnlistedModels as showUnlisted, showCapabilityTags, groupByClass, collapsedSections } from "../stores/modelDisplay";
+  import {
+    showUnlistedModels as showUnlisted,
+    showCapabilityTags,
+    groupByClass,
+    collapsedSections,
+    modelsDashTab,
+    type ModelsDashTab,
+  } from "../stores/modelDisplay";
   import { listCapabilityBadges, capabilityBadgeClass } from "../lib/capabilities";
   import { groupModelsByClass, modelClassLabels, sectionStatusDotColor } from "../lib/modelClasses";
-  import type { Model, PeerStatus } from "../lib/types";
+  import type { Model, PeerStatus, Profile } from "../lib/types";
   import ModelLoadButton from "../components/ModelLoadButton.svelte";
   import Tag from "../components/Tag.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { Tabs, TabsList, TabsTrigger, TabsContent } from "$lib/components/ui/tabs/index.js";
   import { PowerOff, Loader2, ExternalLink, Boxes, Pause, Play, ChevronDown, ChevronRight, SlidersHorizontal, RefreshCw } from "@lucide/svelte";
   import { modelServerPath, groupModelsByPeer, peerLocalModelID } from "../lib/modelUtils";
 
@@ -112,14 +121,49 @@
     }
     return groups.sort((a, b) => a.peerID.localeCompare(b.peerID, undefined, { numeric: true }));
   });
-  let selectedProfile = $derived(
-    $profiles.find((profile) => profile.id === $activeProfile)
+
+  // Tabs with nothing to show are hidden. A stored tab that is hidden (no
+  // profiles configured any more, peers not loaded yet) falls back to Local
+  // without overwriting the stored choice, so it comes back once it has
+  // content again.
+  let tabs = $derived.by(() => {
+    const list: { id: ModelsDashTab; label: string; count: number }[] = [
+      { id: "local", label: "Local", count: localModels.length },
+    ];
+    if (peerGroups.length > 0) list.push({ id: "peers", label: "Peers", count: peerModels.length });
+    if ($selectorModels.length > 0) list.push({ id: "selectors", label: "Selectors", count: $selectorModels.length });
+    if ($profiles.length > 0) list.push({ id: "profiles", label: "Profiles", count: $profiles.length });
+    return list;
+  });
+  let currentTab = $derived<ModelsDashTab>(
+    tabs.some((tab) => tab.id === $modelsDashTab) ? $modelsDashTab : "local"
   );
-  let profileMappings = $derived(
-    Object.entries(selectedProfile?.pins ?? {}).sort(([a], [b]) =>
+
+  function profileMappings(profile: Profile): [string, string][] {
+    return Object.entries(profile.pins ?? {}).sort(([a], [b]) =>
       a.localeCompare(b, undefined, { numeric: true })
-    )
-  );
+    );
+  }
+
+  function findModel(id: string): Model | undefined {
+    return $models.find((m) => m.id === id) ?? $models.find((m) => m.aliases?.includes(id));
+  }
+
+  // Profile being switched to (null while deactivating); undefined when idle.
+  let switchingProfile = $state<string | null | undefined>(undefined);
+  let profileError = $state("");
+
+  async function handleSetProfile(id: string | null): Promise<void> {
+    switchingProfile = id;
+    profileError = "";
+    try {
+      await setActiveProfile(id);
+    } catch (e) {
+      profileError = e instanceof Error ? e.message : String(e);
+    } finally {
+      switchingProfile = undefined;
+    }
+  }
 
   let readyCount = $derived($models.filter((m) => m.state === "ready").length);
   let anyReady = $derived(readyCount > 0);
@@ -271,84 +315,187 @@
 {/snippet}
 
 {#snippet peerSection()}
-  {@const collapsed = isSectionCollapsed("peers")}
   <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-    <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
-      <button
-        type="button"
-        class="flex w-full cursor-pointer items-center gap-2"
-        onclick={() => toggleSection("peers")}
-        aria-expanded={!collapsed}
-      >
-        <Card.Title class="text-sm">Peer models</Card.Title>
-        <span class="text-muted-foreground text-xs">{peerModels.length}</span>
-        <ChevronDown
-          class={`text-muted-foreground ml-auto size-4 shrink-0 transition-transform ${collapsed ? "-rotate-90" : ""}`}
-          aria-hidden="true"
-        />
-      </button>
-    </Card.Header>
-    {#if !collapsed}
-      <Card.Content class="p-0">
-        {#if peerGroups.length === 0}
-          <div class="text-muted-foreground px-3 py-6 sm:px-4 text-center text-sm">
-            No peer models available
+    <Card.Content class="p-0">
+    {#if peerGroups.length === 0}
+      <div class="text-muted-foreground px-3 py-6 sm:px-4 text-center text-sm">
+        No peer models available
+      </div>
+    {:else}
+      <div class="divide-y">
+        {#each peerGroups as group (group.peerID)}
+          {@const key = `peer:${group.peerID}`}
+          {@const peerCollapsed = isSectionCollapsed(key)}
+          {@const refreshing = refreshingPeers[group.peerID] === true}
+          {@const refreshError = peerRefreshErrors[group.peerID] ?? peerStatus[group.peerID]?.catalog?.lastError}
+          <div>
+            <div class="bg-muted/30 flex items-center gap-2 px-3 py-1.5 sm:px-4">
+              <button
+                type="button"
+                class="flex min-w-0 flex-1 cursor-pointer items-center gap-2"
+                onclick={() => toggleSection(key)}
+                aria-expanded={!peerCollapsed}
+              >
+                <ChevronRight
+                  class={`text-muted-foreground size-4 shrink-0 transition-transform ${peerCollapsed ? "" : "rotate-90"}`}
+                  aria-hidden="true"
+                />
+                <span class="truncate text-sm font-medium">{group.peerID}</span>
+                <span class="text-muted-foreground text-xs">{group.models.length}</span>
+                {#if refreshError}
+                  <span class="text-destructive min-w-0 truncate text-xs" title={refreshError}>{refreshError}</span>
+                {/if}
+              </button>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="size-7 shrink-0"
+                onclick={() => handleRefreshPeer(group.peerID)}
+                disabled={refreshing || !peerStatus[group.peerID]?.catalog}
+                title={peerRefreshTitle(group.peerID)}
+                aria-label={`Refresh models from ${group.peerID}`}
+              >
+                <RefreshCw class={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+            {#if !peerCollapsed}
+              <div class="divide-y border-t">
+                {#each group.models as model (model.id)}
+                  {@render modelRow(model, true)}
+                {:else}
+                  <div class="text-muted-foreground py-3 pr-3 pl-9 text-sm sm:pr-4 sm:pl-10">
+                    No models from this peer
+                  </div>
+                {/each}
+              </div>
+            {/if}
           </div>
+        {/each}
+      </div>
+    {/if}
+    </Card.Content>
+  </Card.Root>
+{/snippet}
+
+{#snippet selectorSection()}
+  <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
+    <Card.Content class="p-0">
+      <div class="divide-y">
+        {#each $selectorModels as selector (selector.id)}
+          <div class="hover:bg-muted/50 flex items-center gap-3 px-3 py-2.5 sm:px-4">
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-sm font-medium">
+                {selector.name ? `${selector.id} - ${selector.name}` : selector.id}
+              </div>
+              {#if selector.description}
+                <div class="text-muted-foreground truncate text-xs">
+                  {selector.description}
+                </div>
+              {/if}
+              <div class="text-muted-foreground flex flex-wrap items-center gap-x-1 text-xs">
+                <span>targets:</span>
+                {#each selector.targets ?? [] as target, i (target)}
+                  {#if i > 0}<span>,</span>{/if}
+                  <a
+                    href="/models/{encodeURIComponent(target)}"
+                    use:link
+                    class="hover:text-foreground hover:underline"
+                  >{target}</a>
+                {/each}
+              </div>
+            </div>
+            {#if selector.strategy === "spillover" && selector.spillover}
+              <Tag>spillover {selector.spillover}</Tag>
+            {/if}
+            {#if selector.strategy === "fit" && selector.noEvict}
+              <Tag>no evict</Tag>
+            {/if}
+            <Tag class="px-1.5 text-[0.625rem] uppercase">{selector.strategy}</Tag>
+          </div>
+        {/each}
+      </div>
+    </Card.Content>
+  </Card.Root>
+{/snippet}
+
+{#snippet profilesSection()}
+  {#if profileError}
+    <div class="text-destructive text-sm" role="alert">{profileError}</div>
+  {/if}
+  {#if !$activeProfile}
+    <div class="text-muted-foreground text-sm">No profile is active. Activate one to pin its models.</div>
+  {/if}
+  {#each $profiles as profile (profile.id)}
+    {@const active = profile.id === $activeProfile}
+    {@const mappings = profileMappings(profile)}
+    <Card.Root class={`shrink-0 gap-0 overflow-hidden py-0 ${active ? "ring-success/60 ring-2" : ""}`}>
+      <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
+        <div class="flex items-center gap-2">
+          <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span class="flex min-w-0 items-center gap-2">
+              <Card.Title class="truncate text-sm">{profile.id}</Card.Title>
+              {#if active}
+                <Tag class="bg-success/15 text-success">Active</Tag>
+              {/if}
+              <span class="text-muted-foreground text-xs">
+                {mappings.length} {mappings.length === 1 ? "mapping" : "mappings"}
+              </span>
+            </span>
+            {#if profile.description}
+              <span class="text-muted-foreground text-xs">{profile.description}</span>
+            {/if}
+          </div>
+          <Button
+            variant={active ? "ghost" : "outline"}
+            size="sm"
+            class="shrink-0"
+            disabled={switchingProfile !== undefined}
+            onclick={() => handleSetProfile(active ? null : profile.id)}
+            title={active ? "Deactivate this profile" : "Make this the active profile"}
+          >
+            {#if switchingProfile !== undefined && (switchingProfile === profile.id || (active && switchingProfile === null))}
+              <Loader2 class="size-3.5 animate-spin" />
+            {/if}
+            {active ? "Deactivate" : "Activate"}
+          </Button>
+        </div>
+      </Card.Header>
+      <Card.Content class="p-0">
+        {#if mappings.length === 0}
+          <div class="text-muted-foreground px-3 py-4 text-center text-sm sm:px-4">No mappings</div>
         {:else}
           <div class="divide-y">
-            {#each peerGroups as group (group.peerID)}
-              {@const key = `peer:${group.peerID}`}
-              {@const peerCollapsed = isSectionCollapsed(key)}
-              {@const refreshing = refreshingPeers[group.peerID] === true}
-              {@const refreshError = peerRefreshErrors[group.peerID] ?? peerStatus[group.peerID]?.catalog?.lastError}
-              <div>
-                <div class="bg-muted/30 flex items-center gap-2 px-3 py-1.5 sm:px-4">
-                  <button
-                    type="button"
-                    class="flex min-w-0 flex-1 cursor-pointer items-center gap-2"
-                    onclick={() => toggleSection(key)}
-                    aria-expanded={!peerCollapsed}
-                  >
-                    <ChevronRight
-                      class={`text-muted-foreground size-4 shrink-0 transition-transform ${peerCollapsed ? "" : "rotate-90"}`}
-                      aria-hidden="true"
-                    />
-                    <span class="truncate text-sm font-medium">{group.peerID}</span>
-                    <span class="text-muted-foreground text-xs">{group.models.length}</span>
-                    {#if refreshError}
-                      <span class="text-destructive min-w-0 truncate text-xs" title={refreshError}>{refreshError}</span>
+            {#each mappings as [modelID, target] (modelID)}
+              {@const targetModel = target ? findModel(target) : undefined}
+              <div class="hover:bg-muted/50 flex items-center gap-3 px-3 py-2.5 sm:px-4 has-[>button]:py-1.5">
+                {#if targetModel && !targetModel.peerID}
+                  <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(targetModel)}`} role="img" aria-label={`Model ${targetModel.state}`}></span>
+                {/if}
+                <span class="max-w-[45%] truncate text-sm font-medium">{modelID}</span>
+                <span class="text-muted-foreground text-xs" aria-hidden="true">→</span>
+                {#if target}
+                  {#if targetModel}
+                    <a
+                      href="/models/{encodeURIComponent(targetModel.id)}"
+                      use:link
+                      class="min-w-0 flex-1 truncate text-sm hover:text-foreground hover:underline"
+                    >{target}</a>
+                    {#if active && !targetModel.peerID}
+                      <ModelLoadButton model={targetModel} />
                     {/if}
-                  </button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="size-7 shrink-0"
-                    onclick={() => handleRefreshPeer(group.peerID)}
-                    disabled={refreshing || !peerStatus[group.peerID]?.catalog}
-                    title={peerRefreshTitle(group.peerID)}
-                    aria-label={`Refresh models from ${group.peerID}`}
-                  >
-                    <RefreshCw class={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />
-                  </Button>
-                </div>
-                {#if !peerCollapsed}
-                  <div class="divide-y border-t">
-                    {#each group.models as model (model.id)}
-                      {@render modelRow(model, true)}
-                    {:else}
-                      <div class="text-muted-foreground py-3 pr-3 pl-9 text-sm sm:pr-4 sm:pl-10">
-                        No models from this peer
-                      </div>
-                    {/each}
-                  </div>
+                  {:else}
+                    <span class="min-w-0 truncate text-sm">{target}</span>
+                  {/if}
+                {:else}
+                  <Tag class="px-1.5 text-[0.625rem] uppercase">disabled</Tag>
                 {/if}
               </div>
             {/each}
           </div>
         {/if}
       </Card.Content>
-    {/if}
-  </Card.Root>
+    </Card.Root>
+  {/each}
 {/snippet}
 
 {#snippet displayOptions()}
@@ -439,156 +586,44 @@
     </Card.Header>
   </Card.Root>
 
-  <div class="flex min-h-0 shrink-0 flex-col gap-3 sm:gap-4">
-    {#if $profiles.length > 0}
-      <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-        <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
-          <button
-            type="button"
-            class="flex w-full cursor-pointer flex-col gap-1"
-            onclick={() => toggleSection("profiles")}
-            aria-expanded={!isSectionCollapsed("profiles")}
-          >
-            <span class="flex items-center gap-2">
-              <Card.Title class="text-sm">Profiles</Card.Title>
-              {#if selectedProfile}
-                <Tag>{$activeProfile}</Tag>
-                <Tag class="bg-success/15 text-success">Active</Tag>
-              {/if}
-              <span class="text-muted-foreground ml-auto text-xs">
-                {profileMappings.length} {profileMappings.length === 1 ? "mapping" : "mappings"}
-              </span>
-              <ChevronDown
-                class={`text-muted-foreground size-4 shrink-0 transition-transform ${isSectionCollapsed("profiles") ? "-rotate-90" : ""}`}
-                aria-hidden="true"
-              />
-            </span>
-            {#if selectedProfile?.description}
-              <span class="text-muted-foreground text-left text-xs">{selectedProfile.description}</span>
-            {/if}
-          </button>
-        </Card.Header>
-        {#if !isSectionCollapsed("profiles")}
-        <Card.Content class="p-0">
-          {#if !selectedProfile}
-            <div class="text-muted-foreground px-3 py-6 sm:px-4 text-center text-sm">
-              No active profile
-            </div>
-          {:else}
-            <div class="divide-y">
-              {#each profileMappings as [modelID, target] (modelID)}
-                {@const targetModel = target
-                  ? $models.find((m) => m.id === target) ??
-                    $models.find((m) => m.aliases?.includes(target))
-                  : undefined}
-                <div
-                  class="hover:bg-muted/50 flex items-center gap-3 px-3 py-2.5 sm:px-4 has-[>button]:py-1.5"
-                >
-                  {#if targetModel && !targetModel.peerID}
-                    <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(targetModel)}`} role="img" aria-label={`Model ${targetModel.state}`}></span>
-                  {/if}
-                  <span class="max-w-[45%] truncate text-sm font-medium">{modelID}</span>
-                  <span class="text-muted-foreground text-xs" aria-hidden="true">→</span>
-                  {#if target}
-                    {#if targetModel}
-                      <a
-                        href="/models/{encodeURIComponent(targetModel.id)}"
-                        use:link
-                        class="min-w-0 flex-1 truncate text-sm hover:text-foreground hover:underline"
-                      >{target}</a>
-                      {#if !targetModel.peerID}
-                        <ModelLoadButton model={targetModel} />
-                      {/if}
-                    {:else}
-                      <span class="min-w-0 truncate text-sm">{target}</span>
-                    {/if}
-                  {:else}
-                    <Tag class="px-1.5 text-[0.625rem] uppercase">disabled</Tag>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </Card.Content>
-        {/if}
-      </Card.Root>
-    {/if}
+  <Tabs value={currentTab} onValueChange={(v) => v && modelsDashTab.set(v as ModelsDashTab)}>
+    <TabsList variant="line" class="max-w-full overflow-x-auto">
+      {#each tabs as tab (tab.id)}
+        <TabsTrigger value={tab.id} class="flex-none px-2">
+          {tab.label}
+          <span class="text-muted-foreground text-xs tabular-nums">{tab.count}</span>
+        </TabsTrigger>
+      {/each}
+    </TabsList>
 
-    {#if $selectorModels.length > 0}
-      <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-        <Card.Header class="shrink-0 border-b px-3 py-2.5 sm:px-4">
-          <button
-            type="button"
-            class="flex w-full cursor-pointer items-center gap-2"
-            onclick={() => toggleSection("selectors")}
-            aria-expanded={!isSectionCollapsed("selectors")}
-          >
-            <Card.Title class="text-sm">Selectors</Card.Title>
-            <span class="text-muted-foreground ml-auto text-xs">
-              {$selectorModels.length} {$selectorModels.length === 1 ? "selector" : "selectors"}
-            </span>
-            <ChevronDown
-              class={`text-muted-foreground size-4 shrink-0 transition-transform ${isSectionCollapsed("selectors") ? "-rotate-90" : ""}`}
-              aria-hidden="true"
-            />
-          </button>
-        </Card.Header>
-        {#if !isSectionCollapsed("selectors")}
-        <Card.Content class="p-0">
-          <div class="divide-y">
-            {#each $selectorModels as selector (selector.id)}
-              <div class="hover:bg-muted/50 flex items-center gap-3 px-3 py-2.5 sm:px-4">
-                <div class="min-w-0 flex-1">
-                  <div class="truncate text-sm font-medium">
-                    {selector.name ? `${selector.id} - ${selector.name}` : selector.id}
-                  </div>
-                  {#if selector.description}
-                    <div class="text-muted-foreground truncate text-xs">
-                      {selector.description}
-                    </div>
-                  {/if}
-                  <div class="text-muted-foreground flex flex-wrap items-center gap-x-1 text-xs">
-                    <span>targets:</span>
-                    {#each selector.targets ?? [] as target, i (target)}
-                      {#if i > 0}<span>,</span>{/if}
-                      <a
-                        href="/models/{encodeURIComponent(target)}"
-                        use:link
-                        class="hover:text-foreground hover:underline"
-                      >{target}</a>
-                    {/each}
-                  </div>
-                </div>
-                {#if selector.strategy === "spillover" && selector.spillover}
-                  <Tag>spillover {selector.spillover}</Tag>
-                {/if}
-                {#if selector.strategy === "fit" && selector.noEvict}
-                  <Tag>no evict</Tag>
-                {/if}
-                <Tag class="px-1.5 text-[0.625rem] uppercase">{selector.strategy}</Tag>
-              </div>
-            {/each}
-          </div>
-        </Card.Content>
+    <TabsContent value="local" class="mt-2 flex flex-col gap-3 sm:gap-4">
+      {#if $groupByClass}
+        {#if localClassGroups.length === 0}
+          {@render modelSection("local", "Local models", localModels)}
+        {:else}
+          {#each localClassGroups as group (group.class)}
+            {@render modelSection(
+              group.class,
+              modelClassLabels[group.class],
+              group.models
+            )}
+          {/each}
         {/if}
-      </Card.Root>
-    {/if}
-
-    {#if $groupByClass}
-      {#if localClassGroups.length === 0}
-        {@render modelSection("local", "Local models", localModels)}
       {:else}
-        {#each localClassGroups as group (group.class)}
-          {@render modelSection(
-            group.class,
-            modelClassLabels[group.class],
-            group.models
-          )}
-        {/each}
+        {@render modelSection("local", "Local models", sortedLocalModels)}
       {/if}
-    {:else}
-      {@render modelSection("local", "Local models", sortedLocalModels)}
-    {/if}
-    {@render peerSection()}
-  </div>
+    </TabsContent>
+
+    <TabsContent value="peers" class="mt-2">
+      {@render peerSection()}
+    </TabsContent>
+
+    <TabsContent value="selectors" class="mt-2">
+      {@render selectorSection()}
+    </TabsContent>
+
+    <TabsContent value="profiles" class="mt-2 flex flex-col gap-3 sm:gap-4">
+      {@render profilesSection()}
+    </TabsContent>
+  </Tabs>
 </div>
