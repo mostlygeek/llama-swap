@@ -33,6 +33,7 @@ func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 		{hint.TensorFold, "/v1/chat/completions", "tensorfold/chat_completion_stream_v2.sse"},
 		{hint.Kyojin, "/v1/chat/completions", "kyojin/chat_completion_stream.sse"},
 		{hint.Radiance, "/v1/chat/completions", "radiance/chat_completion_stream.sse"},
+		{hint.RapidMLX, "/v1/chat/completions", "rapid-mlx/chat_completion.json"},
 		{hint.Halogen, "/v1/chat/completions", "halogen/chat_completion_stream.sse"},
 		{hint.Radiance, "/v1/messages", "radiance/messages_stream.sse"},
 		{hint.Radiance, "/v1/responses", "radiance/responses_stream.sse"},

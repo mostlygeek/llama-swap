@@ -520,6 +520,23 @@ func TestCapcompat_DetectRadiance(t *testing.T) {
 	require.NoError(t, info.Capabilities.Validate())
 }
 
+func TestCapcompat_DetectRapidMLX(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "rapid-mlx", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "mlx-community/Qwen3.5-4B-MLX-4bit")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.RapidMLX, info.Upstream)
+	assert.Equal(t, 262144, info.Capabilities.Context)
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools, "listing-only probing leaves tools unset")
+	assert.Len(t, up.hits, 1, "only /v1/models is needed")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
 func TestCapcompat_DetectHipfire(t *testing.T) {
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "hipfire", "v1_models.json"),
