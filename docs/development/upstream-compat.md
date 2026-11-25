@@ -52,6 +52,7 @@ Three packages are involved:
 | `llamaServerProber` | `owned_by` `llamacpp` | `/v1/models`, `/props` |
 | `halogenProber` | `owned_by` `halogen` | `/v1/models`, `/health` |
 | `hipfireProber` | `owned_by` `hipfire` | `/v1/models` (no context length reported) |
+| `fastFlowLMProber` | `owned_by` `FastFlowLM` | `/v1/models` (context length when reported) |
 | `defaultProber` | any entry with a context length | `/v1/models` only |
 
 Pick the smallest change that works:

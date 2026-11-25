@@ -553,6 +553,20 @@ func TestCapcompat_DetectFastFlowLM(t *testing.T) {
 	require.NoError(t, info.Capabilities.Validate())
 }
 
+func TestCapcompat_DetectFastFlowLMWithoutContext(t *testing.T) {
+	// Before FastFlowLM 35fe4252, the listing included owned_by but no context length.
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": []byte(`{"object":"list","data":[{"id":"qwen3.5:9b","object":"model","owned_by":"FastFlowLM"}]}`),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "qwen3.5:9b")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.FastFlowLM, info.Upstream)
+	assert.Zero(t, info.Capabilities.Context)
+	assert.Len(t, up.hits, 1, "only /v1/models is needed")
+}
+
 func TestCapcompat_DetectYamz(t *testing.T) {
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "yamz", "v1_models.json"),
