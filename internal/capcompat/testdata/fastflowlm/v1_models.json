@@ -1,0 +1,34 @@
+{
+  "data": [
+    {
+      "architecture": {
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "backend": "flm",
+      "capabilities": [
+        "completion",
+        "tools",
+        "vision",
+        "thinking"
+      ],
+      "context_length": 8192,
+      "created": 1795598062,
+      "device": "npu",
+      "id": "qwen3.5:9b",
+      "object": "model",
+      "owned_by": "FastFlowLM",
+      "supported_parameters": [
+        "tools",
+        "tool_choice",
+        "reasoning"
+      ]
+    }
+  ],
+  "object": "list"
+}
