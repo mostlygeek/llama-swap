@@ -23,6 +23,7 @@ const (
 	Radiance         Upstream = "radiance"
 	Halogen          Upstream = "halogen"
 	Hipfire          Upstream = "hipfire"
+	FastFlowLM       Upstream = "fastflowlm"
 	OpenAICompatible Upstream = "openai-compatible" // any other /v1 server
 
 	// Remote upstreams a peer can point at.
@@ -36,7 +37,7 @@ const (
 // not known.
 func (u Upstream) Known() bool {
 	switch u {
-	case LlamaServer, VLLM, TabbyAPI, OMLX, TensorFold, Kyojin, Radiance, Halogen, Hipfire, OpenAICompatible,
+	case LlamaServer, VLLM, TabbyAPI, OMLX, TensorFold, Kyojin, Radiance, Halogen, Hipfire, FastFlowLM, OpenAICompatible,
 		LlamaSwap, OpenAI, Anthropic, OpenRouter:
 		return true
 	}

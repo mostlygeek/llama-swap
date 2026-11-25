@@ -66,6 +66,8 @@ func extractorFor(u hint.Upstream) usageExtractor {
 		return halogenExtractor{}
 	case hint.Hipfire:
 		return hipfireExtractor{}
+	case hint.FastFlowLM:
+		return fastFlowLMExtractor{}
 	case hint.OpenAI, hint.Anthropic, hint.OpenRouter:
 		return apiExtractor{}
 	default:

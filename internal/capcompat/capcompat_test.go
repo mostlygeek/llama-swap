@@ -520,6 +520,23 @@ func TestCapcompat_DetectRadiance(t *testing.T) {
 	require.NoError(t, info.Capabilities.Validate())
 }
 
+func TestCapcompat_DetectFastFlowLM(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "fastflowlm", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "qwen3.5:9b")
+	require.NoError(t, err)
+
+	assert.Equal(t, hint.FastFlowLM, info.Upstream)
+	assert.True(t, info.Upstream.Known())
+	assert.Equal(t, 8192, info.Capabilities.Context)
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.Len(t, up.hits, 1, "only /v1/models is needed")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
 func TestCapcompat_DetectHipfire(t *testing.T) {
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "hipfire", "v1_models.json"),

@@ -29,9 +29,10 @@ func (defaultProber) Name() string { return "default" }
 // owned_by. Anything else is reported as a generic OpenAI-compatible server.
 // Add a family here once its owned_by value is confirmed against the server.
 var ownerUpstreams = map[string]hint.Upstream{
-	"vllm":     hint.VLLM,
-	"yamz":     hint.Kyojin,
-	"radiance": hint.Radiance,
+	"vllm":       hint.VLLM,
+	"yamz":       hint.Kyojin,
+	"radiance":   hint.Radiance,
+	"fastflowlm": hint.FastFlowLM,
 }
 
 func (defaultProber) Upstream(models ModelsResponse) hint.Upstream {

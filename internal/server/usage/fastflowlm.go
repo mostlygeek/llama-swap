@@ -1,6 +1,37 @@
 package usage
 
-import "github.com/tidwall/gjson"
+import (
+	"time"
+
+	"github.com/tidwall/gjson"
+)
+
+// fastFlowLMExtractor reads OpenAI usage and the rates added by FastFlowLM.
+type fastFlowLMExtractor struct{}
+
+func (fastFlowLMExtractor) newParser(path string, start time.Time) usageParser {
+	return &fastFlowLMParser{
+		apiParser: apiParser{start: start, read: apiReaderFor(path), api: newAPIUsage()},
+	}
+}
+
+type fastFlowLMParser struct {
+	apiParser
+	block gjson.Result // last usage block
+}
+
+func (p *fastFlowLMParser) event(ev gjson.Result) {
+	p.apiParser.event(ev)
+	if b := ev.Get("usage"); b.IsObject() {
+		p.block = b
+	}
+}
+
+func (p *fastFlowLMParser) usage() Usage {
+	u := p.apiParser.usage()
+	applyFastFlowLMRates(&u, p.block)
+	return u
+}
 
 // applyFastFlowLMRates reads the rates FLM adds to OpenAI chat usage.
 // Prefill counts only uncached prompt tokens. Decode excludes prefill.
