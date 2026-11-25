@@ -71,12 +71,6 @@ func TestUsage_Auto_Precedence(t *testing.T) {
 		wantPrompt float64
 		wantGen    float64
 	}{
-		{"FastFlowLM zero is reported", `,"prefill_speed_tps":0,"decoding_speed_tps":0`, "", 0, 0},
-		{"FastFlowLM null and negative rates are unknown", `,"prefill_speed_tps":null,"decoding_speed_tps":-10`, "", -1, -1},
-		{"FastFlowLM missing and string rates are unknown", `,"decoding_speed_tps":"15"`, "", -1, -1},
-		{"FastFlowLM keeps the reported rate", `,"decoding_speed_tps":15`, "", -1, 15},
-		{"oMLX takes precedence over FastFlowLM", flm + omlx, "", 63.74, 66.38},
-		{"timings take precedence over FastFlowLM", flm, timings, 100, 40},
 		{"TabbyAPI over oMLX", `,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11` + omlx, "", 35.17, 17.11},
 		{"TabbyAPI zero over oMLX", `,"prompt_tokens_per_sec":0,"completion_tokens_per_sec":0` + omlx, "", 0, 0},
 		{"TabbyAPI null falls back to oMLX", `,"prompt_tokens_per_sec":null,"completion_tokens_per_sec":null` + omlx, "", 63.74, 66.38},
@@ -89,6 +83,14 @@ func TestUsage_Auto_Precedence(t *testing.T) {
 		{"timings over usage rates", omlx, timings, 100, 40},
 		{"Hipfire timings over usage rates", omlx, `,"timings":{"prefill_tok_s":200,"decode_tok_s":50}`, 200, 50},
 		{"Hipfire null preserves usage rates", omlx, `,"timings":{"prefill_tok_s":null,"decode_tok_s":null}`, 63.74, 66.38},
+		{"FastFlowLM zero is reported", `,"prefill_speed_tps":0,"decoding_speed_tps":0`, "", 0, 0},
+		{"FastFlowLM null and negative rates are unknown", `,"prefill_speed_tps":null,"decoding_speed_tps":-10`, "", -1, -1},
+		{"FastFlowLM missing and string rates are unknown", `,"decoding_speed_tps":"15"`, "", -1, -1},
+		{"FastFlowLM keeps the reported rate", `,"decoding_speed_tps":15`, "", -1, 15},
+		{"oMLX takes precedence over FastFlowLM", flm + omlx, "", 63.74, 66.38},
+		{"timings take precedence over FastFlowLM", flm, timings, 100, 40},
+		{"Hipfire timings take precedence over FastFlowLM", flm, `,"timings":{"prefill_tok_s":200,"decode_tok_s":50}`, 200, 50},
+		{"FastFlowLM fills the rate missing from Hipfire", flm, `,"timings":{"prefill_tok_s":200}`, 200, 15},
 		{"vLLM metrics over usage rates", omlx, metrics, 200, 100},
 		{"vLLM metrics over timings", omlx, timings + metrics, 200, 100},
 	}
