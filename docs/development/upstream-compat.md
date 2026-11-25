@@ -58,7 +58,8 @@ Pick the smallest change that works:
 
 - **The server only needs a name.** Add its `owned_by` value to
   `ownerUpstreams` in `default.go`. The default prober reports context length
-  and text in/out. This is how vLLM, kyojin (`yamz`) and radiance are done.
+  and text in/out. This is how vLLM, kyojin (`yamz`), radiance and Rapid-MLX
+  (`rapid-mlx`) are done.
 - **The server exposes more capabilities** (tools, vision, audio) on another
   endpoint. Write a prober in its own file (`<server>.go`), register it in
   `defaultProbers()` before `defaultProber`, and use `c.GetJSON` for extra
@@ -101,14 +102,16 @@ Building blocks in `usage.go`:
   `applyOMLXRates`, `applyTensorFold`, `applyKyojinDrafts`,
   `applyRadianceTotal`, `applyHipfireTimings`.
 - `autoExtractor` applies every `apply*` it finds. It serves `Unknown` and
-  llama-swap peers. When you add an `apply*`, add it to auto too, ordered so
-  the more precise source runs last.
+  llama-swap peers, generic OpenAI-compatible servers and Rapid-MLX (preserving
+  its usage handling before identification). When you add an `apply*`, add it
+  to auto too, ordered so the more precise source runs last.
 
 Adding an extractor:
 
 1. Hosted APIs that add nothing to the standard usage block go in the
    `apiExtractor` case in `extractorFor`. A local server gets its own
-   extractor; don't send `OpenAICompatible` to `apiExtractor`, because it
+   extractor (Rapid-MLX reuses `autoExtractor` to preserve generic parsing);
+   don't send `OpenAICompatible` to `apiExtractor`, because it
    covers unrecognized servers that may still add timings. Create
    `<upstream>.go`. Reuse an existing parser when the format is the
    same (`halogenExtractor` reuses llama-server's), and keep server-specific

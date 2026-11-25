@@ -76,6 +76,7 @@ func TestUsage_ExtractorFor(t *testing.T) {
 		{hint.TensorFold, tensorFoldExtractor{}},
 		{hint.Kyojin, kyojinExtractor{}},
 		{hint.Radiance, radianceExtractor{}},
+		{hint.RapidMLX, autoExtractor{}},
 		{hint.OpenAI, apiExtractor{}},
 		{hint.Anthropic, apiExtractor{}},
 		{hint.OpenRouter, apiExtractor{}},

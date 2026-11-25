@@ -1,0 +1,1 @@
+{"id":"chatcmpl-49441136","object":"chat.completion","created":1795609335,"model":"mlx-community/Qwen3.5-4B-MLX-4bit","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":16,"completion_tokens":1,"total_tokens":17}}
