@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/event"
@@ -149,6 +150,27 @@ func (mp *metricsMonitor) queueMetrics(metric ActivityLogEntry) (ActivityLogEntr
 // emitMetric publishes an ActivityLogEvent for the given metric.
 func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry) {
 	event.Emit(ActivityLogEvent{Metrics: metric})
+}
+
+// requestObserver receives every finished HTTP request, whether or not the
+// store accepted it. It runs on the request goroutine, so once the HTTP
+// server has shut down every request has been observed.
+var requestObserver atomic.Pointer[func(ActivityLogEntry, hint.Upstream)]
+
+// SetRequestObserver installs fn as the request observer; nil removes it.
+// Realtime websocket sessions are not requests and are not observed.
+func SetRequestObserver(fn func(ActivityLogEntry, hint.Upstream)) {
+	if fn == nil {
+		requestObserver.Store(nil)
+		return
+	}
+	requestObserver.Store(&fn)
+}
+
+func observeRequest(tm ActivityLogEntry, upstream hint.Upstream) {
+	if fn := requestObserver.Load(); fn != nil {
+		(*fn)(tm, upstream)
+	}
 }
 
 // overlayCaptureState sets HasCapture on entries whose capture is still in
@@ -296,6 +318,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 	tm, upstream := mp.newEntry(modelID, task, r, recorder)
 
 	queueAndEmit := func() {
+		observeRequest(tm, upstream)
 		stored, ok := mp.queueMetrics(tm)
 		if !ok {
 			return
@@ -321,6 +344,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 		decoded, decErr := mp.decodeResponseBody(recorder, r.URL.Path)
 		tm.ErrorMsg = failedErrorMessage(recorder.Status(), decoded, decErr)
 		tm.CaptureID = mp.newCaptureID(tm.Timestamp)
+		observeRequest(tm, upstream)
 		stored, ok := mp.queueMetrics(tm)
 		if !ok {
 			return
@@ -359,6 +383,7 @@ func (mp *metricsMonitor) record(modelID string, task hint.Task, r *http.Request
 	}
 
 	tm.CaptureID = mp.newCaptureID(tm.Timestamp)
+	observeRequest(tm, upstream)
 	stored, ok := mp.queueMetrics(tm)
 	if !ok {
 		return

@@ -21,6 +21,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/genaimetrics"
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/mcptools/sourcecode"
@@ -31,6 +32,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
 	"github.com/mostlygeek/llama-swap/internal/watcher"
+	"go.opentelemetry.io/otel"
 )
 
 var (
@@ -242,6 +244,17 @@ func main() {
 	}
 
 	buildInfo := server.BuildInfo{Version: version, Commit: commit, Date: date}
+
+	// GenAI metrics over OTLP, opt-in through the OTEL_* environment. The
+	// exporter outlives config reloads so its cumulative totals do too.
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) { proxyLog.Warnf("otel: %v", err) }))
+	genaiMetrics, err := genaimetrics.FromEnv(context.Background(), os.Getenv, version, proxyLog)
+	if err != nil {
+		proxyLog.Warnf("OTLP metrics disabled: %v", err)
+	}
+	if genaiMetrics != nil {
+		server.SetRequestObserver(genaiMetrics.Record)
+	}
 
 	// Indexed once and shared by every Server instance, including the ones a
 	// hot config reload creates: the documentation is immutable and does not
@@ -541,6 +554,15 @@ func main() {
 
 				if perfMon != nil {
 					perfMon.Stop()
+				}
+				if genaiMetrics != nil {
+					// Push what finished since the last interval. Use what is
+					// left of the budget, but at least a second.
+					ctx, cancel := context.WithTimeout(context.Background(), max(time.Until(deadline), time.Second))
+					if err := genaiMetrics.Shutdown(ctx); err != nil {
+						proxyLog.Warnf("OTLP metrics shutdown error: %v", err)
+					}
+					cancel()
 				}
 				if err := st.Close(); err != nil {
 					proxyLog.Warnf("store shutdown error: %v", err)
