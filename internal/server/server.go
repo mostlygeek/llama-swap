@@ -77,7 +77,7 @@ type Server struct {
 	pause *PauseState
 
 	local router.LocalRouter
-	peer  router.Router
+	peer  router.PeerRouter
 
 	mux     *http.ServeMux
 	handler http.Handler
@@ -314,6 +314,9 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 		shutdownFn:    shutdownFn,
 	}
 	s.capcompat = capcompat.New(st.Cache(), logs.ProxyLogs)
+	peer.StartCatalog(st.Cache(), func(peerID string) {
+		event.Emit(swaputil.PeerCatalogChangedEvent{PeerID: peerID})
+	})
 	s.capcompatCancel = event.On(s.onUpstreamDetected)
 
 	// SysProvider is constructed here because this is where perf and hardware
@@ -524,6 +527,8 @@ func (s *Server) routes() {
 	mux.Handle("GET /api/version", apiChain.ThenFunc(s.handleAPIVersion))
 	mux.Handle("GET /api/hardware", apiChain.ThenFunc(s.handleAPIHardware))
 	mux.Handle("GET /api/tailcat", apiChain.ThenFunc(s.handleAPITailcat))
+	mux.Handle("GET /api/peers", apiChain.ThenFunc(s.handleAPIPeers))
+	mux.Handle("POST /api/peers/{peer}/refresh", apiChain.ThenFunc(s.handleAPIRefreshPeer))
 	mux.Handle("GET /api/captures/{id}", apiChain.ThenFunc(s.handleAPICapture))
 
 	// Stateless MCP server exposing llama-swap's own documentation as tools,

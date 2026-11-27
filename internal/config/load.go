@@ -124,6 +124,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	config.aliases = make(map[string]string)
 	for modelName, modelConfig := range config.Models {
 		for _, alias := range modelConfig.Aliases {
+			if alias == modelName {
+				return Config{}, fmt.Errorf("model %s alias must not equal its own model ID", modelName)
+			}
 			if _, found := config.aliases[alias]; found {
 				return Config{}, fmt.Errorf("duplicate alias %s found in model: %s", alias, modelName)
 			}
@@ -316,6 +319,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	if err := ValidatePeerNamespace(config); err != nil {
 		return Config{}, err
 	}
+	config.peerModels = newPeerModels(config)
 
 	if err := validateSelectors(config); err != nil {
 		return Config{}, err

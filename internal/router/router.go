@@ -1,13 +1,19 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
+
+// Eviction describes what starting a model would stop right now. It is an
+// alias for scheduler.Eviction so callers need not import the scheduler.
+type Eviction = scheduler.Eviction
 
 var (
 	ErrNoRouterFound     = swaputil.ErrNoRouterFound
@@ -29,6 +35,21 @@ type Router interface {
 
 	// Handles reports whether this router can serve requests for the given model.
 	Handles(model string) bool
+}
+
+// PeerRouter is a Router that forwards to remote peers and reports the state
+// of model discovery from their catalogs.
+type PeerRouter interface {
+	Router
+
+	// CatalogStatus returns the discovery status of each peer with a
+	// catalog, sorted by peer ID.
+	CatalogStatus() []PeerCatalogStatus
+
+	// RefreshCatalog fetches a peer's catalog now and waits for the result.
+	// It reports false without fetching when the peer has no model
+	// discovery, and returns ErrPeerNotFound for an unknown peer.
+	RefreshCatalog(ctx context.Context, peerID string) (bool, error)
 }
 
 // LocalRouter is a Router backed by local processes whose state can be
@@ -57,6 +78,13 @@ type LocalRouter interface {
 	// modelID must be a real (non-alias) config key. Returns false when the
 	// model is not known to this router.
 	ProcessLogger(modelID string) (*logmon.Monitor, bool)
+
+	// Evictions reports, for each target, the models that would be stopped
+	// to start it, their total evict_cost, and the target's state, using the
+	// scheduler's live view including swaps it has committed to. Targets this
+	// router does not handle are omitted. It never starts or stops anything.
+	// ctx bounds the wait for the router's run loop.
+	Evictions(ctx context.Context, targets ...string) (map[string]Eviction, error)
 
 	// SetStartGate installs a check that runs before the router starts any
 	// process. While it returns an error no model starts, and the requests

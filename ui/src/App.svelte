@@ -21,6 +21,7 @@
     profiles,
     resumeInference,
     setActiveProfile,
+    pendingProfileSwitch,
   } from "./stores/api";
   import { initScreenWidth, initSystemThemeListener, isDarkMode, themeName, appTitle, connectionState } from "./stores/theme";
   import { currentRoute } from "./stores/route";
@@ -104,16 +105,12 @@
   }
 
   const noProfileValue = "__none__";
-  let switchingProfile = $state(false);
 
   async function handleProfileChange(value: string): Promise<void> {
-    switchingProfile = true;
     try {
       await setActiveProfile(value === noProfileValue ? null : value);
     } catch (error) {
       console.error(error);
-    } finally {
-      switchingProfile = false;
     }
   }
 
@@ -251,7 +248,7 @@
               <Select.Trigger
                 class="w-40"
                 aria-label="Active profile"
-                disabled={switchingProfile}
+                disabled={$pendingProfileSwitch !== undefined}
               >
                 {$activeProfile ?? "None"}
               </Select.Trigger>

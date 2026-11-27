@@ -41,6 +41,8 @@ type stubRouter struct {
 	unloadTimeout time.Duration
 	onUnload      func()
 	loggers       map[string]*logmon.Monitor
+	evictions     map[string]router.Eviction
+	evictionsErr  error
 }
 
 func newStubRouter(models []string, response string) *stubRouter {
@@ -51,7 +53,11 @@ func newStubRouter(models []string, response string) *stubRouter {
 	return &stubRouter{models: m, response: response}
 }
 
-func (s *stubRouter) Handles(model string) bool      { return s.models[model] }
+func (s *stubRouter) Handles(model string) bool                 { return s.models[model] }
+func (s *stubRouter) CatalogStatus() []router.PeerCatalogStatus { return nil }
+func (s *stubRouter) RefreshCatalog(context.Context, string) (bool, error) {
+	return false, nil
+}
 func (s *stubRouter) Shutdown(_ time.Duration) error { s.shutdownCalls.Add(1); return nil }
 func (s *stubRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.serveHTTP != nil {
@@ -69,6 +75,18 @@ func (s *stubRouter) RunningStatus() map[string]process.Status {
 		out[id] = process.Status{State: st, ReadySince: s.readySince[id], Loading: s.loading[id]}
 	}
 	return out
+}
+func (s *stubRouter) Evictions(_ context.Context, targets ...string) (map[string]router.Eviction, error) {
+	if s.evictionsErr != nil {
+		return nil, s.evictionsErr
+	}
+	out := make(map[string]router.Eviction, len(targets))
+	for _, target := range targets {
+		if e, ok := s.evictions[target]; ok {
+			out[target] = e
+		}
+	}
+	return out, nil
 }
 func (s *stubRouter) Unload(timeout time.Duration, models ...string) {
 	s.unloadCalls.Add(1)
@@ -89,13 +107,13 @@ func (s *stubRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
 }
 
 // newTestServer wires a Server with stub routers and a built mux.
-func newTestServer(local router.LocalRouter, peer router.Router) *Server {
+func newTestServer(local router.LocalRouter, peer router.PeerRouter) *Server {
 	return newTestServerWithConfig(config.Config{}, local, peer)
 }
 
 // newTestServerWithConfig is newTestServer with a caller-supplied config, for
 // tests that exercise config-driven middleware wiring in routes().
-func newTestServerWithConfig(cfg config.Config, local router.LocalRouter, peer router.Router) *Server {
+func newTestServerWithConfig(cfg config.Config, local router.LocalRouter, peer router.PeerRouter) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	logs := logmon.NewGroup(io.Discard, true, true, true)
 	proxylog := logs.ProxyLogs
@@ -123,7 +141,7 @@ func newTestServerWithConfig(cfg config.Config, local router.LocalRouter, peer r
 // newTestServerWithReference is newTestServer plus an indexed documentation
 // library, for the /api/mcp tests. Handlers read s.reference at request time,
 // so no re-registration is needed.
-func newTestServerWithReference(local router.LocalRouter, peer router.Router, fsys fs.FS) *Server {
+func newTestServerWithReference(local router.LocalRouter, peer router.PeerRouter, fsys fs.FS) *Server {
 	s := newTestServer(local, peer)
 	s.reference = docagent.New(fsys)
 

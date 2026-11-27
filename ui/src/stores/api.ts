@@ -1,4 +1,4 @@
-import { writable, derived } from "svelte/store";
+import { writable, derived, get } from "svelte/store";
 import type {
   Model,
   ActivityPage,
@@ -15,6 +15,7 @@ import type {
   PlaygroundModelType,
   HardwareSnapshot,
   TailcatStatus,
+  PeerStatus,
 } from "../lib/types";
 import { appendActivityFilters, type ActivityFilters } from "../lib/activityFilters";
 import { apiUrl } from "../lib/apiPath";
@@ -25,6 +26,12 @@ export const models = writable<Model[]>([]);
 export const playgroundModels = writable<Model[]>([]);
 export const profiles = writable<Profile[]>([]);
 export const activeProfile = writable<string | null>(null);
+/**
+ * Profile the UI is switching to (null when clearing it), or undefined when
+ * no switch is in flight. Every profile control disables while it is set, so
+ * two switches never race and the earlier one lands last.
+ */
+export const pendingProfileSwitch = writable<string | null | undefined>(undefined);
 /** True while inference is paused: the server rejects requests for local models. */
 export const inferencePaused = writable<boolean>(false);
 
@@ -225,17 +232,25 @@ export async function fetchProfiles(): Promise<ProfileState> {
 }
 
 export async function setActiveProfile(name: string | null): Promise<void> {
-  const revision = profileRevision;
-  const response = await fetch(apiUrl("/api/profiles/active"), {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to switch profile: ${response.status}`);
+  if (get(pendingProfileSwitch) !== undefined) {
+    throw new Error("A profile switch is already in progress");
   }
-  const state = await response.json() as Pick<ProfileState, "active">;
-  if (profileRevision === revision) activeProfile.set(state.active);
+  pendingProfileSwitch.set(name);
+  try {
+    const revision = profileRevision;
+    const response = await fetch(apiUrl("/api/profiles/active"), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to switch profile: ${response.status}`);
+    }
+    const state = await response.json() as Pick<ProfileState, "active">;
+    if (profileRevision === revision) activeProfile.set(state.active);
+  } finally {
+    pendingProfileSwitch.set(undefined);
+  }
 }
 
 // Fetch version info when connected
@@ -273,6 +288,7 @@ interface ModelListRecord {
       strategy?: string;
       targets?: string[];
       spillover?: number;
+      no_evict?: boolean;
     };
   };
 }
@@ -323,6 +339,7 @@ async function loadPlaygroundModels(request: number): Promise<Model[]> {
           strategy: metadata?.strategy,
           targets: metadata?.targets ?? [],
           spillover: metadata?.spillover,
+          noEvict: metadata?.no_evict,
         };
       });
     newModels.sort((a, b) => {
@@ -392,6 +409,36 @@ export async function fetchTailcatStatus(): Promise<TailcatStatus> {
   const status = await response.json() as TailcatStatus;
   tailcatStatus.set(status);
   return status;
+}
+
+export async function fetchPeers(): Promise<PeerStatus[]> {
+  const response = await fetch(apiUrl("/api/peers"));
+  if (!response.ok) {
+    throw new Error(`Failed to fetch peers: ${response.status}`);
+  }
+  return await response.json() as PeerStatus[];
+}
+
+/**
+ * Fetches a peer's model catalog now. A no-op for peers without model rules.
+ * The model list updates through the events stream when it changes.
+ */
+export async function refreshPeer(peerID: string): Promise<PeerStatus> {
+  const response = await fetch(apiUrl(`/api/peers/${encodeURIComponent(peerID)}/refresh`), {
+    method: "POST",
+  });
+  if (!response.ok) {
+    // Errors come as {"error":{"message":...}}; fall back to the raw text.
+    const text = (await response.text()).trim();
+    let message = text;
+    try {
+      message = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? text;
+    } catch {
+      // not JSON
+    }
+    throw new Error(message || `Failed to refresh peer: ${response.status}`);
+  }
+  return await response.json() as PeerStatus;
 }
 
 export async function getActivityStats(model?: string): Promise<ActivityStatsData> {

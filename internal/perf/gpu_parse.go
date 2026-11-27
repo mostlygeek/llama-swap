@@ -21,7 +21,9 @@ func ParseNvidiaSmiLine(line string) *GpuStat {
 	id, _ := strconv.Atoi(strings.TrimSpace(fields[0]))
 	name := strings.TrimSpace(fields[1])
 	uuid := strings.TrimSpace(fields[2])
-	tempC, _ := strconv.Atoi(strings.TrimSpace(fields[3]))
+	// Newer drivers report temperature.gpu with decimals (e.g. "56.90").
+	tempF, _ := strconv.ParseFloat(strings.TrimSpace(fields[3]), 64)
+	tempC := int(math.Round(tempF))
 	gpuUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[4]), 64)
 	memUsed, _ := strconv.Atoi(strings.TrimSpace(fields[5]))
 	memTotal, _ := strconv.Atoi(strings.TrimSpace(fields[6]))

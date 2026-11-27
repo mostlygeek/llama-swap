@@ -358,6 +358,23 @@ selectors:
       # - optional, default: 1
       spillover: 4
 
+  # fit picks the target that is cheapest to run right now: lowest total
+  # evict_cost of the models it would unload, then fewest models unloaded,
+  # then ready over starting over not loaded, then target order
+  # - needs routing.router.use: capacity; with any other router fit selectors
+  #   are ignored with a warning in the log and requests for them get a 404
+  # - targets must be local models
+  # - commented out because this example uses the group router
+  # "any-llama":
+  #   strategy: fit
+  #   targets: ["llama-70b", "llama-8b-q8", "llama-8b-q4"]
+  #   settings:
+  #     # true: respond 429 instead of choosing a target that unloads a model
+  #     # - only controls the selector's choice; the router may still unload
+  #     #   a model if another swap starts before this request reaches it
+  #     # - optional, default: false
+  #     no_evict: false
+
 # models: a dictionary of model configurations
 # - required
 # - each key is the model's ID, used in API requests
@@ -899,11 +916,52 @@ peers:
     # - requested path to llama-swap will be appended to the end of the proxy value
     proxy: http://192.168.1.23
     # models: a list of models served by the peer
-    # - required
+    # - optional, default: ["add .*"] with the catalog enabled
+    # - a plain string is a model ID that is always routable
+    # - "add <regex>" adds catalog models whose ID matches anywhere
+    # - "remove <regex>" removes catalog models added by earlier add rules
+    # - the keyword and regex are separated by whitespace
+    # - rules run top to bottom, like: grep 'a' | grep -v 'b' | grep 'c'
+    # - remove rules never drop plain string model IDs
+    # - any add or remove rule enables the catalog
+    # - quote a rule whose regex contains ": " or starts with a YAML symbol
     models:
       - model_a
       - model_b
       - embeddings/model_c
+
+  # A peer whose models are discovered from its model list
+  llama-swap-kitchen:
+    proxy: http://192.168.1.24
+    # catalog: discover the peer's models automatically
+    # - optional, enabled when present, when models has add or remove
+    #   rules, or when models is omitted
+    # - the model list is fetched in the background and the last good list
+    #   is kept when a fetch fails
+    # - the last good list is cached in the store, so discovered models
+    #   route immediately after a restart or config reload
+    # - discovered models that collide with a local model, alias, selector,
+    #   profile pin or another peer model are skipped
+    catalog:
+      # path: appended to proxy to fetch an OpenAI style model list
+      # - optional, default: /v1/models
+      # - only .data[].id is used to select models
+      path: /v1/models
+      # refresh: seconds between fetches
+      # - optional, default: 120, minimum: 10
+      refresh: 120
+      # limit: maximum models discovered from this peer
+      # - optional, default: 512
+      # - applied after filtering, in sorted ID order
+      limit: 512
+      # transitive: also import the peer's own peer models and aliases
+      # - optional, default: false
+      # - off by default so two llama-swap instances that peer with each
+      #   other do not chain or loop model names
+      transitive: false
+    models:
+      - add qwen
+      - remove embed
   # Tailcat peers use the case-sensitive connection token as their proxy.
   # Virtual TCP port 80 is fixed and must not be included in the URL.
   tailcat-peer:

@@ -147,6 +147,7 @@ Which gives, concretely:
 | `base-cuda.Dockerfile` | the base and all 5 projects of **both** CUDA variants; no Vulkan |
 | `CMAKE_CUDA_ARCHITECTURES` or `CUDA_VERSION` env var | the base and all 5 projects of the one variant being built, and its runtime image |
 | the built-in `CMAKE_CUDA_ARCHITECTURES`/`CUDA_VERSION` default for one variant, in `build-image.sh` | that variant only, and only the platform whose default changed |
+| `--consumer`, the `IK_CUDA_ARCHITECTURES` env var, or the `--consumer` list in `build-image.sh` | ik-llama only, of the one variant and platform it applies to, and that runtime image |
 | `base-vulkan.Dockerfile` | the Vulkan base and all 4 Vulkan projects; no CUDA |
 
 and means a project that overruns its own job no longer discards the ones that
@@ -406,6 +407,28 @@ dropping `100` does not leave GB200 covered by `120`.
 `121` is deliberately absent from the amd64 list. GB10 is a Grace SoC with no
 PCIe part, so sm_121 cannot appear in an x86 host; it is listed on arm64, where
 it is the whole point.
+
+**ik_llama.cpp on `unified-cuda13` amd64 is consumer cards only.** Its CUDA
+build is several times larger than the others', and ik changes a ggml header
+that every CUDA file includes most weeks, which misses every object in ccache.
+Compiled for the full list, that cold build overran the CI job's time limit. So
+`build-image.sh --consumer` sets `IK_CUDA_ARCHITECTURES` to
+`75-virtual;86-real;89-real;120-real` for that image, and ik_llama.cpp alone
+compiles for it. CI passes `--consumer` unless the `consumer` input of a
+manual run is unticked; a local build without the flag compiles ik_llama.cpp
+for the full list:
+
+| GPU | ik-llama-server |
+|---|---|
+| RTX 30xx, RTX A-series, A10/A40 (86), RTX 40xx, L4/L40 (89), RTX 50xx, RTX PRO Blackwell (120) | native code |
+| RTX 20xx, GTX 16xx, T4 (75) | JIT-compiled from PTX on first load, which can take minutes. The driver caches the result in `~/.nv/ComputeCache`; mount it as a volume and raise `CUDA_CACHE_MAXSIZE` so a new container does not pay it again |
+| A100 (80), H100/H200 (90), B200 (100) | not supported. They would JIT the 7.5 PTX, but ik picks kernels from the GPU's compute capability and can launch one that was never compiled and abort, as on Volta (issue #1185). Use llama.cpp in the same image |
+
+`/versions.txt` records the list as `ik_llama_cuda_architectures`. Set
+`IK_CUDA_ARCHITECTURES` when invoking `build-image.sh` to compile ik_llama.cpp
+for a list of your own, with or without `--consumer`.
+Unlike mainline ggml, ik_llama.cpp does not rewrite `120` to `120a`, so neither
+list gives it native Blackwell FP4 code.
 
 Pick `unified-cuda13` for a Turing (compute 7.5) or newer card and
 `unified-cuda` for anything older. `unified-cuda13` is a multi-arch tag, so on a

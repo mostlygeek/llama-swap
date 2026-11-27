@@ -13,6 +13,14 @@
   let { stats }: Props = $props();
 
   const nf = new Intl.NumberFormat();
+  // smaller screens get larger units (e.g. 309.7M) so the numbers don't collide
+  const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+  const items = $derived([
+    { label: "Requests", value: stats?.total_requests ?? 0, unit: "completed" },
+    { label: "Cached", value: stats?.total_cache_tokens ?? 0, unit: "tokens" },
+    { label: "Processed", value: stats?.total_input_tokens ?? 0, unit: "tokens" },
+    { label: "Generated", value: stats?.total_output_tokens ?? 0, unit: "tokens" },
+  ]);
   const histogramCollapsed = persistentStore<boolean>("activity-histogram-collapsed", false);
 </script>
 
@@ -54,22 +62,16 @@
       </div>
     </div>
   {/if}
-  <div class="grid grid-cols-4 gap-x-6 gap-y-1 text-sm">
-    <div class="text-muted-foreground text-xs uppercase tracking-wider">Requests</div>
-    <div class="text-muted-foreground text-xs uppercase tracking-wider">Cached</div>
-    <div class="text-muted-foreground text-xs uppercase tracking-wider">Processed</div>
-    <div class="text-muted-foreground text-xs uppercase tracking-wider">Generated</div>
-    <div class="text-sm">
-      <span class="font-semibold">{nf.format(stats?.total_requests ?? 0)}</span> completed
-    </div>
-    <div class="text-sm">
-      <span class="font-semibold">{nf.format(stats?.total_cache_tokens ?? 0)}</span> tokens
-    </div>
-    <div class="text-sm">
-      <span class="font-semibold">{nf.format(stats?.total_input_tokens ?? 0)}</span> tokens
-    </div>
-    <div class="text-sm">
-      <span class="font-semibold">{nf.format(stats?.total_output_tokens ?? 0)}</span> tokens
-    </div>
+  <div class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
+    {#each items as item}
+      <div class="min-w-0">
+        <div class="text-muted-foreground text-xs uppercase tracking-wider">{item.label}</div>
+        <div class="text-sm">
+          <span class="font-semibold lg:hidden" title={nf.format(item.value)}>{compact.format(item.value)}</span>
+          <span class="hidden font-semibold lg:inline">{nf.format(item.value)}</span>
+          {item.unit}
+        </div>
+      </div>
+    {/each}
   </div>
 </Card.Root>

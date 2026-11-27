@@ -60,19 +60,71 @@ models:
 			wantErr: "invalid peer proxy URL",
 		},
 		{
-			name: "missing models",
+			name: "missing models enables discovery",
 			yaml: `
 proxy: http://localhost:8080
 `,
-			wantErr: "peer models can not be empty",
 		},
 		{
-			name: "empty models",
+			name: "empty models enables discovery",
 			yaml: `
 proxy: http://localhost:8080
 models: []
 `,
-			wantErr: "peer models can not be empty",
+		},
+		{
+			name: "leading remove",
+			yaml: `
+proxy: http://localhost:8080
+models:
+  - remove old
+`,
+			wantErr: "has nothing to remove",
+		},
+		{
+			name: "invalid regex",
+			yaml: `
+proxy: http://localhost:8080
+models:
+  - add (
+`,
+			wantErr: "invalid regex",
+		},
+		{
+			name: "rule without regex",
+			yaml: `
+proxy: http://localhost:8080
+models:
+  - add
+`,
+			wantErr: "needs a regex",
+		},
+		{
+			name: "map entries are not rules",
+			yaml: `
+proxy: http://localhost:8080
+models:
+  - add: qwen
+`,
+			wantErr: "cannot unmarshal",
+		},
+		{
+			name: "refresh too short",
+			yaml: `
+proxy: http://localhost:8080
+catalog:
+  refresh: 5
+`,
+			wantErr: "catalog.refresh",
+		},
+		{
+			name: "relative catalog path",
+			yaml: `
+proxy: http://localhost:8080
+catalog:
+  path: v1/models
+`,
+			wantErr: "catalog.path",
 		},
 	}
 

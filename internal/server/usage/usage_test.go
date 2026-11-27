@@ -82,6 +82,7 @@ func TestUsage_ExtractorFor(t *testing.T) {
 		{hint.OpenAICompatible, autoExtractor{}},
 		{hint.Halogen, halogenExtractor{}},
 		{hint.Hipfire, hipfireExtractor{}},
+		{hint.FastFlowLM, fastFlowLMExtractor{}},
 		{hint.LlamaSwap, autoExtractor{}},
 		{hint.Unknown, autoExtractor{}},
 	}

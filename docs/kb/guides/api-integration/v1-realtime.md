@@ -3,7 +3,7 @@ title: Realtime voice chat with /v1/realtime
 summary: Proxy OpenAI Realtime API websockets to llama-server for speech to speech models like LFM3 Audio, and talk to them from the Playground.
 category: guides
 tags: [realtime, websocket, transcription, session.update, voice, speech, audio, lfm, liquid, llama-server, playground, microphone, https, secure context]
-config_keys: [models.*.cmd, models.*.ttl, models.*.compat.ignoreWebsockets, models.*.concurrencyLimit, globalConcurrencyLimit]
+config_keys: [models.*.cmd, models.*.ttl, models.*.useModelName, models.*.compat.ignoreWebsockets, models.*.concurrencyLimit, globalConcurrencyLimit]
 updated: 2026-11-06
 ---
 
@@ -68,7 +68,10 @@ Sampling comes from two places:
   one phrase. `--repeat-penalty 1.1 --repeat-last-n 2048` fixes that.
 
 `filters.setParams` cannot set either: filters rewrite POST bodies, and a
-realtime session sends its settings later, as websocket messages.
+realtime session sends its settings later, as websocket messages. For the same
+reason `useModelName` does nothing here — the websocket upgrade is forwarded
+with no body of its own, and the model a session names in `session.update` is
+passed upstream unchanged.
 
 ## Talking to it
 

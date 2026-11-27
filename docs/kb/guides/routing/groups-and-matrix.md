@@ -283,5 +283,7 @@ Higher numbers are serviced first. Models default to 0.
 
 - `reference/config/routing` — the full annotated section
 - `guides/model-runtime/ttl-and-unloading` — reclaiming VRAM from idle models
+- `guides/routing/profiles-and-selectors` — the `fit` selector, which picks
+  whichever target the capacity router can run most cheaply right now
 - `guides/tools/kubeswap` — the kubeswap Helm chart, whose
   `config.matrix` builds this section from the model roster

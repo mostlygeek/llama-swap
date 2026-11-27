@@ -391,9 +391,10 @@
                         "enum": [
                             "warm",
                             "pin",
-                            "spillover"
+                            "spillover",
+                            "fit"
                         ],
-                        "description": "How a target is selected for each request."
+                        "description": "How a target is selected for each request. fit selectors are ignored, with a warning, unless routing.router.use is capacity."
                     },
                     "targets": {
                         "type": "array",
@@ -412,6 +413,11 @@
                                 "minimum": 1,
                                 "default": 1,
                                 "description": "Requests reserved per active target before spilling over to the next target."
+                            },
+                            "no_evict": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "fit only: respond 429 instead of choosing a target that would stop a running model."
                             }
                         },
                         "additionalProperties": false,
@@ -778,8 +784,7 @@
             "additionalProperties": {
                 "type": "object",
                 "required": [
-                    "proxy",
-                    "models"
+                    "proxy"
                 ],
                 "properties": {
                     "proxy": {
@@ -803,7 +808,37 @@
                             "type": "string",
                             "minLength": 1
                         },
-                        "description": "A list of models served by the peer."
+                        "description": "Models served by the peer. A plain string is a model ID that is always routable. 'add <regex>' adds catalog models whose ID matches anywhere and 'remove <regex>' removes matching models added by earlier add rules; the keyword and regex are separated by whitespace and rules run top to bottom. Any rule enables the catalog and the first rule cannot be a remove. Remove rules never drop plain model IDs. When omitted or empty, defaults to ['add .*'] with the catalog enabled."
+                    },
+                    "catalog": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "pattern": "^/",
+                                "default": "/v1/models",
+                                "description": "Path appended to proxy to fetch the peer's OpenAI style model list (.data[].id)."
+                            },
+                            "refresh": {
+                                "type": "integer",
+                                "minimum": 10,
+                                "default": 120,
+                                "description": "Seconds between catalog fetches."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "default": 512,
+                                "description": "Maximum number of discovered models kept from this peer, taken in sorted ID order after filtering."
+                            },
+                            "transitive": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Also import entries a llama-swap peer proxies from its own peers, and its aliases. Off by default to avoid chained names and loops."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Discover the peer's models from its model list. Enabled when present, when models has add or remove rules, or when models is omitted. The last successful list is cached in the store and kept when a fetch fails."
                     },
                     "filters": {
                         "type": "object",

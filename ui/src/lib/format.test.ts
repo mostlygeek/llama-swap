@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   formatDuration,
   formatSpeed,
+  formatTokenCount,
   formatFileSize,
   formatCapacity,
   formatRelativeTime,
@@ -35,6 +36,17 @@ describe("formatSpeed", () => {
 
   it("reports negative values as unknown", () => {
     expect(formatSpeed(-1)).toBe("unknown");
+  });
+});
+
+describe("formatTokenCount", () => {
+  it("formats counts with grouping", () => {
+    expect(formatTokenCount(0)).toBe("0");
+    expect(formatTokenCount(1234)).toBe((1234).toLocaleString());
+  });
+
+  it("reports negative values as unknown", () => {
+    expect(formatTokenCount(-1)).toBe("unknown");
   });
 });
 

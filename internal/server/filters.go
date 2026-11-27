@@ -23,13 +23,14 @@ import (
 //   - SetParams injection (issue #453)
 //   - SetParamsByID per-alias overrides
 //
-// Non-JSON requests (GET, multipart forms) pass through untouched. The buffered
-// body is re-attached with Content-Length / Transfer-Encoding cleanup so the
-// downstream reverse proxy forwards the correct bytes (see issue #11).
+// Requests without a body pass through untouched. The buffered body is
+// re-attached with Content-Length / Transfer-Encoding cleanup so the downstream
+// reverse proxy forwards the correct bytes (see issue #11).
 func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+			if !hasFilterableBody(r) ||
+				!strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -73,13 +74,14 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 // upstream. JSON-body filters (StripParams, SetParams) do not apply to form
 // endpoints; only the "model" field is rewritten.
 //
-// Non-multipart requests pass through untouched. When a rewrite is needed the
+// Requests without a body pass through untouched. When a rewrite is needed the
 // form is reconstructed and re-attached with Content-Type / Content-Length
 // cleanup so the downstream reverse proxy forwards the correct bytes.
 func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !strings.Contains(r.Header.Get("Content-Type"), "multipart/form-data") {
+			if !hasFilterableBody(r) ||
+				!strings.Contains(r.Header.Get("Content-Type"), "multipart/form-data") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -109,6 +111,11 @@ func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 			next.ServeHTTP(w, updated)
 		})
 	}
+}
+
+// hasFilterableBody reports whether a request has a body to filter (#1352).
+func hasFilterableBody(r *http.Request) bool {
+	return r.Method == http.MethodPost && !swaputil.IsWebSocketUpgrade(r)
 }
 
 // resolveFilters returns the filter settings for a requested model. UseModelName

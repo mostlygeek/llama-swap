@@ -3,6 +3,8 @@ import {
   buildModelOptions,
   filterModelOptions,
   groupModels,
+  groupModelsByPeer,
+  peerLocalModelID,
   matchesCapabilities,
   matchesModel,
   modelServerPath,
@@ -187,6 +189,33 @@ describe("groupModels", () => {
 });
 
 describe("buildModelOptions", () => {
+  it.each([undefined, { capabilities: ["vision"] }])("deduplicates model IDs and aliases within a group (%j)", (matcher) => {
+    const options = buildModelOptions({
+      models: [
+        makeModel({ id: "self-alias-demo", aliases: ["self-alias-demo", "chat", "chat", "other"], capabilities: { vision: true } }),
+        makeModel({ id: "other", aliases: ["chat"], capabilities: { vision: true } }),
+        makeModel({ id: "other", capabilities: { vision: true } }),
+      ],
+      matcher,
+    });
+    expect(options.map((option) => [option.value, option.aliasOf])).toEqual([
+      ["self-alias-demo", undefined],
+      ["chat", "self-alias-demo"],
+      ["other", undefined],
+    ]);
+  });
+
+  it("preserves the same value in different groups", () => {
+    const options = buildModelOptions({
+      models: [makeModel({ id: "chat" })],
+      profiles: [makeModel({ id: "chat" })],
+    });
+    expect(options.map((option) => [option.group, option.value])).toEqual([
+      [MODEL_GROUP_PROFILE, "chat"],
+      [MODEL_GROUP_LOCAL, "chat"],
+    ]);
+  });
+
   const models: Model[] = [
     makeModel({ id: "vision-model", name: "Vision", modalities: { in: ["text", "image"], out: ["text"] }, aliases: ["gpt-4o"] }),
     makeModel({ id: "draw-model", name: "draw-model", modalities: { in: ["text"], out: ["image"] } }),
@@ -260,5 +289,33 @@ describe("filterModelOptions", () => {
 
   it("matches an alias by its own name", () => {
     expect(filterModelOptions(options, "fast").map((o) => o.value)).toEqual(["fast"]);
+  });
+});
+
+describe("groupModelsByPeer", () => {
+  it("groups peer models by peer in numeric order and skips local models", () => {
+    const groups = groupModelsByPeer([
+      makeModel({ id: "local" }),
+      makeModel({ id: "peer10/b", peerID: "peer10" }),
+      makeModel({ id: "peer2/m10", peerID: "peer2" }),
+      makeModel({ id: "peer2/m9", peerID: "peer2" }),
+    ]);
+    expect(groups.map((g) => g.peerID)).toEqual(["peer2", "peer10"]);
+    expect(groups[0].models.map((m) => m.id)).toEqual(["peer2/m9", "peer2/m10"]);
+  });
+
+  it("returns no groups without peer models", () => {
+    expect(groupModelsByPeer([makeModel()])).toEqual([]);
+  });
+});
+
+describe("peerLocalModelID", () => {
+  it("strips the peer prefix", () => {
+    expect(peerLocalModelID(makeModel({ id: "kitchen/org/qwen", peerID: "kitchen" }))).toBe("org/qwen");
+  });
+
+  it("keeps IDs without the prefix", () => {
+    expect(peerLocalModelID(makeModel({ id: "qwen", peerID: "kitchen" }))).toBe("qwen");
+    expect(peerLocalModelID(makeModel({ id: "kitchen/qwen" }))).toBe("kitchen/qwen");
   });
 });

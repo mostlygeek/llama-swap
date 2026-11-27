@@ -33,6 +33,11 @@ on:
         description: "Push the assembled image to ghcr.io"
         required: true
         type: boolean
+      consumer:
+        description: "Pass --consumer to build-image.sh (narrows ik_llama.cpp's CUDA architectures)"
+        required: false
+        type: boolean
+        default: true
       llama_hash:
         required: true
         type: string
@@ -166,7 +171,13 @@ jobs:
           LS_VERSION: ${{ inputs.ls_hash }}
         run: |
           chmod +x docker/unified/build-image.sh
-          docker/unified/build-image.sh --${{ inputs.variant }} --stage=${{ matrix.project }}
+          # The assemble job passes the same flag: it changes ik-llama's
+          # artifacts tag, which assemble has to look up.
+          CONSUMER_FLAG=""
+          if [[ "${{ inputs.consumer }}" == "true" ]]; then
+            CONSUMER_FLAG="--consumer"
+          fi
+          docker/unified/build-image.sh --${{ inputs.variant }} --stage=${{ matrix.project }} ${CONSUMER_FLAG}
 
   assemble:
     name: assemble (${{ inputs.platform }})
@@ -230,4 +241,8 @@ jobs:
           if [[ "${ACT:-}" != "true" && "${{ inputs.push_to_ghcr }}" == "true" ]]; then
             PUSH_FLAG="--push"
           fi
-          docker/unified/build-image.sh --${{ inputs.variant }} --assemble ${PUSH_FLAG}
+          CONSUMER_FLAG=""
+          if [[ "${{ inputs.consumer }}" == "true" ]]; then
+            CONSUMER_FLAG="--consumer"
+          fi
+          docker/unified/build-image.sh --${{ inputs.variant }} --assemble ${PUSH_FLAG} ${CONSUMER_FLAG}

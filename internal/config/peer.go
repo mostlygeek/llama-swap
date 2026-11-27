@@ -15,8 +15,17 @@ type PeerConfig struct {
 	ProxyURL   *url.URL `yaml:"-"`
 	ApiKey     string   `yaml:"apiKey"`
 	TailcatKey string   `yaml:"tailcatKey"`
-	Models     []string `yaml:"models"`
-	Filters    Filters  `yaml:"filters"`
+
+	// Models lists literal model IDs, which are always routable, and
+	// "add <regex>" / "remove <regex>" rules applied to the peer's
+	// catalog. Use LiteralModels for just the model IDs.
+	Models []string `yaml:"models"`
+
+	// Catalog enables model discovery from the peer. It is nil for peers
+	// that only list literal models.
+	Catalog *PeerCatalogConfig `yaml:"catalog,omitempty"`
+
+	Filters Filters `yaml:"filters"`
 
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
@@ -47,44 +56,10 @@ func PeerModelFQN(peerID, modelID string) string {
 // ResolvePeerModel resolves an exact fully qualified peer model name or an
 // unqualified model name provided by exactly one peer. Fully qualified names
 // take precedence over unqualified names that happen to contain the same text.
+// It covers literal models and models discovered from peer catalogs.
 func (c *Config) ResolvePeerModel(search string) (peerID, modelID string, found bool) {
-	for id, peer := range c.Peers {
-		seen := make(map[string]struct{})
-		for _, model := range peer.Models {
-			if _, duplicate := seen[model]; duplicate {
-				continue
-			}
-			seen[model] = struct{}{}
-			if PeerModelFQN(id, model) != search {
-				continue
-			}
-			if found && (peerID != id || modelID != model) {
-				return "", "", false
-			}
-			peerID, modelID, found = id, model, true
-		}
-	}
-	if found {
-		return peerID, modelID, true
-	}
-
-	for id, peer := range c.Peers {
-		seen := make(map[string]struct{})
-		for _, model := range peer.Models {
-			if _, duplicate := seen[model]; duplicate {
-				continue
-			}
-			seen[model] = struct{}{}
-			if model != search {
-				continue
-			}
-			if found && (peerID != id || modelID != model) {
-				return "", "", false
-			}
-			peerID, modelID, found = id, model, true
-		}
-	}
-	return peerID, modelID, found
+	target, found := c.currentPeerIndex().routes[search]
+	return target.PeerID, target.ModelID, found
 }
 
 // ValidatePeerNamespace ensures every configured peer model has an
@@ -104,7 +79,7 @@ func ValidatePeerNamespace(c Config) error {
 
 	for _, peerID := range peerIDs {
 		seen := make(map[string]struct{})
-		for _, modelID := range c.Peers[peerID].Models {
+		for _, modelID := range c.Peers[peerID].LiteralModels() {
 			if _, duplicate := seen[modelID]; duplicate {
 				continue
 			}
@@ -168,7 +143,6 @@ func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	defaults := rawPeerConfig{
 		Proxy:   "",
 		ApiKey:  "",
-		Models:  []string{},
 		Filters: Filters{},
 
 		// Mostly matches http.DefaultTransport. HTTP peers retain the 60s
@@ -201,9 +175,8 @@ func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 
-	// Validate models is not empty
-	if len(defaults.Models) == 0 {
-		return fmt.Errorf("peer models can not be empty")
+	if err := normalizePeerModels(&defaults); err != nil {
+		return err
 	}
 
 	*c = PeerConfig(defaults)

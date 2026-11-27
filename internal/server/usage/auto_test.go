@@ -8,8 +8,7 @@ import (
 )
 
 // The auto extractor reads every server's fields. These tests cover the
-// order it applies them in when more than one appears: oMLX rates, then
-// TabbyAPI rates, then llama-server timings, then vLLM metrics.
+// order it applies them in when more than one appears.
 
 func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 	// Every server's fixture gives the same result through auto as through
@@ -22,6 +21,7 @@ func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 		{hint.OpenAI, "/v1/chat/completions", "openai/chat_completion.json"},
 		{hint.OpenAI, "/v1/responses", "openai/responses_stream.sse"},
 		{hint.Anthropic, "/v1/messages", "anthropic/message_stream.sse"},
+		{hint.FastFlowLM, "/v1/chat/completions", "fastflowlm/chat_completion.json"},
 		{hint.LlamaServer, "/v1/chat/completions", "llama-server/chat_completion.json"},
 		{hint.LlamaServer, "/infill", "llama-server/infill.json"},
 		{hint.VLLM, "/v1/chat/completions", "vllm/chat_completion.json"},
@@ -59,6 +59,7 @@ func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 }
 
 func TestUsage_Auto_Precedence(t *testing.T) {
+	const flm = `,"prefill_speed_tps":20,"decoding_speed_tps":15`
 	const omlx = `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`
 	const tensorfold = `,"tensorfold":{"prefill_s":0.4,"decode_s":2,"cached":16}`
 	const timings = `,"timings":{"prompt_n":40,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40}`
@@ -82,6 +83,14 @@ func TestUsage_Auto_Precedence(t *testing.T) {
 		{"timings over usage rates", omlx, timings, 100, 40},
 		{"Hipfire timings over usage rates", omlx, `,"timings":{"prefill_tok_s":200,"decode_tok_s":50}`, 200, 50},
 		{"Hipfire null preserves usage rates", omlx, `,"timings":{"prefill_tok_s":null,"decode_tok_s":null}`, 63.74, 66.38},
+		{"FastFlowLM zero is reported", `,"prefill_speed_tps":0,"decoding_speed_tps":0`, "", 0, 0},
+		{"FastFlowLM null and negative rates are unknown", `,"prefill_speed_tps":null,"decoding_speed_tps":-10`, "", -1, -1},
+		{"FastFlowLM missing and string rates are unknown", `,"decoding_speed_tps":"15"`, "", -1, -1},
+		{"FastFlowLM keeps the reported rate", `,"decoding_speed_tps":15`, "", -1, 15},
+		{"oMLX takes precedence over FastFlowLM", flm + omlx, "", 63.74, 66.38},
+		{"timings take precedence over FastFlowLM", flm, timings, 100, 40},
+		{"Hipfire timings take precedence over FastFlowLM", flm, `,"timings":{"prefill_tok_s":200,"decode_tok_s":50}`, 200, 50},
+		{"FastFlowLM fills the rate missing from Hipfire", flm, `,"timings":{"prefill_tok_s":200}`, 200, 15},
 		{"vLLM metrics over usage rates", omlx, metrics, 200, 100},
 		{"vLLM metrics over timings", omlx, timings + metrics, 200, 100},
 	}

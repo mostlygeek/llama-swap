@@ -11,11 +11,15 @@ const (
 	SelectorStrategyWarm      = "warm"
 	SelectorStrategyPin       = "pin"
 	SelectorStrategySpillover = "spillover"
+	SelectorStrategyFit       = "fit"
 )
 
 // SelectorSettings contains strategy-specific selector settings.
 type SelectorSettings struct {
 	Spillover int `yaml:"spillover" json:"spillover"`
+	// NoEvict makes a fit selector reject the request (429) instead of
+	// choosing a target that would stop a running model.
+	NoEvict bool `yaml:"no_evict" json:"no_evict"`
 }
 
 // SelectorConfig describes a virtual model ID that resolves to a concrete
@@ -59,11 +63,14 @@ func validateSelectors(config Config) error {
 		}
 
 		switch selector.Strategy {
-		case SelectorStrategyPin, SelectorStrategyWarm, SelectorStrategySpillover:
+		case SelectorStrategyPin, SelectorStrategyWarm, SelectorStrategySpillover, SelectorStrategyFit:
 		case "":
 			return fmt.Errorf("selectors.%s.strategy is required", selectorID)
 		default:
-			return fmt.Errorf("selectors.%s.strategy: unknown strategy %q (valid: warm, pin, spillover)", selectorID, selector.Strategy)
+			return fmt.Errorf("selectors.%s.strategy: unknown strategy %q (valid: warm, pin, spillover, fit)", selectorID, selector.Strategy)
+		}
+		if selector.Settings.NoEvict && selector.Strategy != SelectorStrategyFit {
+			return fmt.Errorf("selectors.%s.settings.no_evict only applies to strategy %q", selectorID, SelectorStrategyFit)
 		}
 		if len(selector.Targets) == 0 {
 			return fmt.Errorf("selectors.%s.targets must contain at least one entry", selectorID)
@@ -80,7 +87,7 @@ func validateSelectors(config Config) error {
 			}
 
 			realName, local := config.RealModelName(target)
-			if selector.Strategy == SelectorStrategyWarm {
+			if selector.Strategy == SelectorStrategyWarm || selector.Strategy == SelectorStrategyFit {
 				if !local {
 					return fmt.Errorf("selectors.%s.targets[%d] must resolve to a local model for strategy %q", selectorID, i, selector.Strategy)
 				}
@@ -89,11 +96,25 @@ func validateSelectors(config Config) error {
 				if local {
 					localTargets = append(localTargets, realName)
 				} else {
-					peerID, modelID, _ := config.ResolvePeerModel(target)
-					realName = PeerModelFQN(peerID, modelID)
+					if peerID, modelID, found := config.ResolvePeerModel(target); found {
+						realName = PeerModelFQN(peerID, modelID)
+					} else {
+						// A model expected from a peer's catalog.
+						realName = target
+					}
 				}
 				resolvedTargets = append(resolvedTargets, realName)
 			}
+			if selector.Strategy == SelectorStrategyFit {
+				resolvedTargets = append(resolvedTargets, realName)
+			}
+		}
+
+		if selector.Strategy == SelectorStrategyFit {
+			if err := checkDuplicateTargets(selectorID, resolvedTargets); err != nil {
+				return err
+			}
+			continue
 		}
 
 		if selector.Strategy != SelectorStrategySpillover {
@@ -103,16 +124,33 @@ func validateSelectors(config Config) error {
 			return fmt.Errorf("selectors.%s.settings.spillover must be >= 1", selectorID)
 		}
 
-		seen := make(map[string]struct{}, len(resolvedTargets))
-		for _, target := range resolvedTargets {
-			if _, duplicate := seen[target]; duplicate {
-				return fmt.Errorf("selectors.%s.targets contains duplicate resolved model %q", selectorID, target)
-			}
-			seen[target] = struct{}{}
+		if err := checkDuplicateTargets(selectorID, resolvedTargets); err != nil {
+			return err
 		}
 		if err := validateSpilloverCoexistence(config, selectorID, localTargets); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// SelectorEnabled reports whether a selector can serve requests with the
+// configured router. A fit selector needs the capacity router's eviction
+// costs; with any other router it is ignored rather than rejected, so a
+// config can switch routers without editing its selectors.
+func (c Config) SelectorEnabled(selector SelectorConfig) bool {
+	return selector.Strategy != SelectorStrategyFit || c.Routing.Router.Use == "capacity"
+}
+
+// checkDuplicateTargets rejects targets that resolve to the same model, such as
+// a model listed alongside one of its aliases.
+func checkDuplicateTargets(selectorID string, resolved []string) error {
+	seen := make(map[string]struct{}, len(resolved))
+	for _, target := range resolved {
+		if _, duplicate := seen[target]; duplicate {
+			return fmt.Errorf("selectors.%s.targets contains duplicate resolved model %q", selectorID, target)
+		}
+		seen[target] = struct{}{}
 	}
 	return nil
 }

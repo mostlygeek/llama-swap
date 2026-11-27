@@ -252,6 +252,10 @@ type Config struct {
 	// map aliases to actual model IDs
 	aliases map[string]string
 
+	// peerModels indexes literal and discovered peer models. It is shared by
+	// copies of this Config so catalog updates reach every holder.
+	peerModels *peerModels
+
 	// automatic port assignments
 	StartPort int `yaml:"startPort"`
 
@@ -358,6 +362,9 @@ func (c *Config) ResolveBaseModel(search string) (string, bool) {
 		return realName, true
 	}
 	if _, _, found := c.ResolvePeerModel(search); found {
+		return search, true
+	}
+	if _, _, found := c.DiscoveryPeerFor(search); found {
 		return search, true
 	}
 	return "", false

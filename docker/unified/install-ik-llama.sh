@@ -30,7 +30,9 @@ CMAKE_FLAGS=(
 if [ "$BACKEND" = "cuda" ]; then
     CMAKE_FLAGS+=(
         -DGGML_CUDA=ON
-        "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:?CMAKE_CUDA_ARCHITECTURES must be set}"
+        # IK_CUDA_ARCHITECTURES narrows the list for ik_llama.cpp alone; see
+        # build-image.sh for why.
+        "-DCMAKE_CUDA_ARCHITECTURES=${IK_CUDA_ARCHITECTURES:-${CMAKE_CUDA_ARCHITECTURES:?CMAKE_CUDA_ARCHITECTURES must be set}}"
         "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler"
         "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda -Wl,--allow-shlib-undefined"
     )

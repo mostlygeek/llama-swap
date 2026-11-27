@@ -21,6 +21,7 @@ import {
   resumeInference,
   selectorModels,
   setActiveProfile,
+  pendingProfileSwitch,
   tailcatStatus,
   uiConfig,
   helpAgentEnabled,
@@ -281,6 +282,28 @@ describe("api store event handling", () => {
     }));
   });
 
+  it("rejects a profile switch while another is in flight", async () => {
+    let finish!: (value: unknown) => void;
+    const mockFetch = vi.fn().mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const first = setActiveProfile("coding");
+    expect(get(pendingProfileSwitch)).toBe("coding");
+    await expect(setActiveProfile(null)).rejects.toThrow("already in progress");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    finish({ ok: true, json: async () => ({ active: "coding" }) });
+    await first;
+    expect(get(pendingProfileSwitch)).toBeUndefined();
+  });
+
+  it("clears the pending profile switch when it fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+
+    await expect(setActiveProfile("coding")).rejects.toThrow("Failed to switch profile: 500");
+    expect(get(pendingProfileSwitch)).toBeUndefined();
+  });
+
   it("loads Playground models and virtual model types from v1/models", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -313,6 +336,17 @@ describe("api store event handling", () => {
             },
           },
           {
+            id: "fitter",
+            meta: {
+              llamaswap: {
+                type: "selector",
+                strategy: "fit",
+                targets: ["real"],
+                no_evict: true,
+              },
+            },
+          },
+          {
             id: "public",
             meta: { llamaswap: { type: "profile" } },
           },
@@ -339,8 +373,13 @@ describe("api store event handling", () => {
       peerID: "remote",
       playgroundType: "peer",
     });
-    expect(get(selectorModels).map((model) => model.id)).toEqual(["pool"]);
+    expect(get(selectorModels).map((model) => model.id)).toEqual(["fitter", "pool"]);
     expect(get(selectorModels)[0]).toMatchObject({
+      strategy: "fit",
+      targets: ["real"],
+      noEvict: true,
+    });
+    expect(get(selectorModels)[1]).toMatchObject({
       strategy: "spillover",
       targets: ["real", "remote/remote-model"],
       spillover: 4,

@@ -11,12 +11,14 @@ ARG BACKEND=cuda
 ARG IK_LLAMA_COMMIT_HASH=main
 ARG COMPILE_TIMEOUT_MINUTES=
 ARG CCACHE_EXPORT=
+# Overrides the base's CMAKE_CUDA_ARCHITECTURES for ik_llama.cpp; see build-image.sh.
+ARG IK_CUDA_ARCHITECTURES=
 COPY ccache-build.sh install-ik-llama.sh /build/
 RUN --mount=type=bind,from=ccache-seed,target=/ccache-seed \
     --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=ik-llama-${BACKEND},target=/src/ik_llama.cpp/build \
     COMPILE_TIMEOUT_MINUTES=${COMPILE_TIMEOUT_MINUTES} CCACHE_EXPORT=${CCACHE_EXPORT} \
-    BACKEND=${BACKEND} bash /build/ccache-build.sh run bash /build/install-ik-llama.sh "${IK_LLAMA_COMMIT_HASH}"
+    BACKEND=${BACKEND} IK_CUDA_ARCHITECTURES="${IK_CUDA_ARCHITECTURES}" bash /build/ccache-build.sh run bash /build/install-ik-llama.sh "${IK_LLAMA_COMMIT_HASH}"
 
 # The compiler cache, published by build-image.sh --stage for the next run.
 FROM scratch AS ccache
