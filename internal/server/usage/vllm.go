@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"math"
 	"time"
 
 	"github.com/tidwall/gjson"
@@ -37,6 +38,34 @@ func (p *vllmParser) usage() Usage {
 	applyVLLMMetrics(&u, p.metrics)
 	applySecondsTimings(&u, p.timings) // fills the rates metrics left unknown
 	return u
+}
+
+// applySecondsTimings applies 1Cat-vLLM's timings block, a set of phase
+// durations in seconds nested under the usage block ("usage.timings"). It
+// is the rate fallback for responses with no top-level metrics object:
+// prompt rate is the uncached prompt tokens over prefill_s, generation rate
+// the output tokens over decode_s (the same phase math as
+// applyVLLMMetrics), so the rates stay unknown when a duration is missing
+// or non-positive. Only values still unknown are replaced, so metrics wins
+// when both are present.
+func applySecondsTimings(u *Usage, timings gjson.Result) {
+	if !timings.Exists() {
+		return
+	}
+	u.Found = true
+	if secs := timings.Get("prefill_s").Float(); u.Tokens.PromptPerSecond < 0 && secs > 0 {
+		// Uncached prompt tokens over the prefill time; 0 when the prompt
+		// is fully cached, matching applyVLLMMetrics.
+		uncached := u.Tokens.InputTokens - max(u.Tokens.CachedTokens, 0)
+		if rate := float64(uncached) / secs; !math.IsNaN(rate) && !math.IsInf(rate, 0) {
+			u.Tokens.PromptPerSecond = rate
+		}
+	}
+	if secs := timings.Get("decode_s").Float(); u.Tokens.TokensPerSecond < 0 && secs > 0 {
+		if rate, ok := tokensPerSecond(u.Tokens.OutputTokens, secs); ok {
+			u.Tokens.TokensPerSecond = rate
+		}
+	}
 }
 
 // applyVLLMMetrics applies a vLLM response metrics block. The prompt rate

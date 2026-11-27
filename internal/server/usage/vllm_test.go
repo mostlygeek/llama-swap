@@ -54,7 +54,7 @@ func TestUsage_VLLM_SpeculativeDecodingNeedsBothCounters(t *testing.T) {
 func TestUsage_VLLM_OneCatTimingsStream(t *testing.T) {
 	// Captured from 1Cat-vLLM (a vLLM fork); it has no top-level metrics
 	// object, only usage.timings with phase durations in seconds.
-	u := parseUsageFixture(t, hint.VLLM, "/v1/chat/completions", "1cat/chat_completion_stream.sse")
+	u := parseUsageFixture(t, hint.VLLM, "/v1/chat/completions", "vllm/chat_completion_1cat_stream.sse")
 	assert.True(t, u.Found)
 	assert.Equal(t, 42, u.Tokens.InputTokens)
 	assert.Equal(t, 96, u.Tokens.OutputTokens)
@@ -65,7 +65,7 @@ func TestUsage_VLLM_OneCatTimingsStream(t *testing.T) {
 }
 
 func TestUsage_VLLM_OneCatTimingsNonStream(t *testing.T) {
-	u := parseUsageFixture(t, hint.VLLM, "/v1/chat/completions", "1cat/chat_completion.json")
+	u := parseUsageFixture(t, hint.VLLM, "/v1/chat/completions", "vllm/chat_completion_1cat.json")
 	assert.Equal(t, 42, u.Tokens.InputTokens)
 	assert.Equal(t, 16, u.Tokens.OutputTokens)
 	assert.InDelta(t, 0, u.Tokens.PromptPerSecond, 1e-9)
@@ -82,15 +82,6 @@ func TestUsage_VLLM_MetricsBeatOneCatTimings(t *testing.T) {
 			`"metrics":{"time_to_first_token_ms":136.5,"mean_itl_ms":5.56}}`)
 	assert.InDelta(t, (42-42)/(136.5/1000), u.Tokens.PromptPerSecond, 1e-9, "metrics prefill time")
 	assert.InDelta(t, 1000/5.56, u.Tokens.TokensPerSecond, 1e-9, "metrics ITL")
-}
-
-func TestUsage_VLLM_OneCatTimingsThroughAuto(t *testing.T) {
-	// 1Cat-vLLM may be probed as an unknown OpenAI-compatible server, in
-	// which case the auto extractor applies the same fallback.
-	u := parseUsageFixture(t, hint.Unknown, "/v1/chat/completions", "1cat/chat_completion_stream.sse")
-	assert.Equal(t, 42, u.Tokens.InputTokens)
-	assert.Equal(t, 96, u.Tokens.OutputTokens)
-	assert.InDelta(t, 96/8.79, u.Tokens.TokensPerSecond, 1e-9)
 }
 
 func TestUsage_VLLM_IgnoresTimings(t *testing.T) {

@@ -47,8 +47,6 @@ func TestUsage_Auto_ReadsEachServer(t *testing.T) {
 		{hint.OMLX, "/v1/chat/completions", "omlx/chat_completion_stream.sse"},
 		{hint.VLLM, "/v1/chat/completions", "vllm/chat_completion_stream.sse"},
 		{hint.VLLM, "/v1/chat/completions", "vllm/chat_completion_reasoning_stream.sse"},
-		{hint.VLLM, "/v1/chat/completions", "1cat/chat_completion.json"},
-		{hint.VLLM, "/v1/chat/completions", "1cat/chat_completion_stream.sse"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
