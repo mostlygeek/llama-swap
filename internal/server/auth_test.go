@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,4 +84,92 @@ func TestServer_AuthMiddleware(t *testing.T) {
 			t.Error("missing WWW-Authenticate header")
 		}
 	})
+}
+
+// TestServer_CrossSiteBasicAuthRejected reproduces GHSA-g4gp-qf3f-4x4w: once a
+// browser holds Basic credentials from the login prompt it attaches them to
+// requests other sites start (an <img>, a form post). Those must not unload
+// models or start work, while the UI's own same-origin requests and API
+// clients keep working.
+func TestServer_CrossSiteBasicAuthRejected(t *testing.T) {
+	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("user:secret"))
+
+	newServer := func() (*Server, *stubRouter) {
+		local := newStubRouter([]string{"m1"}, "")
+		s := newTestServerWithConfig(config.Config{RequiredAPIKeys: []string{"secret"}}, local, newStubRouter(nil, ""))
+		return s, local
+	}
+
+	cases := []struct {
+		name, method, path, auth, site, origin string
+		wantCode                               int
+		wantUnload                             int32
+	}{
+		{"img to /unload", http.MethodGet, "/unload", basic, "cross-site", "", http.StatusForbidden, 0},
+		{"form post unload", http.MethodPost, "/api/models/unload", basic, "cross-site", "https://evil.example", http.StatusForbidden, 0},
+		{"same-site post unload", http.MethodPost, "/api/models/unload", basic, "same-site", "http://localhost:3000", http.StatusForbidden, 0},
+		{"old browser foreign origin", http.MethodPost, "/api/models/unload", basic, "", "https://evil.example", http.StatusForbidden, 0},
+		{"ui same-origin", http.MethodPost, "/api/models/unload", basic, "same-origin", "http://example.com", http.StatusOK, 1},
+		{"typed url", http.MethodGet, "/unload", basic, "none", "", http.StatusOK, 1},
+		{"non-browser basic", http.MethodPost, "/api/models/unload", basic, "", "", http.StatusOK, 1},
+		{"bearer cross-site", http.MethodPost, "/api/models/unload", "Bearer secret", "cross-site", "https://evil.example", http.StatusOK, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, local := newServer()
+			r := httptest.NewRequest(c.method, c.path, nil)
+			r.Header.Set("Authorization", c.auth)
+			if c.site != "" {
+				r.Header.Set("Sec-Fetch-Site", c.site)
+			}
+			if c.origin != "" {
+				r.Header.Set("Origin", c.origin)
+			}
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, r)
+			if w.Code != c.wantCode {
+				t.Errorf("status = %d, want %d", w.Code, c.wantCode)
+			}
+			if got := local.unloadCalls.Load(); got != c.wantUnload {
+				t.Errorf("unloadCalls = %d, want %d", got, c.wantUnload)
+			}
+		})
+	}
+}
+
+func TestServer_IsCrossSiteBasicAuth(t *testing.T) {
+	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("user:secret"))
+	lowerBasic := "basic " + base64.StdEncoding.EncodeToString([]byte("user:secret"))
+	cases := []struct {
+		name, method, path, auth, site, mode, origin string
+		want                                         bool
+	}{
+		{"x-api-key only", "POST", "/api/models/unload", "", "cross-site", "no-cors", "https://evil.example", false},
+		{"lowercase basic scheme cross-site", "GET", "/unload", lowerBasic, "cross-site", "no-cors", "", true},
+		{"cross-site json as text/plain", "POST", "/v1/chat/completions", basic, "cross-site", "navigate", "https://evil.example", true},
+		{"cross-site link to ui", "GET", "/ui/", basic, "cross-site", "navigate", "", false},
+		{"cross-site fetch of ui", "GET", "/ui/", basic, "cross-site", "no-cors", "", true},
+		{"cross-site navigate to unload", "GET", "/unload", basic, "cross-site", "navigate", "", true},
+		{"old browser same origin", "POST", "/api/models/pause", basic, "", "", "http://localhost:8080", false},
+		{"old browser null origin", "POST", "/api/models/pause", basic, "", "", "null", true},
+		{"old browser cross-site get", "GET", "/running", basic, "", "", "https://evil.example", false},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest(c.method, "http://localhost:8080"+c.path, nil)
+		if c.auth != "" {
+			r.Header.Set("Authorization", c.auth)
+		}
+		if c.site != "" {
+			r.Header.Set("Sec-Fetch-Site", c.site)
+		}
+		if c.mode != "" {
+			r.Header.Set("Sec-Fetch-Mode", c.mode)
+		}
+		if c.origin != "" {
+			r.Header.Set("Origin", c.origin)
+		}
+		if got := isCrossSiteBasicAuth(r); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
 }

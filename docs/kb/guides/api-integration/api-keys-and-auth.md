@@ -4,7 +4,7 @@ summary: apiKeys authentication has no per-key rate limits or user permissions; 
 category: guides
 tags: [security, api-keys, auth, secrets, env, rate-limit, users, permissions, access-control]
 config_keys: [apiKeys, macros, peers.*.apiKey, models.*.env]
-updated: 2026-08-25
+updated: 2026-11-27
 ---
 
 # API keys and keeping secrets out of your config
@@ -45,6 +45,22 @@ front of llama-swap when you need those controls.
 **`apiKeys` is not a substitute for a firewall.** llama-swap starts processes
 on your machine. Do not expose it to the internet on the strength of a bearer
 token alone.
+
+## Basic auth is refused on cross-site requests
+
+When you log in to the UI through the browser's password prompt, the browser
+remembers that Basic login and sends it with every request to llama-swap,
+including ones another web page starts (an image tag or a form post). So that
+another site can't unload models or start generations with your login,
+llama-swap answers `403 forbidden: cross-site request with browser
+credentials` when a Basic-authenticated request is marked cross-site or
+same-site by the browser (`Sec-Fetch-Site`), or, for browsers without that
+header, carries an `Origin` whose host differs from `Host` on a non-GET
+request. A plain link from another site to `/ui/` still works.
+
+Bearer and `x-api-key` credentials are not affected, nor are non-browser
+clients. If a browser app on another origin gets that 403, have it send
+`Authorization: Bearer <key>` instead of relying on the browser's Basic login.
 
 ## Keep the keys out of the file
 
