@@ -25,6 +25,7 @@ type autoParser struct {
 	api        apiUsage
 	block      gjson.Result // last usage block
 	timings    gjson.Result
+	seconds    gjson.Result // 1Cat-vLLM usage.timings, seconds
 	metrics    gjson.Result
 	tensorfold gjson.Result
 }
@@ -37,6 +38,9 @@ func (p *autoParser) event(ev gjson.Result) {
 	}
 	if t := ev.Get("timings"); t.IsObject() {
 		p.timings = t
+	}
+	if t := ev.Get("usage.timings"); t.IsObject() { // 1Cat-vLLM
+		p.seconds = t
 	}
 	if m := ev.Get("metrics"); m.IsObject() {
 		p.metrics = m
@@ -57,5 +61,6 @@ func (p *autoParser) usage() Usage {
 	applyHipfireTimings(&u, p.timings)
 	applyFastFlowLMRates(&u, p.block)
 	applyVLLMMetrics(&u, p.metrics)
+	applySecondsTimings(&u, p.seconds) // last, so it only fills gaps
 	return u
 }

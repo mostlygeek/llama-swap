@@ -6,7 +6,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// vllmExtractor reads the API usage block plus vLLM's metrics block.
+// vllmExtractor reads the API usage block plus vLLM's metrics block, and
+// 1Cat-vLLM's seconds-based usage.timings block as a rate fallback.
 type vllmExtractor struct{}
 
 func (vllmExtractor) newParser(path string, start time.Time) usageParser {
@@ -18,6 +19,7 @@ type vllmParser struct {
 	read    apiReader
 	api     apiUsage
 	metrics gjson.Result
+	timings gjson.Result // 1Cat-vLLM: durations in seconds, nested under usage
 }
 
 func (p *vllmParser) event(ev gjson.Result) {
@@ -25,11 +27,15 @@ func (p *vllmParser) event(ev gjson.Result) {
 	if m := ev.Get("metrics"); m.IsObject() {
 		p.metrics = m
 	}
+	if t := ev.Get("usage.timings"); t.IsObject() {
+		p.timings = t
+	}
 }
 
 func (p *vllmParser) usage() Usage {
 	u := p.api.toUsage(p.start)
 	applyVLLMMetrics(&u, p.metrics)
+	applySecondsTimings(&u, p.timings) // fills the rates metrics left unknown
 	return u
 }
 
