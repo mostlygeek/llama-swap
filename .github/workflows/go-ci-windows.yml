@@ -61,6 +61,9 @@ jobs:
         path: ./build
         key: ${{ runner.os }}-simple-responder-${{ hashFiles('cmd/simple-responder/simple-responder.go') }}
 
-    - name: Test all
+    # Only the packages with Windows-specific code and test suites; the
+    # rest of ./internal/... is platform independent or POSIX-only and is
+    # covered by Linux CI (make test-all).
+    - name: Test Windows packages
       shell: bash
-      run: make test-all
+      run: make test-windows

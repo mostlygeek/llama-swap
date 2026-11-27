@@ -64,6 +64,19 @@ test-all:
 test-cmd:
 	go test -race -count=1 ./cmd/kubeswap ./cmd/vllm-wrapper
 
+# Windows CI only. Runs the packages that carry Windows-specific code
+# (internal/config load, internal/hw detection, internal/perf PDH and
+# D3DKMT metrics, internal/process runtime and tree cleanup) plus their
+# windows-tagged test suites. Everything else is platform independent or
+# POSIX-only and already covered by the Linux CI (make test-all), so it
+# is not duplicated here.
+test-windows:
+	go test -race -count=1 ./internal/config ./internal/hw ./internal/perf ./internal/process
+	# Server level shutdown of real subprocesses (taskkill tree kill) is
+	# Windows specific behaviour; run only that suite instead of all of
+	# internal/server.
+	go test -race -count=1 -run '^TestServer_CapacityProcessLifecycle$$' ./internal/server
+
 # Lint and render the kubeswap Helm chart (requires helm on PATH).
 # Renders every supported config shape (stock defaults, structured with
 # each matrix builder, an existing ConfigMap) and asserts that the
@@ -201,6 +214,6 @@ eval-docs-agent:
 	./evals/docs-agent/run.sh $(EVAL_ARGS)
 
 # Phony targets
-.PHONY: all native clean ui src simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
+.PHONY: all native clean ui src simple-responder simple-responder-windows test test-all test-chart test-cmd test-dev test-ui test-windows wol-proxy kubeswap eval-docs-agent release
 .PHONY: mac linux windows freebsd
 .PHONY: darwin-arm64 linux-arm64 linux-amd64 windows-amd64 freebsd-amd64
