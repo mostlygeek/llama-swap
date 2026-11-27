@@ -583,7 +583,10 @@
   </Card.Root>
 
   <Tabs value={currentTab} onValueChange={(v) => v && modelsDashTab.set(v as ModelsDashTab)}>
-    <TabsList variant="line" class="max-w-full justify-start overflow-x-auto">
+    <TabsList
+      variant="line"
+      class="max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
       {#each tabs as tab (tab.id)}
         <TabsTrigger value={tab.id} class="flex-none px-2">
           {tab.label}
